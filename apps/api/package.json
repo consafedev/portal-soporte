@@ -1,0 +1,12 @@
+{
+  "name": "@portal-soporte/api",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "fastify": "catalog:"
+  }
+}

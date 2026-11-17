@@ -1,0 +1,33 @@
+# Dependencias, compilación y cachés
+node_modules/
+.pnpm-store/
+.next/
+**/.next/
+dist/
+**/dist/
+coverage/
+**/coverage/
+.turbo/
+*.tsbuildinfo
+playwright-report/
+test-results/
+
+# Archivos locales y material sensible
+.env
+.env.*
+!.env.example
+*.pem
+*.ppk
+*.key
+*.p12
+*.pfx
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Documentos, instrucciones y skills del proyecto permanecen versionables.
+!/.agents/
+!/.agents/skills/
+!/.agents/skills/**
+!/docs/
+!/docs/**

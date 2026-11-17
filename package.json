@@ -1,0 +1,41 @@
+{
+  "name": "portal-soporte",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.21.0",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12.21.0",
+      "onFail": "download"
+    }
+  },
+  "engines": {
+    "node": ">=24.0.0 <25",
+    "pnpm": ">=12.21.0 <13"
+  },
+  "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "typecheck": "corepack pnpm@12.21.0 -r --workspace-concurrency=2 --if-present run typecheck",
+    "test": "vitest run",
+    "build": "corepack pnpm@12.21.0 --filter @portal-soporte/web run build && corepack pnpm@12.21.0 run typecheck",
+    "verify:skills": "python .agents/skills/portal-soporte-workflow/scripts/verify_skill.py",
+    "check:secrets": "secretlint \"**/*\"",
+    "check:dependencies": "corepack pnpm@12.21.0 audit --audit-level high"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "eslint": "catalog:",
+    "eslint-config-next": "catalog:",
+    "eslint-config-prettier": "catalog:",
+    "prettier": "catalog:",
+    "secretlint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

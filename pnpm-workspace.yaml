@@ -1,0 +1,20 @@
+packages:
+  - apps/*
+  - packages/*
+  - modules/*
+
+catalog:
+  '@types/node': 24.19.2
+  '@types/react': 19.3.0
+  '@types/react-dom': 19.3.0
+  eslint: 9.39.5
+  eslint-config-next: 16.4.6
+  eslint-config-prettier: 10.1.8
+  fastify: 5.12.8
+  next: 16.4.6
+  prettier: 3.10.1
+  react: 19.3.1
+  react-dom: 19.3.1
+  secretlint: 14.0.1
+  typescript: 6.0.3
+  vitest: 5.1.0

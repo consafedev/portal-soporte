@@ -1,0 +1,26 @@
+# Tablero de trabajo — Portal e-Billia
+
+**Versión:** 0.2 · **Actualizado:** 2026-11-17 · **Significado:** `PENDIENTE`, `EN_CURSO`, `EN_REVISION`, `BLOQUEADO`, `HECHO`.
+
+| ID | Etapa | Tarea y entregable verificable | Estado | Responsable | Bloqueantes |
+|---|---|---|---|---|---|
+| PS-000 | F0 | Establecer línea base documental v0.2 y decisiones funcionales aprobadas | HECHO (fuera de Git) | ChatGPT | Integrar en repo; validaciones técnicas diferidas a tareas posteriores |
+| PS-001 | F0 | Inventario **read-only** de repo y, si hay acceso explícito, Debian/túneles; metadatos DDL solo si hay autorización expresa, sin secretos | HECHO | Codex · 2026-11-17 · `main` | Revisión del propietario completada; servidores y BD productivas no inspeccionados |
+| PS-002 | F1 | Inicializar monorepo, CI, tipos, lint, estándares JSDoc en español y apps vacías | EN_REVISION | Codex · 2026-11-17 · `main` | Revisión del propietario; audit high GHSA-fc5q-39xc-vjpf en dependencia de desarrollo |
+| PS-002.1 | F1 | Estabilización, revisión de seguridad y cierre del bootstrap | EN_REVISION | Codex · 2026-11-17 · main | GHSA-fc5q-39xc-vjpf/CVE-2026-112366 sigue sin parche publicado; riesgo dev/CI documentado y sujeto a revisión del propietario |
+| PS-003 | F1 | Design system claro/oscuro, sidebar, login y responsive | PENDIENTE | Sin asignar | PS-002 |
+| PS-004 | F1 | Identidad, sessions, roles, administración de usuarios, MFA, perfil | PENDIENTE | Sin asignar | PS-002, DEC-014 |
+| PS-005 | F1 | Clientes, perfiles direct/URL/SSH, secretos cifrados y test solo admin | PENDIENTE | Sin asignar | PS-004, DEC-013/023 |
+| PS-006 | F1 | Dashboard, catálogo y matriz de activación por rol/cliente | PENDIENTE | Sin asignar | PS-003/004/005 |
+| PS-007 | F2 | Parser seguro CFDI 4.0 I + tests con datos sintéticos | PENDIENTE | Sin asignar | PS-002 |
+| PS-008 | F2 | UI lote/inputs y lookup contextual de proveedor/sociedad + preview read-only | PENDIENTE | Sin asignar | PS-005/007, DDL verificado; negocio aprobado |
+| PS-009 | F2 | Ejecutor INSERT seguro + duplicados + transacción + conciliación | BLOQUEADO | Sin asignar | Puertas técnicas VT-01..VT-09; PS-008, revisión independiente |
+| PS-010 | F2 | E2E/Multiusuario/concurrencia/errores/seguridad/monedas | PENDIENTE | Sin asignar | PS-009 |
+| PS-011 | F4 | Auditoría, backup/rollback, hardening, systemd, Cloudflare y piloto | BLOQUEADO | Sin asignar | PS-010, DEC-015/024 |
+
+## Reglas del tablero
+
+- En cada tarea deben existir objetivo, owner (persona/agente), fecha, rama, criterios de aceptación, evidencia y PR/commit en el `WORKLOG.md`.
+- Nadie puede mover a `HECHO` sin especificar pruebas reales. `PS-000` significa **documentos generados**, no fusionados en repositorio ni aprobados.
+- Para trabajo paralelo, dividir `PS-###` en sub-tareas con propietario único, respetando APIs/paths de módulos.
+- Nunca colocar un agente ejecutor en una tarea `BLOQUEADO` si eso implica saltarse decisiones P0.
