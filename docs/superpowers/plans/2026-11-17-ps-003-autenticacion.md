@@ -188,7 +188,7 @@
 - [x] **Step 2: Run focused tests; Expected:** FAIL because recovery and email verification flows are absent.
 - [x] **Step 3: Implement SMTP adapter, token-purpose checks, HMAC throttle repository, transaction-bound token consumption, and routes.** Redact SMTP/auth payloads and send only after DB commit.
 - [x] **Step 4: Run focused tests and real PostgreSQL recovery integration; Expected:** only the correct unexpired token succeeds once; the DB contains hashes only; all unknown-account responses are identical.
-- [ ] **Step 5: Commit** as `feat(auth-recovery): PS-003 habilitar recuperación segura` with WORKLOG evidence.
+- [x] **Step 5: Commit** as `feat(auth-recovery): PS-003 habilitar recuperación segura` with WORKLOG evidence.
 
 ### Task 7: Login, recovery, password, and user-management UI
 

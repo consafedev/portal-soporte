@@ -411,3 +411,20 @@
 - **Artefactos:** contratos y puertos de recuperación, adaptador SMTP, servicios/rutas admin y auth, persistencia PostgreSQL, protección de intentos y pruebas unitarias/integración.
 - **Próximo paso:** preparar commit de Task 6 e iniciar Task 7 solo después de leer `.agents/skills/apple-design/SKILL.md`; luego componer runtime/configuración y hacer hardening en Task 8.
 - **Estado:** Task 6 verificada localmente; PS-003 permanece `EN_CURSO`.
+
+### [2026-11-18T09:45:22-06:00] PS-003 · Codex · TASK 6 — COMMIT LOCAL
+- Commit local `84b79a2` (`feat(auth-recovery): PS-003 habilitar recuperación segura`) contiene servicios, contratos, rutas, pruebas y evidencia de Task 6.
+- HEAD verificado en `84b79a2`; árbol limpio tras el commit. No se hizo push.
+- Task 6 queda cerrada en el plan. PS-003 continúa `EN_CURSO`; siguiente paso: lectura obligatoria de Apple Design antes de crear o modificar UI.
+
+### [2026-11-18T09:47:51-06:00] PS-003 · Codex · INICIO TASK 7 — LOGIN Y UI ACOTADA DE CUENTAS
+- **Contexto Git:** rama local `codex/ps-003-auth`, commit de código base `84b79a2`; cambios documentales de cierre/inicio en esta entrega. Sin código visual previo que preservar.
+- **Objetivo/alcance:** implementar login y las pantallas mínimas de recuperación, activación/cambio de correo, cambio voluntario de contraseña y administración de usuarios. Mantener origen único vía API relativa/proxy Next; no agregar dashboard.
+- **Archivos previstos:** `apps/web/src/app/{page,layout,globals.css}.tsx|.css`, rutas `login`, `recover-access`, `recover-access/complete`, `profile/password`, `settings/users`, componentes/helpers de auth y pruebas UI/E2E aprobadas en el plan.
+- **Apple Design leído antes de UI:** `.agents/skills/apple-design/SKILL.md` (lectura completa en esta iteración). Criterios que aplicaré: propósito y simplicidad; sistema `system-ui` con jerarquía/leading/tamaño adaptables; respuesta visible inmediata y estados claros; superficies sólidas y jerarquía espacial; teclado, labels, foco, errores anunciados y contraste; reflujo responsive; `prefers-color-scheme`, `prefers-reduced-motion`, `prefers-reduced-transparency` y `prefers-contrast`; evitar movimiento decorativo y eliminar tokens de URL/historial de inmediato.
+- **Evidencia visual/accesibilidad al inicio:** `NO EJECUTADO`; se hará revisión visual de desktop/móvil y tema claro/oscuro, teclado/foco y preferencias de movimiento/transparencia/contraste tras construir la interfaz. No se usará marca o recurso externo; texto e-Billia conforme a la spec aprobada.
+- **Pruebas previstas:** TDD para helpers y formularios; test UI automatizado con los controles disponibles; typecheck/lint/formato/build; revisión visual manual o automatizada. Cualquier comprobación no disponible quedará marcada `NO EJECUTADO`.
+- **Riesgos/decisiones:** el backend aplica autorización real y CSRF; la UI no reemplazará esos guards. Token de correo se lee solo desde fragmento, se borra inmediatamente del historial y se transmite solo por `POST`. No se almacenan contraseñas, tokens ni datos de sesión en almacenamiento web.
+- **Límites:** solo datos y servicios aislados; sin producción, servidores, Cloudflare, túneles, bases externas, PS-004, RF-1 o dashboard.
+- **Próximo paso:** implementar primero las rutas y el cliente de API same-origin bajo los criterios Apple Design cargados.
+- **Estado:** `EN_CURSO`.
