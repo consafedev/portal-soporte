@@ -10,8 +10,8 @@ const cliente =
     : crearClienteBaseDatosAuth({ DATABASE_URL: baseUrl, NODE_ENV: 'test' });
 const sqlDeSeguridad = baseUrl === undefined ? null : postgres(baseUrl, { max: 1 });
 
-/** Verifica identidad del servidor y prepara únicamente el esquema de prueba. */
-async function prepararPostgresAislado(): Promise<void> {
+/** Comprueba que el arranque global aplicó migraciones en el servidor de prueba aislado. */
+async function verificarPostgresAislado(): Promise<void> {
   if (cliente === null || sqlDeSeguridad === null) {
     throw new Error('TEST_DATABASE_URL debe apuntar a portal_ps003_test en loopback.');
   }
@@ -27,16 +27,16 @@ async function prepararPostgresAislado(): Promise<void> {
     );
   }
 
-  const [estadoInicial] = await sqlDeSeguridad<{ tablas: number; esquemaMigraciones: boolean }[]>`
+  const [estadoMigrado] = await sqlDeSeguridad<{ tablas: number; esquemaMigraciones: boolean }[]>`
     SELECT
       (SELECT count(*)::int FROM information_schema.tables WHERE table_schema = 'public') AS tablas,
       EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = 'drizzle') AS "esquemaMigraciones"
   `;
-  if (estadoInicial?.tablas !== 0 || estadoInicial.esquemaMigraciones) {
-    throw new Error('La suite no modificará una base que ya contenga tablas o migraciones.');
+  if (estadoMigrado?.tablas !== 6 || !estadoMigrado.esquemaMigraciones) {
+    throw new Error(
+      'La configuración global no preparó las seis tablas versionadas de autenticación.',
+    );
   }
-
-  await migrarBaseAuth(cliente);
 }
 
 /** Cierra conexiones de esta suite contra PostgreSQL local aislado. */
@@ -114,5 +114,5 @@ async function pruebaRestriccionDeCuentaActiva(): Promise<void> {
 }
 
 describe('migraciones con PostgreSQL real e aislado', definirPruebasDeMigracionesPostgres);
-beforeAll(prepararPostgresAislado);
+beforeAll(verificarPostgresAislado);
 afterAll(cerrarPostgresAislado);

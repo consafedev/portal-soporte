@@ -101,6 +101,8 @@
 - Create: `apps/api/src/auth/session-service.ts`
 - Create: `apps/api/src/auth/auth-service.ts`
 - Create: `apps/api/src/auth/postgres-auth-repository.ts`
+- Test: `tests/unit/token-service.test.ts`
+- Test: `tests/unit/auth-service.test.ts`
 - Test: `tests/unit/password-hasher.test.ts`
 - Test: `tests/unit/session-service.test.ts`
 - Test: `tests/integration/session-repository.test.ts`
@@ -110,10 +112,10 @@
 - Produces `crearTokenOpaco(): TokenOpaco` (32 random bytes, base64url value plus SHA-256 digest), `crearAuthService(dependencias): AuthService`, and session methods `crear`, `resolverVigente`, `revocar`, and `revocarTodasMenos`.
 - Session validity checks the current account status/role, `lastUsedAt + 30 minutes`, absolute expiry at `createdAt + 8 hours`, and revocation in PostgreSQL on every protected request.
 
-- [ ] **Step 1: Write failing tests** for Argon2id parameters, unique salts, incorrect-password rejection, 32-byte opaque tokens, session idle/absolute expiry, revocation, current role lookup, and secret-free repository results.
-- [ ] **Step 2: Run focused tests; Expected:** FAIL because hash/token/session services are absent.
-- [ ] **Step 3: Implement the minimal hasher, token generator, session service, ports, and repository.** Never persist raw session/token values. Provide a process-scoped dummy Argon2 hash for unknown usernames.
-- [ ] **Step 4: Run focused tests and all unit/integration repository tests; Expected:** all pass against isolated PostgreSQL, with session expiry/revocation observed from independent requests.
+- [x] **Step 1: Write failing tests** for Argon2id parameters, unique salts, incorrect-password rejection, 32-byte opaque tokens, session idle/absolute expiry, revocation, current role lookup, and secret-free repository results.
+- [x] **Step 2: Run focused tests; Expected:** FAIL because hash/token/session services are absent; the initial RED run confirmed the missing modules.
+- [x] **Step 3: Implement the minimal hasher, token generator, session service, ports, and repository.** Never persist raw session/token values. Provide a process-scoped dummy Argon2 hash for unknown usernames and a warm-up method for server startup.
+- [x] **Step 4: Run focused tests and all unit/integration repository tests; Expected:** all pass against isolated PostgreSQL, with session expiry/revocation observed from independent requests.
 - [ ] **Step 5: Commit** as `feat(auth): PS-003 agregar credenciales y sesiones seguras` with WORKLOG evidence.
 
 ### Task 4: API runtime, same-origin proxy, CSRF, proxy trust, login, and logout
