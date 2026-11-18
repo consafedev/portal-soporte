@@ -1,0 +1,465 @@
+import { randomUUID } from 'node:crypto';
+import { eq } from 'drizzle-orm';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { EventoAuditoriaAuth } from '../../packages/core/src/auth/ports.js';
+import { ServicioAutenticacionCore } from '../../apps/api/src/auth/auth-service.js';
+import { Argon2PasswordHasher } from '../../apps/api/src/auth/argon2-password-hasher.js';
+import { calcularDigestTokenOpaco } from '../../apps/api/src/auth/token-service.js';
+import { PostgresAuthRepository } from '../../apps/api/src/auth/postgres-auth-repository.js';
+import { ServicioSesion } from '../../apps/api/src/auth/session-service.js';
+import { cargarConfiguracionAuth } from '../../apps/api/src/config.js';
+import { crearServidorAuth } from '../../apps/api/src/server.js';
+import { crearClienteBaseDatosAuth } from '../../apps/api/src/db/client.js';
+import { sessions, users } from '../../apps/api/src/db/schema.js';
+import type { RelojAuth, EscritorAuditoriaAuth } from '../../packages/core/src/auth/ports.js';
+
+const baseUrl = process.env['TEST_DATABASE_URL'];
+const database =
+  baseUrl === undefined
+    ? null
+    : crearClienteBaseDatosAuth({ DATABASE_URL: baseUrl, NODE_ENV: 'test' });
+const idUsuario = randomUUID();
+const sufijo = idUsuario.slice(0, 8);
+const contrasenaSintetica = 'Clave de prueba Unicode ñ 123';
+const origenPublicoPrueba = 'http://127.0.0.1:3000';
+const instantePrueba = new Date('2026-11-17T14:00:00.000Z');
+/** Tipo de instancia que devuelve la fábrica Fastify del API sin otra dependencia de test. */
+type AplicacionAuthPrueba = Awaited<ReturnType<typeof crearServidorAuth>>;
+const relojFijo: RelojAuth = {
+  /** Devuelve un instante sintético estable para las pruebas HTTP. */
+  ahora(): Date {
+    return new Date(instantePrueba);
+  },
+};
+
+/** Captura eventos de auditoría en memoria, sin imprimir información del caso. */
+class AuditoriaIntegracion implements EscritorAuditoriaAuth {
+  public readonly eventos: EventoAuditoriaAuth[] = [];
+
+  /** Conserva el evento allowlistado para revisar su forma sin acceder a logs. */
+  public async registrar(evento: EventoAuditoriaAuth): Promise<void> {
+    this.eventos.push(evento);
+  }
+}
+
+let aplicacion: AplicacionAuthPrueba | null = null;
+let cookieSesionDePrueba: string | null = null;
+let auditoria: AuditoriaIntegracion | null = null;
+let autenticacionCompartida: ServicioAutenticacionCore | null = null;
+let sesionesCompartidas: ServicioSesion | null = null;
+
+/** Recupera la base de integración o falla sin intentar localizar otros servicios. */
+function exigirBasePrueba(): NonNullable<typeof database> {
+  if (database === null) {
+    throw new Error('La suite de rutas requiere PostgreSQL real aislado.');
+  }
+
+  return database;
+}
+
+/** Recupera la aplicación Fastify que se inicializó para esta suite. */
+function exigirAplicacion(): AplicacionAuthPrueba {
+  if (aplicacion === null) {
+    throw new Error('La aplicación Fastify de integración no está inicializada.');
+  }
+
+  return aplicacion;
+}
+
+/** Recupera el servicio real de login registrado por la preparación PostgreSQL. */
+function exigirAutenticacion(): ServicioAutenticacionCore {
+  if (autenticacionCompartida === null) {
+    throw new Error('El servicio de autenticación de integración no está inicializado.');
+  }
+
+  return autenticacionCompartida;
+}
+
+/** Recupera el servicio de sesiones PostgreSQL registrado por la preparación. */
+function exigirServicioSesiones(): ServicioSesion {
+  if (sesionesCompartidas === null) {
+    throw new Error('El servicio de sesiones de integración no está inicializado.');
+  }
+
+  return sesionesCompartidas;
+}
+
+/** Inicializa el usuario sintético, dependencias reales y servidor sin escuchar un puerto. */
+async function prepararRutasAuth(): Promise<void> {
+  const hasheador = new Argon2PasswordHasher();
+  const passwordHash = await hasheador.hash(contrasenaSintetica);
+  await exigirBasePrueba()
+    .insert(users)
+    .values({
+      id: idUsuario,
+      username: `support_${sufijo}`,
+      usernameNormalized: `support_${sufijo}`,
+      displayName: 'Soporte Sintético',
+      email: `support_${sufijo}@example.test`,
+      emailNormalized: `support_${sufijo}@example.test`,
+      passwordHash,
+      role: 'SUPPORT',
+      status: 'ACTIVE',
+      emailVerifiedAt: new Date(instantePrueba),
+    });
+
+  const repositorio = new PostgresAuthRepository(exigirBasePrueba());
+  const sesionesAuth = new ServicioSesion(repositorio, relojFijo);
+  sesionesCompartidas = sesionesAuth;
+  auditoria = new AuditoriaIntegracion();
+  const autenticacion = new ServicioAutenticacionCore(
+    repositorio,
+    hasheador,
+    sesionesAuth,
+    auditoria,
+    relojFijo,
+  );
+  autenticacionCompartida = autenticacion;
+  const configuracion = cargarConfiguracionAuth({
+    NODE_ENV: 'test',
+    PUBLIC_APP_ORIGIN: origenPublicoPrueba,
+    API_INTERNAL_ORIGIN: 'http://127.0.0.1:4000',
+  });
+  aplicacion = await crearServidorAuth({
+    configuracion,
+    autenticacion,
+    sesiones: sesionesAuth,
+    auditoria,
+    reloj: relojFijo,
+  });
+  /** Ruta exclusiva de la suite para verificar la interpretación de headers de red. */
+  aplicacion.get('/__test/client', (solicitud, respuesta) => {
+    respuesta.send({
+      ip: solicitud.ip,
+      hostname: solicitud.hostname,
+      protocol: solicitud.protocol,
+    });
+  });
+}
+
+/** Cierra Fastify y el pool exclusivo de esta suite. */
+async function cerrarRutasAuth(): Promise<void> {
+  await aplicacion?.close();
+  await database?.delete(users).where(eq(users.id, idUsuario));
+  await database?.$client.end({ timeout: 5 });
+}
+
+/** Extrae la cookie solicitada de la cabecera de respuesta sin registrar su valor. */
+function extraerCookie(
+  respuesta: { headers: { readonly 'set-cookie'?: unknown } },
+  nombre: string,
+): string {
+  const entrada = normalizarSetCookie(respuesta.headers['set-cookie']).find((cookie) =>
+    cookie.startsWith(`${nombre}=`),
+  );
+  if (entrada === undefined) {
+    throw new Error('La respuesta de prueba no incluyó la cookie esperada.');
+  }
+
+  const valor = entrada.split(';', 1)[0];
+  if (valor === undefined || valor.length === 0) {
+    throw new Error('La cookie de prueba no contiene un valor válido.');
+  }
+
+  return valor;
+}
+
+/** Convierte Set-Cookie en una lista segura para aserciones sin revelar sus valores. */
+function normalizarSetCookie(cabeceras: unknown): string[] {
+  if (typeof cabeceras === 'string') {
+    return [cabeceras];
+  }
+
+  return Array.isArray(cabeceras)
+    ? cabeceras.filter((cabecera): cabecera is string => typeof cabecera === 'string')
+    : [];
+}
+
+/** Emite cookie y token CSRF de prueba para una operación de escritura. */
+async function obtenerCsrf(): Promise<{ token: string; cookie: string }> {
+  const respuesta = await exigirAplicacion().inject({ method: 'GET', url: '/api/v1/auth/csrf' });
+  const cuerpo = respuesta.json<{ token: string }>();
+
+  return { token: cuerpo.token, cookie: extraerCookie(respuesta, 'portal_test_csrf') };
+}
+
+/** Construye headers same-origin con el par CSRF de doble envío de la suite. */
+function crearHeadersEscritura(csrf: { token: string; cookie: string }, cookieSesion?: string) {
+  return {
+    origin: origenPublicoPrueba,
+    'sec-fetch-site': 'same-origin',
+    'x-csrf-token': csrf.token,
+    cookie: cookieSesion === undefined ? csrf.cookie : `${cookieSesion}; ${csrf.cookie}`,
+  };
+}
+
+/** Comprueba nombre/atributos de cookies y cache-control del endpoint CSRF. */
+async function pruebaEmiteCsrfHttpOnly(): Promise<void> {
+  const respuesta = await exigirAplicacion().inject({ method: 'GET', url: '/api/v1/auth/csrf' });
+  const cuerpo = respuesta.json<{ token: string }>();
+  const cookie = extraerCookie(respuesta, 'portal_test_csrf');
+
+  expect(Buffer.from(cuerpo.token, 'base64url')).toHaveLength(32);
+  expect(cookie).toContain('portal_test_csrf=');
+  expect(respuesta.headers['set-cookie']).toContain('HttpOnly');
+  expect(respuesta.headers['set-cookie']).toContain('SameSite=Strict');
+  expect(respuesta.headers['set-cookie']).not.toContain('Secure');
+  expect(respuesta.headers['cache-control']).toContain('no-store');
+  expect(respuesta.headers['referrer-policy']).toBe('no-referrer');
+}
+
+/** Comprueba atributos de producción y login same-origin sin degradación de Secure. */
+async function pruebaCookiesProduccion(): Promise<void> {
+  const appProduccion = await crearServidorAuth({
+    configuracion: cargarConfiguracionAuth({
+      NODE_ENV: 'production',
+      PUBLIC_APP_ORIGIN: 'https://portal.example.test',
+      API_INTERNAL_ORIGIN: 'http://auth-api.internal:4000',
+    }),
+    autenticacion: exigirAutenticacion(),
+    sesiones: exigirServicioSesiones(),
+    auditoria: auditoria ?? new AuditoriaIntegracion(),
+    reloj: relojFijo,
+  });
+
+  try {
+    const respuestaCsrf = await appProduccion.inject({ method: 'GET', url: '/api/v1/auth/csrf' });
+    const csrf = respuestaCsrf.json<{ token: string }>();
+    const cookieCsrf = normalizarSetCookie(respuestaCsrf.headers['set-cookie']).find((valor) =>
+      valor.startsWith('__Host-portal_csrf='),
+    );
+    if (cookieCsrf === undefined) {
+      throw new Error('La respuesta productiva no incluyó la cookie CSRF segura.');
+    }
+
+    const respuestaLogin = await appProduccion.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      headers: {
+        origin: 'https://portal.example.test',
+        'sec-fetch-site': 'same-origin',
+        'x-csrf-token': csrf.token,
+        cookie: `__Host-portal_csrf=${csrf.token}`,
+      },
+      payload: { username: `support_${sufijo}`, password: contrasenaSintetica },
+    });
+    const cookieSesion = normalizarSetCookie(respuestaLogin.headers['set-cookie']).find((valor) =>
+      valor.startsWith('__Host-portal_session='),
+    );
+
+    expect(respuestaCsrf.headers['set-cookie']).toContain('Secure');
+    expect(respuestaCsrf.headers['set-cookie']).toContain('HttpOnly');
+    expect(cookieCsrf).toContain('SameSite=Strict');
+    expect(cookieCsrf).toContain('Path=/');
+    expect(cookieCsrf).not.toContain('Domain=');
+    expect(respuestaLogin.statusCode).toBe(200);
+    expect(cookieSesion).toContain('Secure');
+    expect(cookieSesion).toContain('HttpOnly');
+    expect(cookieSesion).toContain('SameSite=Strict');
+    expect(cookieSesion).toContain('Path=/');
+    expect(cookieSesion).not.toContain('Domain=');
+    expect(respuestaLogin.headers['access-control-allow-origin']).toBeUndefined();
+
+    if (cookieSesion !== undefined) {
+      await appProduccion.inject({
+        method: 'POST',
+        url: '/api/v1/auth/logout',
+        headers: {
+          origin: 'https://portal.example.test',
+          'sec-fetch-site': 'same-origin',
+          'x-csrf-token': csrf.token,
+          cookie: `${cookieSesion.split(';', 1)[0]}; ${extraerCookie(respuestaCsrf, '__Host-portal_csrf')}`,
+        },
+      });
+    }
+  } finally {
+    await appProduccion.close();
+  }
+}
+
+/** Comprueba login real con cookie opaca y respuesta libre de credenciales. */
+async function pruebaLoginSeguro(): Promise<void> {
+  const csrf = await obtenerCsrf();
+  const respuesta = await exigirAplicacion().inject({
+    method: 'POST',
+    url: '/api/v1/auth/login',
+    headers: crearHeadersEscritura(csrf),
+    payload: { username: `SUPPORT_${sufijo}`, password: contrasenaSintetica },
+  });
+  const cookieSesion = extraerCookie(respuesta, 'portal_test_session');
+  const tokenSesion = cookieSesion.slice('portal_test_session='.length);
+  const hashSesion = calcularDigestTokenOpaco(tokenSesion);
+  const filas = await exigirBasePrueba()
+    .select({ tokenHash: sessions.tokenHash })
+    .from(sessions)
+    .where(eq(sessions.tokenHash, hashSesion));
+
+  cookieSesionDePrueba = cookieSesion;
+  expect(respuesta.statusCode).toBe(200);
+  expect(respuesta.json()).toEqual({
+    user: {
+      id: idUsuario,
+      username: `support_${sufijo}`,
+      displayName: 'Soporte Sintético',
+      role: 'SUPPORT',
+    },
+  });
+  expect(respuesta.body).not.toContain(contrasenaSintetica);
+  expect(respuesta.body).not.toContain(tokenSesion);
+  expect(filas).toHaveLength(1);
+  expect(filas[0]?.tokenHash).toBe(hashSesion);
+
+  const respuestaMe = await exigirAplicacion().inject({
+    method: 'GET',
+    url: '/api/v1/auth/me',
+    headers: { cookie: cookieSesion },
+  });
+  expect(respuestaMe.statusCode).toBe(200);
+  expect(respuestaMe.json()).toMatchObject({ user: { id: idUsuario, role: 'SUPPORT' } });
+}
+
+/** Comprueba que usuario desconocido y clave incorrecta comparten respuesta pública. */
+async function pruebaLoginSinEnumeracion(): Promise<void> {
+  const csrf = await obtenerCsrf();
+  const cabeceras = crearHeadersEscritura(csrf);
+  const conocido = await exigirAplicacion().inject({
+    method: 'POST',
+    url: '/api/v1/auth/login',
+    headers: cabeceras,
+    payload: { username: `support_${sufijo}`, password: 'clave incorrecta sintética' },
+  });
+  const desconocido = await exigirAplicacion().inject({
+    method: 'POST',
+    url: '/api/v1/auth/login',
+    headers: cabeceras,
+    payload: { username: 'usuario_ausente', password: 'clave incorrecta sintética' },
+  });
+
+  expect(conocido.statusCode).toBe(401);
+  expect(desconocido.statusCode).toBe(401);
+  expect(desconocido.body).toBe(conocido.body);
+}
+
+/** Comprueba que toda escritura se detenga por Origin, CSRF o Fetch Metadata inválido. */
+async function pruebaProteccionCsrf(): Promise<void> {
+  const csrf = await obtenerCsrf();
+  const casos = [
+    { headers: { ...crearHeadersEscritura(csrf), origin: 'null' } },
+    {
+      headers: {
+        ...crearHeadersEscritura(csrf),
+        origin: 'http://attacker.test',
+        'x-forwarded-host': '127.0.0.1:3000',
+        'x-forwarded-proto': 'http',
+        'x-forwarded-for': '203.0.113.9',
+      },
+    },
+    { headers: { ...crearHeadersEscritura(csrf), 'x-csrf-token': `${csrf.token}x` } },
+    { headers: { ...crearHeadersEscritura(csrf), 'sec-fetch-site': 'cross-site' } },
+    { headers: { 'x-csrf-token': csrf.token, cookie: csrf.cookie } },
+  ];
+
+  for (const caso of casos) {
+    const respuesta = await exigirAplicacion().inject({
+      method: 'POST',
+      url: '/api/v1/auth/logout',
+      headers: caso.headers,
+    });
+    expect(respuesta.statusCode).toBe(403);
+  }
+
+  for (const method of ['POST', 'PUT', 'PATCH', 'DELETE'] as const) {
+    const respuesta = await exigirAplicacion().inject({
+      method,
+      url: '/api/v1/auth/no-disponible',
+      headers: { origin: origenPublicoPrueba },
+    });
+    expect(respuesta.statusCode).toBe(403);
+  }
+
+  const writeAdminSinCsrf = await exigirAplicacion().inject({
+    method: 'POST',
+    url: '/api/v1/admin/users',
+    headers: { origin: origenPublicoPrueba },
+  });
+  expect(writeAdminSinCsrf.statusCode).toBe(403);
+}
+
+/** Comprueba que las cabeceras forwarded no alteren la identidad de red si el peer no es proxy confiable. */
+async function pruebaIgnoraHeadersProxyFalsificados(): Promise<void> {
+  const respuesta = await exigirAplicacion().inject({
+    method: 'GET',
+    url: '/__test/client',
+    headers: {
+      host: 'api.internal',
+      'x-forwarded-for': '203.0.113.9',
+      'x-forwarded-host': 'attacker.example.test',
+      'x-forwarded-proto': 'https',
+    },
+  });
+
+  expect(respuesta.json()).toEqual({ ip: '127.0.0.1', hostname: 'api.internal', protocol: 'http' });
+}
+
+/** Comprueba logout, revocación en PostgreSQL y rechazo de la cookie anterior. */
+async function pruebaLogoutRevocaSesion(): Promise<void> {
+  const cookieSesion = cookieSesionDePrueba;
+  if (cookieSesion === null) {
+    throw new Error('La prueba requiere completar antes el login sintético.');
+  }
+
+  const csrf = await obtenerCsrf();
+  const respuesta = await exigirAplicacion().inject({
+    method: 'POST',
+    url: '/api/v1/auth/logout',
+    headers: crearHeadersEscritura(csrf, cookieSesion),
+  });
+  const respuestaMe = await exigirAplicacion().inject({
+    method: 'GET',
+    url: '/api/v1/auth/me',
+    headers: { cookie: cookieSesion },
+  });
+  const eventos = auditoria?.eventos ?? [];
+  const cookiesSet = respuesta.headers['set-cookie'];
+  const valoresCookies =
+    typeof cookiesSet === 'string'
+      ? [cookiesSet]
+      : Array.isArray(cookiesSet)
+        ? cookiesSet.filter((valor): valor is string => typeof valor === 'string')
+        : [];
+
+  expect(respuesta.statusCode).toBe(204);
+  expect(
+    valoresCookies.some(
+      (valor) => valor.startsWith('portal_test_session=') && valor.includes('Max-Age=0'),
+    ),
+  ).toBe(true);
+  expect(respuestaMe.statusCode).toBe(401);
+  expect(
+    eventos.some((evento) => evento.action === 'AUTH_LOGIN' && evento.outcome === 'SUCCESS'),
+  ).toBe(true);
+  expect(
+    eventos.some((evento) => evento.action === 'AUTH_LOGOUT' && evento.outcome === 'SUCCESS'),
+  ).toBe(true);
+}
+
+/** Agrupa pruebas de origen, anti-enumeración, sesión y controles de cookie del API. */
+function definirPruebasDeRutasAuth(): void {
+  it('emite CSRF no cacheable en cookie HttpOnly', pruebaEmiteCsrfHttpOnly);
+  it(
+    'mantiene Secure, __Host-, same-site y ausencia de CORS en producción',
+    pruebaCookiesProduccion,
+  );
+  it('autentica y devuelve identidad sin revelar credenciales', pruebaLoginSeguro);
+  it('mantiene respuesta genérica ante cuenta desconocida', pruebaLoginSinEnumeracion);
+  it('rechaza writes sin Origin/CSRF same-origin válido', pruebaProteccionCsrf);
+  it(
+    'ignora X-Forwarded falsificado por un peer no confiable',
+    pruebaIgnoraHeadersProxyFalsificados,
+  );
+  it('cierra la sesión y bloquea la cookie revocada', pruebaLogoutRevocaSesion);
+}
+
+describe('rutas de autenticación con PostgreSQL aislado', definirPruebasDeRutasAuth);
+beforeAll(prepararRutasAuth);
+afterAll(cerrarRutasAuth);

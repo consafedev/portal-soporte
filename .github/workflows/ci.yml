@@ -69,6 +69,8 @@ jobs:
         run: pnpm test:integration
 
       - name: Construir aplicaciones
+        env:
+          API_INTERNAL_ORIGIN: http://127.0.0.1:4100
         run: pnpm build
 
       # Next.js genera .next/types, que next-env.d.ts incluye en el typecheck.

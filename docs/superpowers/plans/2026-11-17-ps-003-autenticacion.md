@@ -123,25 +123,24 @@
 **Files:**
 - Create: `apps/api/src/config.ts`
 - Create: `apps/api/src/server.ts`
-- Create: `apps/api/src/plugins/cookies.ts`
 - Create: `apps/api/src/plugins/csrf.ts`
-- Create: `apps/api/src/plugins/authentication.ts`
 - Create: `apps/api/src/routes/auth-routes.ts`
 - Modify: `apps/api/src/index.ts`, `apps/api/package.json`
 - Create: `apps/web/next.config.ts`
+- Modify: `.github/workflows/ci.yml` (proxy origin only for Next build)
 - Test: `tests/unit/security-config.test.ts`
 - Test: `tests/integration/auth-routes.test.ts`
 
 **Interfaces:**
 - Produces `cargarConfiguracionAuth(entorno: NodeJS.ProcessEnv): ConfiguracionAuth`, validating canonical `PUBLIC_APP_ORIGIN`, private `API_INTERNAL_ORIGIN`, distinct production/development cookie names, loopback-only insecure development cookies, and explicit `TRUSTED_PROXY_CIDRS`.
-- Produces `validarSolicitudEscritura(request): void`, global before route handlers: exact `Origin`, cookie/header CSRF double-submit with constant-time comparison, and same-origin Fetch Metadata when present. `GET /api/v1/auth/csrf` sets a non-cacheable CSRF cookie/value.
+- Produces `validarSolicitudEscritura(request): boolean`, registered globally before route handlers: exact `Origin`, cookie/header CSRF double-submit with constant-time comparison, and same-origin Fetch Metadata when present. All `POST`/`PUT`/`PATCH`/`DELETE` operations are checked. `GET /api/v1/auth/csrf` sets a non-cacheable CSRF cookie/value.
 - Produces same-origin `POST /login`, `POST /logout`, `GET /me`; the web browser calls relative `/api/v1/*`, Next.js rewrites server-side to `API_INTERNAL_ORIGIN`, and Fastify never enables public CORS.
 - Produces per-route redacted request logging and stable public errors without body/token leakage.
 
-- [ ] **Step 1: Write failing config and API injection tests** for allowed loopback development, HTTPS production, rejected weak cookie/proxy config, exact Origin, CSRF cookie/header match, missing/null Origin, forged headers, cross-site Fetch Metadata, login enumeration, and successful login/logout.
-- [ ] **Step 2: Run the focused tests; Expected:** FAIL because runtime, security hooks, and routes are absent.
-- [ ] **Step 3: Implement configuration, cookie/CSRF/auth hooks, login/logout/me routes, and Next proxy rewrites.** Trust no proxy unless an explicit IP/CIDR matches the peer; never build links or target origin from request headers.
-- [ ] **Step 4: Run focused tests; Expected:** untrusted or incomplete writes return 403 before route logic, invalid credentials share one response, and successful login rotates opaque session state.
+- [x] **Step 1: Write failing config and API integration tests** for allowed loopback development, HTTPS production, rejected weak cookie/proxy config, exact Origin, CSRF cookie/header match, missing/null Origin, forged headers, cross-site Fetch Metadata, login enumeration, and successful login/logout.
+- [x] **Step 2: Run the focused tests; Expected:** FAIL because config/runtime/routes were absent; the initial RED runs failed on the missing config and server modules.
+- [x] **Step 3: Implement configuration, cookie/CSRF/auth hooks, login/logout/me routes, and Next proxy rewrites.** Trust no proxy unless an explicit IP/CIDR matches the peer; never build links or target origin from request headers.
+- [x] **Step 4: Run focused tests; Expected:** untrusted or incomplete writes return 403 before route logic, invalid credentials share one response, and successful login rotates opaque session state.
 - [ ] **Step 5: Commit** as `feat(auth-api): PS-003 implementar login y controles CSRF` with WORKLOG evidence.
 
 ### Task 5: User administration, authorization, audit, last-admin invariant, and bootstrap

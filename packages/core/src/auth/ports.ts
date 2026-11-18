@@ -164,6 +164,8 @@ export type ResultadoInicioSesion =
 
 /** Orquesta comparación de credenciales sin exponer hashes ni detalles de cuenta. */
 export interface ServicioAutenticacion {
+  /** Precalienta el hash dummy antes de aceptar solicitudes para no filtrar por tiempo. */
+  preparar(): Promise<void>;
   /** Autentica por username canónico y crea una sesión opaca tras verificar el hash. */
   iniciarSesion(username: string, contrasena: string): Promise<ResultadoInicioSesion>;
 }

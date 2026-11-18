@@ -30,7 +30,12 @@ export class ServicioAutenticacionCore implements ServicioAutenticacion {
     private readonly reloj: RelojAuth,
   ) {}
 
-  /** Precalienta Argon2 dummy para evitar una penalización de primera petición anónima. */
+  /**
+   * Precalienta Argon2 dummy para evitar una penalización de primera petición anónima.
+   *
+   * @returns Promesa que se resuelve cuando el hash aleatorio quedó en memoria.
+   * @throws Error si el proveedor criptográfico no puede calcular Argon2id.
+   */
   public async preparar(): Promise<void> {
     await this.resolverHashDummy();
   }
