@@ -222,3 +222,9 @@
 - **Riesgos/decisiones:** MFA admin sigue requerido antes de producción por `OPEN_DECISIONS.md` VT-08; el método/canal SMTP no está configurado en el repositorio y requerirá configuración externa, sin revelar fallos/token al solicitante; parámetros de sesión y limitación se fijarán explícitamente en diseño y se documentarán. GHSA picomatch sigue aceptado solo para dev hasta 2026-12-17 UTC, con revisión 2026-12-10 UTC.
 - **Límites:** sin bases de clientes/productivas, Debian, Cloudflare, servicios, túneles, secretos reales, despliegue o push. PS-004 no se inicia.
 - **Estado:** `EN_CURSO`.
+
+### [2026-11-17T19:53:25-06:00] PS-002 · Codex · VERIFICACIÓN DEL CIERRE Y RIESGO
+- `git diff --check` y `git diff --cached --check` → PASS para el conjunto documental de cierre. Commit local de cierre: `1ce22324333fdab2b2113997dfd3da73c7c2fc63`, limitado a `DEPENDENCY_SECURITY.md`, `TASK_BOARD.md` y `WORKLOG.md`; no publicado.
+- Verificación de fuentes públicas el 2026-11-17 (hora local): el [advisory GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf) continúa sin versión parcheada indicada; las [releases del upstream picomatch](https://github.com/micromatch/picomatch/releases) siguen listando `4.0.7` como la más reciente.
+- El riesgo permanece abierto, aceptado solo para dependencias dev; revisión 2026-12-10 UTC y vencimiento 2026-12-17 UTC. No se cambian allowlist, lockfile, auditorías ni alcance de autorización.
+- PS-002, PS-002.1 y PS-002.2 permanecen `HECHO` por aprobación administrativa; no hubo push, despliegue ni acceso productivo.
