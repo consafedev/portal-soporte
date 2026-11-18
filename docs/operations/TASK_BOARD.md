@@ -1,6 +1,6 @@
 # Tablero de trabajo — Portal e-Billia
 
-**Versión:** 0.2 · **Actualizado:** 2026-11-17 · **Significado:** `PENDIENTE`, `EN_CURSO`, `EN_REVISION`, `BLOQUEADO`, `HECHO`.
+**Versión:** 0.2 · **Actualizado:** 2026-11-18 · **Significado:** `PENDIENTE`, `EN_CURSO`, `EN_REVISION`, `BLOQUEADO`, `HECHO`.
 
 | ID | Etapa | Tarea y entregable verificable | Estado | Responsable | Bloqueantes |
 |---|---|---|---|---|---|
@@ -9,7 +9,7 @@
 | PS-002 | F1 | Inicializar monorepo, CI, tipos, lint, estándares JSDoc en español y apps vacías | HECHO | Codex · 2026-11-17 · `main` | Cierre administrativo aprobado por el propietario el 2026-11-17; docs commit `1ce22324333`; GHSA-fc5q-39xc-vjpf sigue abierto solo para desarrollo; revisión 2026-12-10 UTC y vencimiento 2026-12-17 UTC |
 | PS-002.1 | F1 | Estabilización, revisión de seguridad y cierre del bootstrap | HECHO | Codex · 2026-11-17 · `main` | Cierre administrativo aprobado por el propietario el 2026-11-17; aceptación condicionada del riesgo de picomatch limitada a desarrollo |
 | PS-002.2 | F1 | Cierre documental, publicación controlada y validación de CI | HECHO | Codex · 2026-11-17 · `main` | Cierre administrativo aprobado por el propietario el 2026-11-17; commit 41217b534ef23a9c12515c29d2f25011185f720a; GitHub Actions run 44215839204 success; riesgo sigue abierto con revisión 2026-12-10 UTC y vencimiento 2026-12-17 UTC |
-| PS-003 | F1 | Login, autenticación, sesiones, autorización ADMIN/SUPPORT, usuarios, recuperación y cambio de contraseña; sin dashboard completo | EN_CURSO | Codex · 2026-11-17 · `codex/ps-003-auth` | Diseño aprobado con cinco ajustes; Tasks 1–4 comprometidas localmente hasta `243587d` (Task 4: 62 unitarias, 13 PostgreSQL 18.7 aisladas). Login same-origin, cookies por entorno, proxy confiable explícito y CSRF global implementados. Task 5 de administración/RBAC/bootstrap iniciada; luego recuperación, UI y E2E. MFA admin bloquea producción; picomatch dev sigue abierto (revisión 2026-12-10 UTC, vence 2026-12-17 UTC); SMTP real, servidores, túneles, PS-004 y RF-1 fuera de alcance |
+| PS-003 | F1 | Login, autenticación, sesiones, autorización ADMIN/SUPPORT, usuarios, recuperación y cambio de contraseña; sin dashboard completo | EN_CURSO | Codex · 2026-11-18 · `codex/ps-003-auth` | Diseño aprobado con cinco ajustes; Tasks 1–5 implementadas y verificadas localmente (Task 5: 69 unitarias, 28 PostgreSQL 18.7 aisladas; commit pendiente). Login same-origin, sesiones opacas, CSRF global, RBAC, invariantes de último ADMIN y bootstrap transaccional. Continúa Task 6 (recuperación/activación/SMTP/antiabuso), luego login UI con Apple Design y E2E; terminar EN_REVISION. MFA admin bloquea producción; picomatch dev sigue abierto (revisión 2026-12-10 UTC, vence 2026-12-17 UTC); sin producción, servidores, túneles, PS-004 o RF-1 |
 | PS-004 | F1 | Identidad, sessions, roles, administración de usuarios, MFA, perfil | PENDIENTE | Sin asignar | PS-002, DEC-014 |
 | PS-005 | F1 | Clientes, perfiles direct/URL/SSH, secretos cifrados y test solo admin | PENDIENTE | Sin asignar | PS-004, DEC-013/023 |
 | PS-006 | F1 | Dashboard, catálogo y matriz de activación por rol/cliente | PENDIENTE | Sin asignar | PS-003/004/005 |

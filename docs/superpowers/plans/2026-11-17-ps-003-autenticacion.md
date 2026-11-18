@@ -161,11 +161,11 @@
 - All active-admin membership changes begin `READ COMMITTED`, lock `auth_invariants(id=1)` with `SELECT FOR UPDATE`, then re-count active admins in a later statement before commit.
 - Audit event and account/session mutations are in the same transaction. `SUPPORT` gets audited 403 on every admin route; password hashes and secrets never enter user DTOs.
 
-- [ ] **Step 1: Write failing API/real PostgreSQL tests** for ADMIN CRUD, SUPPORT 403, input validation, audit atomicity, final-admin demotion/deactivation rejection, concurrent opposing admin mutations, two simultaneous bootstrap invocations, and session revocation after role/status changes.
-- [ ] **Step 2: Run focused tests; Expected:** FAIL because user routes and transaction guards do not exist.
-- [ ] **Step 3: Implement authorization, application service, routes, audit repository, invariant lock, and no-echo initial bootstrap.** Fail closed if the singleton guard row is missing or locking/querying fails.
-- [ ] **Step 4: Run focused tests and PostgreSQL race tests; Expected:** SUPPORT requests return 403; no execution leaves zero active admins; exactly one simultaneous bootstrap succeeds; audit and mutation commit or roll back together.
-- [ ] **Step 5: Commit** as `feat(users): PS-003 administrar cuentas y roles` with WORKLOG evidence.
+- [x] **Step 1: Write failing API/real PostgreSQL tests** for ADMIN CRUD, SUPPORT 403, input validation, audit atomicity, final-admin demotion/deactivation rejection, concurrent opposing admin mutations, two simultaneous bootstrap invocations, and session revocation after role/status changes.
+- [x] **Step 2: Run focused tests; Expected:** FAIL because user routes and transaction guards do not exist; the duplicate-constraint route test also exposed Drizzle's nested PostgreSQL cause.
+- [x] **Step 3: Implement authorization, application service, routes, audit repository, invariant lock, and no-echo initial bootstrap.** Fail closed if the singleton guard row is missing or locking/querying fails.
+- [x] **Step 4: Run focused tests and PostgreSQL race tests; Expected:** SUPPORT requests return 403; no execution leaves zero active admins; exactly one simultaneous bootstrap succeeds; audit and mutation commit or roll back together.
+- [x] **Step 5: Commit** as `feat(users): PS-003 administrar cuentas y roles` with WORKLOG evidence.
 
 ### Task 6: Recovery, invitations, verified email changes, SMTP, and throttling
 
