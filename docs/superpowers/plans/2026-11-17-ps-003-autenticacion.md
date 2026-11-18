@@ -116,7 +116,7 @@
 - [x] **Step 2: Run focused tests; Expected:** FAIL because hash/token/session services are absent; the initial RED run confirmed the missing modules.
 - [x] **Step 3: Implement the minimal hasher, token generator, session service, ports, and repository.** Never persist raw session/token values. Provide a process-scoped dummy Argon2 hash for unknown usernames and a warm-up method for server startup.
 - [x] **Step 4: Run focused tests and all unit/integration repository tests; Expected:** all pass against isolated PostgreSQL, with session expiry/revocation observed from independent requests.
-- [ ] **Step 5: Commit** as `feat(auth): PS-003 agregar credenciales y sesiones seguras` with WORKLOG evidence.
+- [x] **Step 5: Commit** as `feat(auth): PS-003 agregar credenciales y sesiones seguras` with WORKLOG evidence.
 
 ### Task 4: API runtime, same-origin proxy, CSRF, proxy trust, login, and logout
 
@@ -141,7 +141,7 @@
 - [x] **Step 2: Run the focused tests; Expected:** FAIL because config/runtime/routes were absent; the initial RED runs failed on the missing config and server modules.
 - [x] **Step 3: Implement configuration, cookie/CSRF/auth hooks, login/logout/me routes, and Next proxy rewrites.** Trust no proxy unless an explicit IP/CIDR matches the peer; never build links or target origin from request headers.
 - [x] **Step 4: Run focused tests; Expected:** untrusted or incomplete writes return 403 before route logic, invalid credentials share one response, and successful login rotates opaque session state.
-- [ ] **Step 5: Commit** as `feat(auth-api): PS-003 implementar login y controles CSRF` with WORKLOG evidence.
+- [x] **Step 5: Commit** as `feat(auth-api): PS-003 implementar login y controles CSRF` with WORKLOG evidence.
 
 ### Task 5: User administration, authorization, audit, last-admin invariant, and bootstrap
 

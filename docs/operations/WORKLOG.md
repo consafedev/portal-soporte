@@ -353,3 +353,20 @@
 - **Artefactos:** runtime/configuración/rutas API, rewrite Next, dependencia de cookies, pruebas unitarias/integración, CI con destino privado explícito para build, plan, tablero y esta bitácora. E2E de navegador: `NO EJECUTADO` (se planifica para Task 7/8); no hay login UI todavía.
 - **Próximo paso:** confirmar el commit local de Task 4 y comenzar Task 5 con pruebas PostgreSQL de autorización ADMIN/SUPPORT, auditoría transaccional, bootstrap y carreras del último administrador.
 - **Estado:** Task 4 verificada, pendiente de commit; PS-003 `EN_CURSO`. Sin producción, servidores, datos de clientes, PS-004, RF-1 ni despliegue.
+
+### [2026-11-17T23:30:44-06:00] PS-003 · Codex · TASK 4 — COMMIT LOCAL
+- Task 4 quedó comprometida localmente como `243587d` (`feat(auth-api): PS-003 implementar login y controles CSRF`) en `codex/ps-003-auth`; se verificó el cierre del commit y no hubo push. El plan marca Task 3 y Task 4 como comprometidas.
+- La evidencia y los resultados de Task 4 quedan en la entrada previa; el riesgo full-audit de picomatch continúa explícito y sin cambios.
+- **Estado:** Task 4 completada y versionada; PS-003 continúa `EN_CURSO`.
+
+### [2026-11-17T23:30:44-06:00] PS-003 · Codex · INICIO TASK 5 — ADMINISTRACIÓN Y RBAC
+- **Contexto Git:** rama `codex/ps-003-auth`, HEAD `243587d`; árbol limpio antes de iniciar este incremento. Cambios son locales y no publicados.
+- **Objetivo/alcance:** administrar usuarios en backend, hacer efectivos ADMIN/SUPPORT, auditar operaciones sensibles en la misma transacción que cambios de identidad, serializar el alta del administrador inicial y preservar al último ADMIN activo.
+- **Archivos previstos:** `apps/api/src/auth/authorization.ts`, `admin-user-service.ts`, `bootstrap-admin.ts`, rutas admin; ampliar `postgres-auth-repository.ts`; pruebas unitarias de bootstrap y de integración PostgreSQL para CRUD, 403, auditoría, sesiones y carreras; plan, tablero y Worklog.
+- **Criterios verificables:** autorización deny-by-default en servidor; SUPPORT recibe 403 ante todas las rutas admin; DTOs nunca incluyen contraseñas/hash/token; cambios de membresía ADMIN bloquean la fila singleton `auth_invariants` con `SELECT FOR UPDATE` antes de recontar; auditoría y mutación confirman o revierten juntas; dos bootstraps simultáneos producen como máximo un administrador inicial; sesiones de usuarios modificados/desactivados se revocan.
+- **Pruebas previstas:** escribir primero pruebas fallidas; ejecutar CRUD y race tests en PostgreSQL 18.7 efímero con registros sintéticos; PGlite solo para simulación no concurrente; verificar atomicidad de auditoría/operación y correr typecheck/lint/test/integration/secret scan.
+- **Riesgos/decisiones:** no aceptar contraseña inicial como argumento CLI ni exponer hash en errores; el bootstrap usará lectura TTY sin eco. No cambiar contratos de esquema fuera del alcance ni confiar en bloqueo de PGlite como evidencia. El alta inicial será comando de bootstrap local, no una ruta pública.
+- **UI/UX:** no aplica en Task 5; no se crean ni cambian pantallas. Skill Apple Design se cargará antes de Task 7 UI.
+- **Límites:** sin SMTP real, bases/usuarios de cliente, producción, servidores Debian, Cloudflare, túneles, despliegue, PS-004 ni RF-1.
+- **Próximo paso:** revisar las tablas, transacciones y servicios existentes y escribir pruebas rojas de autorización, CRUD, rollback de auditoría y concurrencia real.
+- **Estado:** `EN_CURSO`.
