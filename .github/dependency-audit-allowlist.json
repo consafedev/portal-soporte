@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "advisory": "GHSA-fc5q-39xc-vjpf",
+  "cve": "CVE-2026-112366",
+  "packageName": "picomatch",
+  "versions": ["2.3.2", "4.0.7"],
+  "scope": "development",
+  "approvedBy": "Propietario del proyecto",
+  "approvedAt": "2026-11-17",
+  "expiresAt": "2026-12-17",
+  "reason": "Riesgo aceptado temporalmente para herramientas de desarrollo y CI."
+}

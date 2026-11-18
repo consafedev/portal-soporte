@@ -155,3 +155,40 @@
 - **Verificaciones locales de la actualización documental:** format:check, verify:skills, check:secrets y git diff --check → PASS. No se repitieron build/tests porque no hubo cambios de código/configuración.
 - **Estado y límites:** PS-002.1 HECHO bajo aceptación condicionada solo para desarrollo; vulnerabilidad abierta y sin autorización productiva. PS-002 permanece EN_REVISION. PS-002.2 EN_REVISION a la espera de aprobación/rechazo de la excepción propuesta. No hubo despliegue ni inicio de PS-003.
 - **Siguiente paso:** el propietario autoriza o rechaza la excepción; no cambiar CI mientras no exista esa aprobación. Este registro/propuesta se conserva en un commit local posterior al push y aún no se publica.
+
+
+### [2026-11-17T18:53:51-06:00] PS-002.2 · Codex · INICIO DE IMPLEMENTACIÓN
+- Contexto Git: rama main, HEAD ddbca55d2c826af8f7e006377a60bd6618ad6b6b, árbol limpio antes del registro; origin/main 9a16be67f117d88091c119ea7c60cb5a47d1905f, ahead 1/behind 0.
+- Autorización: propietario aprobó la excepción temporal para GHSA-fc5q-39xc-vjpf solo en desarrollo, picomatch 2.3.2/4.0.7, vencimiento 2026-12-17. No resuelve el advisory ni autoriza producción o push.
+- Objetivo: validar el JSON real y aplicar un gate CI fail-closed que mantenga visible el FAIL original y solo permita esa excepción, con auditoría de producción estricta.
+- Alcance previsto: workflow CI, package.json, allowlist, evaluador y pruebas, DEPENDENCY_SECURITY.md, WORKLOG.md y fila PS-002.2 en TASK_BOARD.md. README, ambas skills y lockfile se preservan.
+- Verificaciones previstas: TDD, install congelado, format, lint, typecheck, test, build, verificación de skills, escaneo de secretos, auditorías completa y de producción y revisión Git.
+- Riesgo: picomatch sigue vulnerable en herramientas dev; cualquier otro hallazgo alto/crítico, instancia productiva, versión distinta, cambio de esquema, patch o vencimiento debe fallar. UI/UX no aplica.
+- Límites: sin servidores, túneles, BD productivas, credenciales, despliegue, push o PS-003.
+- Estado: EN_CURSO.
+
+### [2026-11-17T19:20:02-06:00] PS-002.2 · Codex · ENTREGA A REVISIÓN
+- Contexto Git: rama main, base ddbca55d2c826af8f7e006377a60bd6618ad6b6b; origin/main observado en 9a16be67f117d88091c119ea7c60cb5a47d1905f. Se preserva el historial PS-001/PS-002, el README y ambas skills.
+- Autorización: excepción temporal aprobada expresamente el 2026-11-17 solo para desarrollo, GHSA-fc5q-39xc-vjpf / CVE-2026-112366, picomatch 2.3.2 y 4.0.7, válida hasta 2026-12-17 UTC. No autoriza producción, despliegue ni push.
+- Cambios: allowlist .github/dependency-audit-allowlist.json; evaluador fail-closed scripts/check-dependency-audit.mjs y contrato .d.mts; 10 pruebas de política; script check:dependencies:ci; CI comprueba Node 24.22.3 y pnpm 12.21.0, conserva audit de producción estricto y evalúa la excepción por separado; documentación de seguridad actualizada. README, lockfile y skills sin cambios.
+- Runtime e instalación: Node v24.22.3, Corepack 0.36.0, pnpm 12.21.0; corepack pnpm@12.21.0 install --frozen-lockfile → PASS, lockfile sin cambios.
+- Verificaciones: format:check, lint, typecheck de 7 proyectos, test (2 archivos/11 pruebas), build (Next generó / y /_not-found), typecheck estricto de política/pruebas, node --check, verify:skills, check:secrets y peers check → PASS. actionlint → NO EJECUTADO porque no está instalado.
+- Auditoría: audit --prod --audit-level high → PASS, sin vulnerabilidades. check:dependencies → FAIL esperado: un hallazgo high GHSA-fc5q-39xc-vjpf, rango <=4.0.7, Patched versions: None. pnpm why -r picomatch muestra 2.3.2 por eslint-config-next; 4.0.7 por ramas de secretlint, vitest/vite y eslint-config-next. El audit JSON contiene 40 rutas, todas dev: true; pnpm why -r --prod picomatch no devuelve rutas. Sin overrides ni supresiones.
+- Gate CI: check:dependencies:ci → exit 0 por la excepción autorizada; imprime el JSON y el FAIL original, declara el advisory abierto y que la auditoría completa no es PASS. Las pruebas niegan producción, otra alerta high/critical, versión no aprobada, patch publicado, esquema desconocido, salida inconsistente y vencimiento.
+- CI remota: run 44209671184 del workflow anterior sigue fallido solo en audit. Actions para estos cambios → NO EJECUTADO; requieren publicación. Secretlint → sin hallazgos.
+- Límites: sin acceso productivo, túneles, credenciales, deploy, push o PS-003. La revisión de diff y git diff --check se ejecutarán antes del commit local.
+- Próximo paso: revisión final y commit local atómico; solicitar autorización expresa para push normal; después comprobar GitHub Actions. PS-002 y PS-002.2 quedan EN_REVISION. Riesgo GHSA abierto y no autorizado para producción.
+- Estado: EN_REVISION.
+
+
+### [2026-11-17T19:20:26-06:00] PS-002.2 · Codex · CORRECCIÓN DE REGISTRO
+- Se detectó que un borrador local de bitácora había recibido secuencias de escape de la consola y alteraba artificialmente líneas previas. Se restauró WORKLOG.md byte por byte desde el blob de HEAD, hash 36363255056ab40fa69b7a0fd8ff761099419025, y se reanexaron las entradas de esta tarea con saltos de línea correctos.
+- El contenido histórico de PS-001 y PS-002 quedó idéntico a HEAD; la comparación posterior muestra solo anexados de la tarea actual y ninguna línea borrada. No se cambió el commit base ni el historial Git.
+- git diff --check sobre la bitácora restaurada y las nuevas entradas → PASS antes de agregar esta nota; se repetirá al finalizar el registro.
+
+
+### [2026-11-17T19:22:50-06:00] PS-002.2 · Codex · REVISIÓN DEL CONJUNTO PREPARADO
+- Índice: revisión del diff completo de 9 archivos; solo workflow CI, allowlist, evaluador/declaración, pruebas, package.json, DEPENDENCY_SECURITY.md, TASK_BOARD.md y WORKLOG.md. No hay README, skills, lockfile, archivos de entorno, llaves ni artefactos generados.
+- Control Git: git diff --cached --check → PASS; WORKLOG conserva el blob histórico sin modificaciones y solo añade los registros PS-002.2. secretlint "**/*" → PASS, sin hallazgos.
+- Base y límites: HEAD base ddbca55d2c826af8f7e006377a60bd6618ad6b6b; origin/main observado en 9a16be67f117d88091c119ea7c60cb5a47d1905f. No se reescribe historial, no se hace push, despliegue o PS-003.
+- Siguiente paso: crear el commit local atómico y solicitar autorización explícita para publicarlo; GitHub Actions actual queda pendiente de esa publicación.

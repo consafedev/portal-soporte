@@ -24,7 +24,8 @@
     "build": "corepack pnpm@12.21.0 --filter @portal-soporte/web run build && corepack pnpm@12.21.0 run typecheck",
     "verify:skills": "python .agents/skills/portal-soporte-workflow/scripts/verify_skill.py",
     "check:secrets": "secretlint \"**/*\"",
-    "check:dependencies": "corepack pnpm@12.21.0 audit --audit-level high"
+    "check:dependencies": "corepack pnpm@12.21.0 audit --audit-level high",
+    "check:dependencies:ci": "corepack pnpm@12.21.0 exec node scripts/check-dependency-audit.mjs"
   },
   "devDependencies": {
     "@types/node": "catalog:",

@@ -27,6 +27,13 @@ jobs:
         with:
           version: 12.21.0
 
+      - name: Confirmar versiones fijadas
+        run: |
+          node --version
+          pnpm --version
+          test "$(node --version)" = "v24.22.3"
+          test "$(pnpm --version)" = "12.21.0"
+
       - name: Instalar dependencias fijadas
         run: pnpm install --frozen-lockfile
 
@@ -52,5 +59,8 @@ jobs:
       - name: Buscar secretos
         run: pnpm check:secrets
 
-      - name: Revisar dependencias
-        run: pnpm check:dependencies
+      - name: Auditar dependencias de producción
+        run: corepack pnpm@12.21.0 audit --prod --audit-level high
+
+      - name: Auditar dependencias y evaluar excepción aprobada de desarrollo
+        run: corepack pnpm@12.21.0 run check:dependencies:ci

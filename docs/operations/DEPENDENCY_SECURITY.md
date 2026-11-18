@@ -29,10 +29,11 @@ Al momento de la revisión, el registro npm y la página de releases muestran `4
 
 Controles aplicados o vigentes:
 
-- Mantener la auditoría completa estricta (`pnpm audit --audit-level high`) en CI. Debe fallar con el hallazgo actual; no se agrega excepción ni se rebaja el umbral.
+- El comando completo `pnpm audit --audit-level high` permanece estricto y devuelve FAIL ante el advisory. En CI, el wrapper conserva y muestra su JSON y código de salida originales; un gate independiente evalúa la excepción aprobada sin cambiar el resultado de la auditoría.
+- La auditoría de producción (`pnpm audit --prod --audit-level high`) permanece como paso estricto de CI.
 - Mantener las coincidencias de lint/test/secret scan estáticas y no aceptar patrones de usuario o de sistemas externos en las herramientas que resuelven globs.
 - Conservar `permissions: contents: read` en CI y no pasar secretos a ese job.
-- Actualizar el lockfile solo cuando haya una versión corregida publicada; después repetir `pnpm why`, auditoría completa y de producción, pruebas y build.
+- Actualizar el lockfile cuando haya una versión corregida publicada; después repetir `pnpm why`, auditorías completa y de producción, pruebas y build. La excepción debe dejar de permitir el gate ante un advisory parchado o un cambio del esquema de auditoría.
 
 **Riesgo residual:** el propietario aceptó el 2026-11-17 este riesgo de forma temporal y condicionada, exclusivamente para herramientas y CI de desarrollo. El advisory permanece abierto, la auditoría completa continúa fallando y la aceptación no autoriza automáticamente ningún despliegue productivo. Resolver al publicarse una versión corregida compatible, actualizar el lockfile y volver a pasar la auditoría completa, la auditoría de producción y las verificaciones de calidad pertinentes.
 
@@ -41,16 +42,16 @@ Controles aplicados o vigentes:
 - **Aprobación y fecha:** propietario del proyecto, 2026-11-17, registrada explícitamente en la autorización de PS-002.2.
 - **Responsable de aceptación del riesgo:** propietario del proyecto. **Responsable del seguimiento y la remediación técnica:** equipo de ingeniería del portal; Codex registra y verifica la actualización.
 - **Ámbito aceptado:** exclusivamente dependencias de desarrollo utilizadas en estaciones locales y CI de validación de desarrollo. No incluye runtime de producción, artefactos desplegados, ni jobs con secretos o permisos de escritura.
-- **Mitigaciones requeridas mientras permanezca abierto:** conservar la auditoría completa estricta y visible; mantener permisos mínimos de CI (contents: read) y no suministrar secretos; no construir patrones glob desde entradas no confiables; ejecutar auditoría de producción; no aplicar overrides, excepciones o supresiones sin una aprobación separada y trazable.
+- **Mitigaciones requeridas mientras permanezca abierto:** conservar visible el resultado FAIL de la auditoría completa; mantener permisos mínimos de CI (`contents: read`) y no suministrar secretos; no construir patrones glob desde entradas no confiables; ejecutar auditoría estricta de producción; no añadir excepciones, overrides o supresiones adicionales sin aprobación separada y trazable.
 - **Condición para resolver:** una versión corregida publicada y compatible debe reemplazar las instancias afectadas; actualizar el lockfile; confirmar el árbol con pnpm why; obtener PASS de auditoría completa y de producción; repetir format, lint, typecheck, tests, build, skill y secreto. Registrar evidencia y revisión del propietario.
-- **Límite de autorización:** esta aceptación temporal no cambia el resultado FAIL de la auditoría completa y no constituye autorización para producción. No se ha aprobado una excepción de CI.
+- **Límite de autorización:** esta aceptación temporal no cambia el resultado FAIL de la auditoría completa y no constituye autorización para producción. La excepción de CI requiere y recibió una aprobación expresa separada, descrita a continuación.
 
-## Propuesta de excepción temporal para CI — pendiente de aprobación
+## Excepción temporal de CI — aprobada, activa y limitada
 
-**Estado:** propuesta solamente; no aplicada ni aprobada. La auditoría completa sigue siendo FAIL por GHSA-fc5q-39xc-vjpf.
+**Aprobación:** el propietario autorizó expresamente su implementación el 2026-11-17. La excepción está codificada en `.github/dependency-audit-allowlist.json` y el evaluador fail-closed está en `scripts/check-dependency-audit.mjs`. La aprobación es válida hasta el final del **2026-12-17 UTC**; desde el 2026-12-18 el gate falla mientras siga presente la alerta.
 
-Si el propietario la aprueba, registrar una allowlist dedicada con una sola entrada: advisory GHSA-fc5q-39xc-vjpf, paquete picomatch, versiones actualmente fijadas 2.3.2 y 4.0.7, alcance development-only, propietario aprobador, fecha de aprobación, justificación y vencimiento propuesto 2026-12-17. El vencimiento de 30 días es una propuesta para revisión, no una autorización vigente.
+La única combinación admitida es `GHSA-fc5q-39xc-vjpf` / `CVE-2026-112366`, paquete `picomatch`, versiones `2.3.2` y `4.0.7`, severidad high y alcance `development`. Cada instancia debe conservar `dev: true`; el resultado de `pnpm audit --audit-level high --json` debe seguir siendo código 1 y el esquema de pnpm 12.21.0 debe coincidir exactamente con el validado. El evaluador también exige que el resumen y los advisories coincidan y que no haya otra alerta high/critical.
 
-La validación debe ejecutar pnpm audit --json y conservar visible su resultado original de fallo. Un validador separado, con cierre seguro ante JSON inválido o campos desconocidos, podría permitir que el job continúe únicamente cuando todos los hallazgos de severidad high o critical sean exactamente este GHSA sobre picomatch y cada instancia esté marcada como dev. Debe fallar si aparece otro advisory, otra severidad high/critical, una instancia de picomatch en producción, una versión no revisada o un error de auditoría. La auditoría de producción debe permanecer estricta.
+El wrapper imprime completa la salida JSON y mantiene visible `pnpm audit --audit-level high: FAIL (código 1)`. El paso de CI solo informa que la política permitió continuar bajo la excepción aprobada; **no convierte ni reporta la auditoría completa como PASS**. La auditoría de producción permanece en un paso separado y estricto. El audit local `pnpm check:dependencies` sigue siendo estricto y devuelve FAIL ante el hallazgo actual.
 
-El check debe identificarse como evaluación de una excepción aprobada, nunca como auditoría completa PASS; su salida debe decir que GHSA permanece abierto y que solo se aceptó temporalmente en desarrollo. Al vencimiento, el check vuelve a fallar hasta que se publique una corrección o exista una nueva aprobación explícita. No cambiar pnpm audit configuration ni silenciar el advisory.
+La excepción falla cerrada ante cualquier otra alerta high/critical, instancia que no sea dev, paquete/rango/versión/severidad inesperados, advisory parchado, código de salida inconsistente, JSON o esquema desconocido, conteos incongruentes, allowlist modificada o vencimiento. No aplica a artefactos desplegados, producción ni jobs con secretos o permisos de escritura. El riesgo de disponibilidad permanece abierto y requiere actualizar el lockfile al publicarse una versión corregida, volver a obtener PASS de la auditoría completa y de producción, repetir las verificaciones de calidad y solicitar revisión del propietario.
