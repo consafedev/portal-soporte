@@ -508,6 +508,11 @@
 - **Próximo paso:** revisión del propietario; si acepta, cerrar PS-003 administrativamente después de revisar el OOM y volver a correr unitarias en host con memoria disponible. No iniciar PS-004 hasta aprobación explícita.
 - **Estado:** PS-003 `EN_REVISION`; pruebas unitarias: PASS previo y OOM ambiental en repetición final; entrega local pendiente de commit y revisión del propietario.
 
+### [2026-11-18T15:55:18-06:00] PS-003 · Codex · COMMIT LOCAL DE IMPLEMENTACIÓN
+- Commit local `ab64e4663d3d63eb01c8c259fe9929797ff6811f` (`feat(auth): PS-003 entregar núcleo en revisión`) creado sobre `codex/ps-003-auth`; `HEAD` verificado en el mismo hash y `git status --short` vacío inmediatamente después. Sin push.
+- `git diff --cached --check` → PASS, sin espacios en blanco inválidos; `prettier --check` de WORKLOG, TASK_BOARD y documento de seguridad → PASS. El aviso de conversión CRLF que Git imprime durante `git add` es informativo.
+- El hash queda asentado también en el tablero. Se mantiene PS-003 `EN_REVISION`; el commit no convierte la tarea en `HECHO` ni autoriza PS-004.
+
 ### [2026-11-18T12:43:28-06:00] PS-003 · Codex · HANDOFF E2E DE STACK REAL
 - **Cambios de esta iteración:** `test:e2e` compila API y usa `scripts/with-test-postgres.ts --e2e`; el harness rechaza URL externa, crea PostgreSQL efímero nuevo, migra antes de Playwright y ejecuta el navegador en ese mismo ciclo. `playwright.config.ts` arranca el wrapper del API y el servidor personalizado Next.js; `tests/e2e/auth-real-stack.spec.ts` prepara ADMIN/SUPPORT sintéticos aleatorios y cubre login/listado, cookie HttpOnly, 403 con CSRF, cambio de contraseña y revocación entre navegadores. `tests/e2e/start-auth-api.ts` limita el API a loopback/base sintética, genera HMAC en memoria y elimina variables SMTP.
 - **Pruebas propias:** TDD RED inicial observada en `corepack pnpm@12.21.0 exec playwright test --config=playwright.config.ts tests/e2e/auth-real-stack.spec.ts`: falló por falta de `TEST_DATABASE_URL` al invocarse fuera del harness. `prettier --check` de archivos asignados → PASS; ESLint de archivos asignados → PASS; `git diff --check` de archivos asignados → PASS.
