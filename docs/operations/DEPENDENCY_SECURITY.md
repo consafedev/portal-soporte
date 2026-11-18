@@ -40,6 +40,8 @@ Controles aplicados o vigentes:
 ## Aceptación temporal condicionada
 
 - **Aprobación y fecha:** propietario del proyecto, 2026-11-17, registrada explícitamente en la autorización de PS-002.2.
+- **Próxima revisión:** 2026-12-10 UTC; reevaluar advisory, publicación de una versión corregida y alcance de dependencias.
+- **Vencimiento:** 2026-12-17 UTC. La revisión no extiende la aceptación; cualquier extensión requiere aprobación explícita nueva.
 - **Responsable de aceptación del riesgo:** propietario del proyecto. **Responsable del seguimiento y la remediación técnica:** equipo de ingeniería del portal; Codex registra y verifica la actualización.
 - **Ámbito aceptado:** exclusivamente dependencias de desarrollo utilizadas en estaciones locales y CI de validación de desarrollo. No incluye runtime de producción, artefactos desplegados, ni jobs con secretos o permisos de escritura.
 - **Mitigaciones requeridas mientras permanezca abierto:** conservar visible el resultado FAIL de la auditoría completa; mantener permisos mínimos de CI (`contents: read`) y no suministrar secretos; no construir patrones glob desde entradas no confiables; ejecutar auditoría estricta de producción; no añadir excepciones, overrides o supresiones adicionales sin aprobación separada y trazable.
