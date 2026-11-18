@@ -37,7 +37,7 @@ const sufijo = randomUUID().slice(0, 8);
 const contrasenaSintetica = 'Contraseña inicial sintética ñ 123';
 const contrasenaRecuperada = 'Nueva contraseña de recuperación ñ 456';
 const origen = 'http://127.0.0.1:3000';
-const ahora = new Date('2026-11-18T06:00:00.000Z');
+const ahora = new Date();
 const mensajes: MensajeCorreoAuth[] = [];
 const correoPrueba: ServicioCorreoAuth = {
   /** Conserva solo mensajes sintéticos en memoria para verificar el flujo de entrega. */
@@ -329,7 +329,15 @@ function definirPruebasRecuperacion(): void {
   it('rechaza propósito equivocado, acepta activación una sola vez y verifica el correo', async () => {
     await exigirServicioRecuperacion().solicitarInvitacion(
       idPending,
-      null,
+      {
+        userId: idAdminBootstrap,
+        role: 'ADMIN',
+        sessionId: (
+          await new ServicioSesion(new PostgresAuthRepository(exigirBasePrueba()), reloj).crear(
+            idAdminBootstrap,
+          )
+        ).sessionId,
+      },
       '127.0.0.1',
       'integration-invitation',
     );

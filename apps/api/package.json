@@ -6,6 +6,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "tsc --noEmit false -p tsconfig.build.json",
+    "start": "node dist/apps/api/src/main.js",
+    "db:migrate:test": "corepack pnpm@12.21.0 run build && node dist/apps/api/src/db/migrate-cli.js",
     "bootstrap-admin": "corepack pnpm@12.21.0 run build && node dist/apps/api/src/auth/bootstrap-cli.js"
   },
   "dependencies": {

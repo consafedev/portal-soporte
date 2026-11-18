@@ -47,6 +47,17 @@ export class ServicioSesion {
 
   /** Crea una sesión con token aleatorio y persiste únicamente su digest SHA-256. */
   public async crear(userId: string): Promise<SesionEmitida> {
+    const { registro, credencial } = this.preparar(userId);
+    await this.repositorio.crear(registro);
+    return credencial;
+  }
+
+  /**
+   * Genera la credencial opaca y separa el registro que se confirma junto a la operación autorizada.
+   * @param userId Cuenta que será propietaria de la sesión.
+   * @returns Registro con digest y credencial en memoria, aún sin persistir.
+   */
+  public preparar(userId: string): { registro: SesionPersistida; credencial: SesionEmitida } {
     const ahora = this.reloj.ahora();
     const absoluteExpiresAt = new Date(
       ahora.getTime() + HORAS_DURACION_ABSOLUTA * 60 * MILISEGUNDOS_MINUTO,
@@ -64,9 +75,10 @@ export class ServicioSesion {
       absoluteExpiresAt,
     };
 
-    await this.repositorio.crear(entrada);
-
-    return { sessionId, token: token.valor, idleExpiresAt, absoluteExpiresAt };
+    return {
+      registro: entrada,
+      credencial: { sessionId, token: token.valor, idleExpiresAt, absoluteExpiresAt },
+    };
   }
 
   /** Resuelve y renueva una sesión solo si token, expiración, estado y rol siguen vigentes. */
@@ -120,6 +132,18 @@ export class ServicioSesion {
     }
 
     return this.repositorio.revocarPorHash(calcularDigestTokenOpaco(token), this.reloj.ahora());
+  }
+
+  /**
+   * Solicita el cierre auditado sin renovar la actividad de la sesión.
+   * @param token Cookie presentada o undefined si el navegador ya la eliminó.
+   * @param requestId Identificador de correlación del servidor.
+   * @returns Se resuelve tras confirmar la revocación y su evento, o solo el evento anónimo.
+   */
+  public cerrarSesion(token: string | undefined, requestId: string): Promise<void> {
+    const digest =
+      token !== undefined && esTokenOpacoValido(token) ? calcularDigestTokenOpaco(token) : null;
+    return this.repositorio.cerrarSesion(digest, requestId, this.reloj.ahora());
   }
 
   /** Revoca las demás sesiones de una cuenta y permite conservar una sesión autorizada. */

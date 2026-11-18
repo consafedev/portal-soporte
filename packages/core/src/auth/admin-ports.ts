@@ -1,6 +1,16 @@
 import type { RespuestaUsuarioAdmin, RolUsuario, EstadoUsuario } from './models.js';
 import type { EventoAuditoriaAuth } from './ports.js';
 
+/** Identidad administrativa y sesión exacta, revalidadas bajo bloqueo antes de cada mutación. */
+export interface ActorSesionAdmin {
+  /** Identificador de cuenta resuelto por el servidor. */
+  readonly userId: string;
+  /** UUID interno de sesión. Nunca contiene la credencial de la cookie. */
+  readonly sessionId: string;
+  /** Rol observado al autenticar la solicitud. */
+  readonly role: 'ADMIN';
+}
+
 /** Campos persistidos de un usuario invitado antes de recibir contraseña propia. */
 export interface EntradaUsuarioAdminPersistida {
   /** UUID generado en el servidor para la nueva cuenta. */
@@ -75,6 +85,8 @@ export interface CambiosUsuarioAdminPersistidos {
 
 /** Errores controlados que puede producir la persistencia administrativa. */
 export type CodigoErrorRepositorioAdmin =
+  | 'AUTH_REQUIRED'
+  | 'FORBIDDEN'
   | 'ADMIN_ALREADY_EXISTS'
   | 'LAST_ADMIN_REQUIRED'
   | 'AUTH_INVARIANT_UNAVAILABLE'
@@ -105,21 +117,24 @@ export interface RepositorioBootstrapAdmin {
 export interface RepositorioUsuariosAdmin extends RepositorioBootstrapAdmin {
   /** Lista DTOs acotados sin hashes, tokens ni credenciales. */
   listarUsuarios(): Promise<readonly RespuestaUsuarioAdmin[]>;
-  /** Crea una invitación pendiente y su evento en una sola transacción. */
+  /** Crea la cuenta pendiente y su evento tras revalidar la sesión exacta del actor de auditoría. */
   crearUsuario(
     entrada: EntradaUsuarioAdminPersistida,
     evento: EventoAuditoriaAuth,
+    sessionId: string,
   ): Promise<RespuestaUsuarioAdmin>;
-  /** Actualiza una cuenta, mantiene el invariante ADMIN y audita atómicamente. */
+  /** Revalida la sesión del actor, actualiza la cuenta y audita bajo el invariante ADMIN. */
   actualizarUsuario(
     idUsuario: string,
     cambios: CambiosUsuarioAdminPersistidos,
     evento: EventoAuditoriaAuth,
+    sessionId: string,
   ): Promise<RespuestaUsuarioAdmin | null>;
-  /** Revoca sesiones de una cuenta y audita el resultado en la misma transacción. */
+  /** Comprueba la sesión del actor antes de revocar las del objetivo y auditar el resultado. */
   revocarSesionesAdmin(
     idUsuario: string,
     revocadasEn: Date,
     evento: EventoAuditoriaAuth,
+    sessionId: string,
   ): Promise<number | null>;
 }

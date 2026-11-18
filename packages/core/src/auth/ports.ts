@@ -68,6 +68,14 @@ export interface RepositorioSesiones {
   renovar(entrada: RenovacionSesion): Promise<boolean>;
   /** Revoca por digest con una fecha UTC y devuelve si hubo una actualización. */
   revocarPorHash(tokenHash: string, revocadaEn: Date): Promise<boolean>;
+  /**
+   * Revoca la sesión y registra AUTH_LOGOUT en la misma transacción.
+   * @param tokenHash Digest SHA-256 o null si falta una credencial con formato válido.
+   * @param requestId Correlación de la solicitud HTTP.
+   * @param ahora Instante de revocación y comprobación de vigencia del actor.
+   * @returns Se resuelve tras guardar el evento, anónimo si la sesión ya no acredita identidad.
+   */
+  cerrarSesion(tokenHash: string | null, requestId: string, ahora: Date): Promise<void>;
   /** Revoca sesiones de la cuenta y permite conservar la sesión de la petición actual. */
   revocarSesionesDeUsuario(
     userId: string,
@@ -86,6 +94,16 @@ export interface CuentaAutenticacion extends CuentaSesion {
 export interface RepositorioAutenticacion extends RepositorioSesiones {
   /** Busca una cuenta usando únicamente el username canónico. */
   buscarCuentaPorUsuarioNormalizado(username: string): Promise<CuentaAutenticacion | null>;
+  /**
+   * Confirma sesión y auditoría solo si la cuenta activa conserva el username y hash verificados.
+   * @returns Identidad pública vigente o null si cambió la credencial.
+   */
+  confirmarLogin(
+    sesion: SesionPersistida,
+    hashVerificado: string,
+    usernameNormalizado: string,
+    evento: EventoAuditoriaAuth,
+  ): Promise<RespuestaUsuarioPublico | null>;
 }
 
 /** Implementación intercambiable de hash y verificación de contraseñas. */
@@ -164,8 +182,18 @@ export type ResultadoInicioSesion =
 
 /** Orquesta comparación de credenciales sin exponer hashes ni detalles de cuenta. */
 export interface ServicioAutenticacion {
-  /** Precalienta el hash dummy antes de aceptar solicitudes para no filtrar por tiempo. */
+  /** Precalienta Argon2 dummy para igualar el primer rechazo de credenciales desconocidas. */
   preparar(): Promise<void>;
-  /** Autentica por username canónico y crea una sesión opaca tras verificar el hash. */
-  iniciarSesion(username: string, contrasena: string): Promise<ResultadoInicioSesion>;
+  /**
+   * Autentica por username canónico y confirma sesión/auditoría con el identificador de solicitud.
+   * @param username Nombre de usuario no confiable; solo se usa su forma canónica.
+   * @param contrasena Contraseña presentada que no debe persistirse ni registrarse.
+   * @param requestId Identificador generado por el adaptador HTTP para correlación segura.
+   * @returns Resultado genérico de autenticación y credencial interna solo al validar.
+   */
+  iniciarSesion(
+    username: string,
+    contrasena: string,
+    requestId: string,
+  ): Promise<ResultadoInicioSesion>;
 }

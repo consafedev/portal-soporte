@@ -75,18 +75,47 @@ function definirPruebasDeLimitador(): void {
     );
   });
 
-  it('guarda solo digests HMAC y permite reiniciar los contadores tras login válido', async () => {
+  it('descuenta una reserva exitosa y conserva los fallos de otras solicitudes', async () => {
     const identificador = 'admin_sintetico@example.test';
     const direccionIp = '127.0.0.10';
     await limitador.registrarIntento('LOGIN', identificador, direccionIp, instante);
-    const filas = await base.select().from(authThrottleWindows);
+    await limitador.registrarIntento(
+      'LOGIN',
+      'support_sintetico@example.test',
+      direccionIp,
+      new Date(instante.getTime() + 1),
+    );
+    const reservaExitosa = await limitador.registrarIntento(
+      'LOGIN',
+      identificador,
+      direccionIp,
+      new Date(instante.getTime() + 2),
+    );
+    expect(reservaExitosa).toBe(true);
 
-    expect(filas).toHaveLength(2);
+    const filas = await base.select().from(authThrottleWindows);
+    expect(filas).toHaveLength(3);
     expect(filas.every((fila) => /^[0-9a-f]{64}$/u.test(fila.keyHash))).toBe(true);
     expect(JSON.stringify(filas)).not.toContain(identificador);
     expect(JSON.stringify(filas)).not.toContain(direccionIp);
 
-    await limitador.reiniciarIntentos('LOGIN', identificador, direccionIp);
+    await limitador.descontarReservaExitosa('LOGIN', identificador, direccionIp);
+
+    const restantes = await base.select().from(authThrottleWindows);
+    expect(restantes).toHaveLength(3);
+    expect(restantes.find((fila) => fila.scope === 'LOGIN_ACCOUNT')?.attemptCount).toBe(1);
+    expect(restantes.find((fila) => fila.scope === 'LOGIN_NETWORK')?.attemptCount).toBe(2);
+  });
+
+  it('no bloquea una IP por una secuencia de autenticaciones válidas', async () => {
+    const direccionIp = '127.0.0.12';
+    for (let intento = 0; intento < 25; intento += 1) {
+      const ahora = new Date(instante.getTime() + intento);
+      expect(await limitador.registrarIntento('LOGIN', 'admin_valido', direccionIp, ahora)).toBe(
+        true,
+      );
+      await limitador.descontarReservaExitosa('LOGIN', 'admin_valido', direccionIp);
+    }
 
     expect(await base.select().from(authThrottleWindows)).toHaveLength(0);
   });

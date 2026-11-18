@@ -17,6 +17,7 @@ import type { EstadoUsuario, RolUsuario } from '../../../../packages/core/src/au
 
 type ColumnasUsuarioRestricciones = {
   emailNormalized: AnyPgColumn;
+  emailVerifiedAt: AnyPgColumn;
   passwordHash: AnyPgColumn;
   role: AnyPgColumn;
   status: AnyPgColumn;
@@ -66,7 +67,7 @@ function definirRestriccionesUsuario(columnas: ColumnasUsuarioRestricciones) {
     ),
     credencialCoherente: check(
       'users_credential_state_check',
-      sql`(${columnas.status} = 'PENDING_ACTIVATION' AND ${columnas.passwordHash} IS NULL) OR (${columnas.status} IN ('ACTIVE', 'DISABLED') AND ${columnas.passwordHash} IS NOT NULL)`,
+      sql`(${columnas.status} = 'PENDING_ACTIVATION' AND ${columnas.passwordHash} IS NULL AND ${columnas.emailVerifiedAt} IS NULL) OR (${columnas.status} = 'DISABLED' AND ${columnas.passwordHash} IS NULL AND ${columnas.emailVerifiedAt} IS NULL) OR (${columnas.status} IN ('ACTIVE', 'DISABLED') AND ${columnas.passwordHash} IS NOT NULL)`,
     ),
     usuarioNormalizadoUnico: uniqueIndex('users_username_normalized_unique').on(
       columnas.usernameNormalized,

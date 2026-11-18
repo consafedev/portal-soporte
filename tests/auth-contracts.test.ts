@@ -2,6 +2,7 @@ import { Value } from '@sinclair/typebox/value';
 import { describe, expect, it } from 'vitest';
 import {
   adminCreateUserSchema,
+  adminCreateUserResponseSchema,
   adminUserResponseSchema,
   loginRequestSchema,
   publicUserResponseSchema,
@@ -14,6 +15,11 @@ function definirPruebasDeContratos(): void {
   it('acepta exclusivamente los roles definidos', pruebaAltaAdminAceptaRolValido);
   it('no permite secretos en la respuesta pública', pruebaRespuestaPublicaNoIncluyeSecretos);
   it('no permite hashes ni tokens en el DTO administrativo', pruebaRespuestaAdminNoIncluyeSecretos);
+  it(
+    'expone solo el indicador derivado de credencial para cuentas admin',
+    pruebaIndicadorCredencialAdmin,
+  );
+  it('limita la respuesta de alta a estados explícitos de invitación', pruebaEstadosRespuestaAlta);
 }
 
 /** Comprueba que el login no ignore ni acepte propiedades adicionales. */
@@ -73,9 +79,65 @@ function pruebaRespuestaAdminNoIncluyeSecretos(): void {
       email: 'soporte@example.test',
       emailVerifiedAt: null,
       status: 'ACTIVE',
+      hasPassword: true,
       createdAt: '2026-11-17T12:00:00.000Z',
       recoveryToken: 'token-sintetico-que-debe-rechazarse',
     }),
+  ).toBe(false);
+}
+
+/** Comprueba que el DTO admin distingue cuentas invitadas sin exponer el hash almacenado. */
+function pruebaIndicadorCredencialAdmin(): void {
+  const usuario = {
+    id: '16a0c35a-f49f-4b01-9bd7-18ac6a7c9ae3',
+    username: 'soporte_1',
+    displayName: 'Cuenta Sintética',
+    role: 'SUPPORT',
+    email: 'soporte@example.test',
+    emailVerifiedAt: null,
+    status: 'DISABLED',
+    createdAt: '2026-11-17T12:00:00.000Z',
+  } as const;
+
+  expect(Value.Check(adminUserResponseSchema, { ...usuario, hasPassword: true })).toBe(true);
+  expect(Value.Check(adminUserResponseSchema, { ...usuario, hasPassword: false })).toBe(true);
+  expect(
+    Value.Check(adminUserResponseSchema, {
+      ...usuario,
+      hasPassword: true,
+      passwordHash: 'hash-sintetico-que-no-debe-exponerse',
+    }),
+  ).toBe(false);
+}
+
+/** Comprueba que la alta exponga únicamente el DTO y los tres resultados seguros del enlace. */
+function pruebaEstadosRespuestaAlta(): void {
+  const usuario = {
+    id: '16a0c35a-f49f-4b01-9bd7-18ac6a7c9ae3',
+    username: 'soporte_1',
+    displayName: 'Cuenta Sintética',
+    role: 'SUPPORT',
+    email: 'soporte@example.test',
+    emailVerifiedAt: null,
+    status: 'PENDING_ACTIVATION',
+    hasPassword: false,
+    createdAt: '2026-11-17T12:00:00.000Z',
+  } as const;
+  const estados = ['ACCEPTED', 'RATE_LIMITED', 'DELIVERY_FAILED'] as const;
+
+  for (const invitationStatus of estados) {
+    expect(Value.Check(adminCreateUserResponseSchema, { user: usuario, invitationStatus })).toBe(
+      true,
+    );
+  }
+  expect(
+    Value.Check(adminCreateUserResponseSchema, {
+      user: { ...usuario, passwordHash: 'hash-sintetico-no-publico' },
+      invitationStatus: 'ACCEPTED',
+    }),
+  ).toBe(false);
+  expect(
+    Value.Check(adminCreateUserResponseSchema, { user: usuario, invitationStatus: 'UNKNOWN' }),
   ).toBe(false);
 }
 

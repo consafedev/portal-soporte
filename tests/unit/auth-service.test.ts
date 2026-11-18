@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type {
   CuentaAutenticacion,
   CuentaSesion,
@@ -25,10 +25,17 @@ const contrasenaValidaSintetica = 'contraseña de prueba sintética';
 
 /** Repositorio en memoria que conserva únicamente entradas seguras de sesión. */
 class RepositorioAutenticacionMemoria implements RepositorioAutenticacion {
+  /** Sustituye el cierre auditado, ajeno al flujo de login que cubre esta suite. */
+  public readonly cerrarSesion = vi
+    .fn<RepositorioAutenticacion['cerrarSesion']>()
+    .mockResolvedValue(undefined);
   private readonly sesiones = new Map<string, SesionPersistida & { revokedAt: Date | null }>();
 
   /** Construye el repositorio con la cuenta que el caso necesite simular. */
-  public constructor(private readonly cuenta: CuentaAutenticacion | null) {}
+  public constructor(
+    private readonly cuenta: CuentaAutenticacion | null,
+    private readonly auditoria: EscritorAuditoriaAuth,
+  ) {}
 
   /** Busca una cuenta solo por el nombre canónico usado en el inicio de sesión. */
   public async buscarCuentaPorUsuarioNormalizado(
@@ -40,6 +47,29 @@ class RepositorioAutenticacionMemoria implements RepositorioAutenticacion {
   /** Guarda la sesión de prueba y nunca recibe el token original. */
   public async crear(entrada: SesionPersistida): Promise<void> {
     this.sesiones.set(entrada.tokenHash, { ...entrada, revokedAt: null });
+  }
+
+  /** Simula el guardado condicionado por las credenciales y la auditoría del login. */
+  public async confirmarLogin(
+    sesion: SesionPersistida,
+    hash: string,
+    username: string,
+    evento: EventoAuditoriaAuth,
+  ) {
+    if (
+      !this.cuenta ||
+      this.cuenta.status !== 'ACTIVE' ||
+      this.cuenta.passwordHash !== hash ||
+      this.cuenta.username !== username
+    )
+      return null;
+    await this.crear(sesion);
+    const { id, displayName, role } = this.cuenta;
+    await this.auditoria.registrar({
+      ...evento,
+      metadata: { ...evento.metadata, actorRole: role },
+    });
+    return { id, username, displayName, role };
   }
 
   /** Simula una consulta de sesión con los datos actuales de la cuenta. */
@@ -155,9 +185,9 @@ const relojFijo = {
 
 /** Construye el servicio bajo prueba con puertos simulados y estado aislado. */
 function crearSujeto(cuenta: CuentaAutenticacion | null = cuentaActiva) {
-  const repositorio = new RepositorioAutenticacionMemoria(cuenta);
   const hasheador = new HasheadorMemoria();
   const auditoria = new AuditoriaMemoria();
+  const repositorio = new RepositorioAutenticacionMemoria(cuenta, auditoria);
   const servicio = new ServicioAutenticacionCore(
     repositorio,
     hasheador,
@@ -189,7 +219,11 @@ function definirPruebasDeAutenticacion(): void {
 /** Comprueba la autenticación por username y la sesión opaca creada. */
 async function pruebaLoginExitoso(): Promise<void> {
   const { servicio } = crearSujeto();
-  const resultado = await servicio.iniciarSesion('  SOPORTE_1 ', contrasenaValidaSintetica);
+  const resultado = await servicio.iniciarSesion(
+    '  SOPORTE_1 ',
+    contrasenaValidaSintetica,
+    'req-login-unitario',
+  );
 
   expect(resultado).toMatchObject({
     autenticado: true,
@@ -210,10 +244,12 @@ async function pruebaRespuestaSinEnumeracion(): Promise<void> {
   const respuestaConocido = await conocido.servicio.iniciarSesion(
     'soporte_1',
     'contraseña incorrecta sintética',
+    'req-login-unitario',
   );
   const respuestaDesconocido = await desconocido.servicio.iniciarSesion(
     'usuario_ausente',
     'contraseña incorrecta sintética',
+    'req-login-unitario',
   );
 
   expect(respuestaConocido).toEqual(respuestaDesconocido);
@@ -227,19 +263,22 @@ async function pruebaRespuestaSinEnumeracion(): Promise<void> {
 async function pruebaCuentaDesactivada(): Promise<void> {
   const { servicio, hasheador } = crearSujeto({ ...cuentaActiva, status: 'DISABLED' });
 
-  await expect(servicio.iniciarSesion('soporte_1', contrasenaValidaSintetica)).resolves.toEqual({
-    autenticado: false,
-    codigo: 'INVALID_CREDENTIALS',
-  });
+  await expect(
+    servicio.iniciarSesion('soporte_1', contrasenaValidaSintetica, 'req-login-unitario'),
+  ).resolves.toEqual({ autenticado: false, codigo: 'INVALID_CREDENTIALS' });
   expect(hasheador.verificaciones).toHaveLength(1);
 }
 
 /** Comprueba que los eventos de login no contengan valores sensibles. */
 async function pruebaAuditoriaSinSecretos(): Promise<void> {
   const { servicio, auditoria } = crearSujeto();
-  await servicio.iniciarSesion('soporte_1', contrasenaValidaSintetica);
+  await servicio.iniciarSesion('soporte_1', contrasenaValidaSintetica, 'req-login-unitario');
 
   expect(auditoria.eventos).toHaveLength(1);
+  expect(auditoria.eventos[0]?.metadata).toEqual({
+    requestId: 'req-login-unitario',
+    actorRole: 'SUPPORT',
+  });
   expect(JSON.stringify(auditoria.eventos[0])).not.toContain(contrasenaValidaSintetica);
   expect(JSON.stringify(auditoria.eventos[0])).not.toContain(cuentaActiva.passwordHash ?? '');
 }

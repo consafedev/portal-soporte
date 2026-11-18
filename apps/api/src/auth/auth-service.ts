@@ -40,8 +40,18 @@ export class ServicioAutenticacionCore implements ServicioAutenticacion {
     await this.resolverHashDummy();
   }
 
-  /** Autentica solo por username y devuelve un token interno para emitir como cookie. */
-  public async iniciarSesion(username: string, contrasena: string): Promise<ResultadoInicioSesion> {
+  /**
+   * Compara la contraseña y confirma bajo bloqueo que la cuenta mantiene el hash verificado.
+   * @param username Identificador presentado por la persona.
+   * @param contrasena Contraseña exacta recibida por el adaptador.
+   * @param requestId Identificador de correlación creado por el servidor HTTP.
+   * @returns Credencial para la cookie tras confirmar sesión y auditoría, o rechazo uniforme.
+   */
+  public async iniciarSesion(
+    username: string,
+    contrasena: string,
+    requestId: string,
+  ): Promise<ResultadoInicioSesion> {
     const usernameValido = esNombreUsuarioValido(username);
     const usernameNormalizado = usernameValido ? normalizarUsuario(username) : '';
     const cuenta = usernameValido
@@ -50,33 +60,41 @@ export class ServicioAutenticacionCore implements ServicioAutenticacion {
     const hashComparacion = await this.resolverHashComparacion(cuenta);
     const contrasenaCoincide = await this.hasheador.verificar(hashComparacion, contrasena);
 
-    if (!contrasenaCoincide || cuenta === null || cuenta.status !== 'ACTIVE') {
-      await this.auditarLoginFallido();
+    if (
+      !contrasenaCoincide ||
+      cuenta?.status !== 'ACTIVE' ||
+      hashComparacion !== cuenta.passwordHash
+    ) {
+      await this.auditarLoginFallido(requestId);
 
       return { autenticado: false, codigo: 'INVALID_CREDENTIALS' };
     }
 
-    const sesion = await this.sesiones.crear(cuenta.id);
+    const { registro, credencial: sesion } = this.sesiones.preparar(cuenta.id);
     const evento: EventoAuditoriaAuth = {
       actorUserId: cuenta.id,
       action: 'AUTH_LOGIN',
       targetUserId: cuenta.id,
       outcome: 'SUCCESS',
-      metadata: {},
+      metadata: { requestId },
       createdAt: this.reloj.ahora(),
     };
-    await this.auditoria.registrar(evento);
+    const usuario = await this.repositorio.confirmarLogin(
+      registro,
+      hashComparacion,
+      usernameNormalizado,
+      evento,
+    );
+    if (usuario === null) {
+      await this.auditarLoginFallido(requestId);
+      return { autenticado: false, codigo: 'INVALID_CREDENTIALS' };
+    }
 
     return {
       autenticado: true,
       tokenSesion: sesion.token,
       sessionId: sesion.sessionId,
-      usuario: {
-        id: cuenta.id,
-        username: cuenta.username,
-        displayName: cuenta.displayName,
-        role: cuenta.role,
-      },
+      usuario,
       idleExpiresAt: sesion.idleExpiresAt,
       absoluteExpiresAt: sesion.absoluteExpiresAt,
     };
@@ -99,13 +117,13 @@ export class ServicioAutenticacionCore implements ServicioAutenticacion {
   }
 
   /** Emite auditoría sin incluir username, contraseña, hash ni causa enumerable. */
-  private async auditarLoginFallido(): Promise<void> {
+  private async auditarLoginFallido(requestId: string): Promise<void> {
     const evento: EventoAuditoriaAuth = {
       actorUserId: null,
       action: 'AUTH_LOGIN',
       targetUserId: null,
       outcome: 'FAILURE',
-      metadata: {},
+      metadata: { requestId },
       createdAt: this.reloj.ahora(),
     };
     await this.auditoria.registrar(evento);

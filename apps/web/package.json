@@ -4,12 +4,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev --hostname 127.0.0.1",
+    "dev": "node server.ts --dev",
     "build": "next build",
-    "start": "next start --hostname 127.0.0.1",
+    "start": "node server.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@portal-soporte/contracts": "workspace:*",
+    "@sinclair/typebox": "0.34.52",
+    "ipaddr.js": "2.5.0",
     "next": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:"

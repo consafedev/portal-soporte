@@ -132,7 +132,7 @@
 - Test: `tests/integration/auth-routes.test.ts`
 
 **Interfaces:**
-- Produces `cargarConfiguracionAuth(entorno: NodeJS.ProcessEnv): ConfiguracionAuth`, validating canonical `PUBLIC_APP_ORIGIN`, private `API_INTERNAL_ORIGIN`, distinct production/development cookie names, loopback-only insecure development cookies, and explicit `TRUSTED_PROXY_CIDRS`.
+- Produces `cargarConfiguracionAuth(entorno: NodeJS.ProcessEnv): ConfiguracionAuth`, validating canonical `PUBLIC_APP_ORIGIN`, private `API_INTERNAL_ORIGIN`, distinct production/development cookie names, loopback-only insecure development cookies, and explicit `TRUSTED_PROXY_CIDRS`; an empty allowlist trusts no forwarded peer and uses the socket address.
 - Produces `validarSolicitudEscritura(request): boolean`, registered globally before route handlers: exact `Origin`, cookie/header CSRF double-submit with constant-time comparison, and same-origin Fetch Metadata when present. All `POST`/`PUT`/`PATCH`/`DELETE` operations are checked. `GET /api/v1/auth/csrf` sets a non-cacheable CSRF cookie/value.
 - Produces same-origin `POST /login`, `POST /logout`, `GET /me`; the web browser calls relative `/api/v1/*`, Next.js rewrites server-side to `API_INTERNAL_ORIGIN`, and Fastify never enables public CORS.
 - Produces per-route redacted request logging and stable public errors without body/token leakage.
@@ -208,12 +208,12 @@
 - Recovery page removes `#token` from browser history immediately and sends it only in the body of the verified API `POST`; set `Referrer-Policy: no-referrer`, `Cache-Control: no-store`, and restrictive CSP without analytics/third-party assets.
 - User management displays only admin-authorized fields and offers create, update, disable, reset-link, and revoke sessions; no dashboard route is added.
 
-- [ ] **Step 1: Read `.agents/skills/apple-design/SKILL.md` immediately before UI work** and append its route, applied criteria, visual/accessibility checks, and any `NO EJECUTADO` items to `WORKLOG.md`.
-- [ ] **Step 2: Write failing Playwright checks** for login validation/keyboard/focus, generic failures, recovery token cleanup, current password flow, ADMIN user management, and SUPPORT inability to see/use admin operations.
-- [ ] **Step 3: Run focused UI checks; Expected:** FAIL because required routes/components are absent.
-- [ ] **Step 4: Implement the responsive, accessible pages and minimal shared components** following the loaded skill and approved visual identity; do not add a dashboard.
-- [ ] **Step 5: Run Playwright plus keyboard, responsive, light/dark, reduced-motion, and contrast checks; Expected:** required UI flows pass and every incomplete visual check is recorded accurately.
-- [ ] **Step 6: Commit** as `feat(auth-ui): PS-003 implementar login y gestión de usuarios` with Apple Design evidence in WORKLOG.
+- [x] **Step 1: Read `.agents/skills/apple-design/SKILL.md` immediately before UI work** and append its route, applied criteria, visual/accessibility checks, and any `NO EJECUTADO` items to `WORKLOG.md`.
+- [x] **Step 2: Write failing Playwright checks** for login validation/keyboard/focus, generic failures, recovery token cleanup, current password flow, ADMIN user management, and SUPPORT inability to see/use admin operations.
+- [x] **Step 3: Run focused UI checks; Expected:** FAIL because required routes/components are absent.
+- [x] **Step 4: Implement the responsive, accessible pages and minimal shared components** following the loaded skill and approved visual identity; do not add a dashboard.
+- [x] **Step 5: Run Playwright plus keyboard, responsive, light/dark, reduced-motion, and contrast checks; Expected:** required UI flows pass and every incomplete visual check is recorded accurately.
+- [x] **Step 6: Include UI work in the PS-003 review commit** with Apple Design evidence in WORKLOG.
 
 ### Task 8: CI, security hardening, full verification, and review handoff
 
@@ -228,10 +228,10 @@
 - CI installs PostgreSQL binaries directly on its disposable Ubuntu runner; it must not use a container/service image or connect to a shared database. Integration env uses only local socket/loopback and a dedicated `portal_ps003_test` database.
 - Security readiness documentation preserves the open MFA-admin production gate, lack of live SMTP verification, picomatch advisory review/expiry, and no-production limits.
 
-- [ ] **Step 1: Add failing script/config tests** for DB safety guards and CI step presence for integration, browser, typecheck, build, secrets, production audit, and the existing picomatch policy gate.
-- [ ] **Step 2: Run the focused tests; Expected:** FAIL because new scripts and pipeline steps are absent.
-- [ ] **Step 3: Implement minimal scripts, local PostgreSQL setup instructions, API compilation/build wiring, CI integration setup, and security documentation.** Keep all existing quality/security steps.
-- [ ] **Step 4: Run the complete suite:** `corepack pnpm@12.21.0 install --frozen-lockfile`, `verify:skills`, `format:check`, `lint`, `typecheck`, `test`, `test:integration`, `test:e2e`, `build`, `check:secrets`, production dependency audit, full dependency gate, and `git diff --check`.
-- [ ] **Step 5: Review the full diff and scan for secrets, SQL interpolation, auth logging leaks, unguarded write routes, missing TSDoc, UI accessibility gaps, and any change outside scope.** Resolve Critical/Important findings with a test-first fix; log deferred minor findings explicitly.
-- [ ] **Step 6: Append `ENTREGA A REVISIÓN` to WORKLOG and update only PS-003 to `EN_REVISION` in TASK_BOARD.** Report actual command outputs, real PostgreSQL version, visual limits, risks, and no-deployment boundary; do not start PS-004.
-- [ ] **Step 7: Commit** as `feat(auth): PS-003 entregar núcleo en revisión`; do not push or deploy.
+- [x] **Step 1: Add failing script/config tests** for DB safety guards and CI step presence for integration, browser, typecheck, build, secrets, production audit, and the existing picomatch policy gate.
+- [x] **Step 2: Run the focused tests; Expected:** FAIL because new scripts and pipeline steps are absent.
+- [x] **Step 3: Implement minimal scripts, local PostgreSQL setup instructions, API compilation/build wiring, CI integration setup, and security documentation.** Keep all existing quality/security steps.
+- [x] **Step 4: Run the complete suite:** `corepack pnpm@12.21.0 install --frozen-lockfile`, `verify:skills`, `format:check`, `lint`, `typecheck`, `test`, `test:integration`, `test:e2e`, `build`, `check:secrets`, production dependency audit, full dependency gate, and `git diff --check`.
+- [x] **Step 5: Review the full diff and scan for secrets, SQL interpolation, auth logging leaks, unguarded write routes, missing TSDoc, UI accessibility gaps, and any change outside scope.** Resolve Critical/Important findings with a test-first fix; log deferred minor findings explicitly.
+- [x] **Step 6: Append `ENTREGA A REVISIÓN` to WORKLOG and update only PS-003 to `EN_REVISION` in TASK_BOARD.** Report actual command outputs, real PostgreSQL version, visual limits, risks, and no-deployment boundary; do not start PS-004.
+- [x] **Step 7: Commit** as `feat(auth): PS-003 entregar núcleo en revisión`; do not push or deploy.

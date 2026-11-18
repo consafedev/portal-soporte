@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { crearClienteBaseDatosAuth } from '../../apps/api/src/db/client.js';
@@ -53,6 +55,126 @@ function definirPruebasDeMigracionesPostgres(): void {
     pruebaMigracionRepetible,
   );
   it('rechaza estados activos sin credencial en PostgreSQL real', pruebaRestriccionDeCuentaActiva);
+  it(
+    'rellena expiración al actualizar filas previas de throttling',
+    pruebaActualizacionThrottlingExistente,
+  );
+  it(
+    'revierte el ciclo de invitaciones manteniendo una cuenta reemitible',
+    pruebaReversionCicloInvitaciones,
+  );
+}
+
+/** Verifica la reversión versionada de invitaciones sobre un esquema PostgreSQL aislado. */
+async function pruebaReversionCicloInvitaciones(): Promise<void> {
+  if (sqlDeSeguridad === null) {
+    throw new Error('La suite de integración requiere PostgreSQL aislado.');
+  }
+
+  const identificadorEsquema = `ps003_rollback_${randomUUID().replaceAll('-', '')}`;
+  const migracionBase = await readFile(
+    new URL('../../apps/api/drizzle/0000_auth_core.sql', import.meta.url),
+    'utf8',
+  );
+  const inicioTabla = migracionBase.indexOf('CREATE TABLE "users"');
+  const finTabla = migracionBase.indexOf('--> statement-breakpoint', inicioTabla);
+  if (inicioTabla < 0 || finTabla < 0) {
+    throw new Error('La migración base no contiene la tabla de usuarios esperada.');
+  }
+
+  const declaracionTabla = migracionBase.slice(inicioTabla, finTabla).trim();
+  const migracionArriba = await readFile(
+    new URL('../../apps/api/drizzle/0002_invitation_lifecycle.sql', import.meta.url),
+    'utf8',
+  );
+  const migracionAbajo = await readFile(
+    new URL('../../apps/api/drizzle/0002_invitation_lifecycle.down.sql', import.meta.url),
+    'utf8',
+  );
+
+  await sqlDeSeguridad.begin(async (transaccion) => {
+    await transaccion.unsafe(`CREATE SCHEMA "${identificadorEsquema}"`);
+    await transaccion.unsafe(`SET LOCAL search_path TO "${identificadorEsquema}"`);
+    await transaccion.unsafe(declaracionTabla);
+    await transaccion.unsafe(`
+      INSERT INTO users (id, username, username_normalized, display_name, email, email_normalized, role, status)
+      VALUES ('00000000-0000-4000-8000-000000000091', 'invitacion_91', 'invitacion_91', 'Invitación sintética', 'invitacion91@example.test', 'invitacion91@example.test', 'SUPPORT', 'PENDING_ACTIVATION')
+    `);
+
+    for (const sentencia of migracionArriba.split('--> statement-breakpoint')) {
+      const sentenciaNormalizada = sentencia.trim();
+      if (sentenciaNormalizada.length > 0) await transaccion.unsafe(sentenciaNormalizada);
+    }
+
+    await transaccion.unsafe(
+      `UPDATE users SET status = 'DISABLED' WHERE username_normalized = 'invitacion_91'`,
+    );
+
+    for (const sentencia of migracionAbajo.split('--> statement-breakpoint')) {
+      const sentenciaNormalizada = sentencia.trim();
+      if (sentenciaNormalizada.length > 0) await transaccion.unsafe(sentenciaNormalizada);
+    }
+
+    const [cuenta] = await transaccion<{ status: string; password_hash: string | null }[]>`
+      SELECT status, password_hash FROM users WHERE username_normalized = 'invitacion_91'
+    `;
+    expect(cuenta).toEqual({ status: 'PENDING_ACTIVATION', password_hash: null });
+    await transaccion.unsafe(`DROP SCHEMA "${identificadorEsquema}" CASCADE`);
+  });
+}
+
+/** Verifica que la migración agregue expiraciones a contadores preexistentes en PostgreSQL. */
+async function pruebaActualizacionThrottlingExistente(): Promise<void> {
+  if (sqlDeSeguridad === null) {
+    throw new Error('La suite de integración requiere PostgreSQL aislado.');
+  }
+
+  const identificadorEsquema = `ps003_migration_${randomUUID().replaceAll('-', '')}`;
+  const migracionBase = await readFile(
+    new URL('../../apps/api/drizzle/0000_auth_core.sql', import.meta.url),
+    'utf8',
+  );
+  const inicioTabla = migracionBase.indexOf('CREATE TABLE "auth_throttle_windows"');
+  const finTabla = migracionBase.indexOf('--> statement-breakpoint', inicioTabla);
+  if (inicioTabla < 0 || finTabla < 0) {
+    throw new Error('La migración base no contiene la tabla de throttling esperada.');
+  }
+
+  const declaracionTabla = migracionBase.slice(inicioTabla, finTabla).trim();
+  const migracionActualizacion = await readFile(
+    new URL('../../apps/api/drizzle/0001_auth_throttle_expiry.sql', import.meta.url),
+    'utf8',
+  );
+
+  await sqlDeSeguridad.begin(async (transaccion) => {
+    await transaccion.unsafe(`CREATE SCHEMA "${identificadorEsquema}"`);
+    await transaccion.unsafe(`SET LOCAL search_path TO "${identificadorEsquema}"`);
+    await transaccion.unsafe(declaracionTabla);
+    await transaccion.unsafe(`
+      INSERT INTO auth_throttle_windows
+        (key_hash, scope, window_started_at, attempt_count, updated_at)
+      VALUES ('${'a'.repeat(64)}', 'LOGIN_ACCOUNT', '2026-01-01T00:00:00Z', 3, '2026-01-01T00:01:00Z')
+    `);
+
+    for (const sentencia of migracionActualizacion.split('--> statement-breakpoint')) {
+      const sentenciaNormalizada = sentencia.trim();
+      if (sentenciaNormalizada.length > 0) {
+        await transaccion.unsafe(sentenciaNormalizada);
+      }
+    }
+
+    const filas = await transaccion<{ window_started_at: Date; expires_at: Date }[]>`
+      SELECT window_started_at, expires_at FROM auth_throttle_windows
+    `;
+    expect(filas).toHaveLength(1);
+    const fila = filas[0];
+    if (fila === undefined) {
+      throw new Error('La migración debe conservar el contador existente.');
+    }
+
+    expect(fila.expires_at.getTime()).toBe(fila.window_started_at.getTime() + 15 * 60_000);
+    await transaccion.unsafe(`DROP SCHEMA "${identificadorEsquema}" CASCADE`);
+  });
 }
 
 /** Comprueba que la migración cree entidades y siembre el invariante. */
@@ -95,7 +217,7 @@ async function pruebaMigracionRepetible(): Promise<void> {
     SELECT count(*)::int AS cantidad FROM auth_invariants
   `;
 
-  expect(versiones[0]?.cantidad).toBe(2);
+  expect(versiones[0]?.cantidad).toBe(3);
   expect(invariantes[0]?.cantidad).toBe(1);
 }
 

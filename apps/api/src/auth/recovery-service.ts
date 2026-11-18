@@ -18,6 +18,7 @@ import type {
 } from '../../../../packages/core/src/auth/recovery-ports.js';
 import type { RolUsuario } from '../../../../packages/core/src/auth/models.js';
 import { ErrorRepositorioUsuariosAdmin } from '../../../../packages/core/src/auth/admin-ports.js';
+import type { ActorSesionAdmin } from '../../../../packages/core/src/auth/admin-ports.js';
 import {
   normalizarCorreo,
   validarNuevaContrasena,
@@ -40,8 +41,8 @@ export interface DependenciasRecuperacionAuth {
   readonly limitador: LimitadorIntentosAuth;
   /** Escritor de auditoría sin datos de identidad completos o secretos. */
   readonly auditoria: EscritorAuditoriaAuth;
-  /** Servicio que crea la nueva sesión opaca después de cambiar contraseña. */
-  readonly sesiones: Pick<ServicioSesion, 'crear'>;
+  /** Prepara la sesión opaca que se confirma con el cambio de contraseña. */
+  readonly sesiones: Pick<ServicioSesion, 'preparar'>;
   /** Reloj UTC sustituible para expiración y pruebas. */
   readonly reloj: RelojAuth;
   /** Origen canónico de enlaces, validado desde configuración del servidor. */
@@ -121,7 +122,16 @@ export class ServicioRecuperacionAuth {
     );
   }
 
-  /** Cambia la contraseña propia tras verificar la actual y rota todas las sesiones. */
+  /**
+   * Reautentica a la persona y confirma conjuntamente contraseña y sesión de reemplazo.
+   * @param userId Cuenta de la sesión autenticada.
+   * @param contrasenaActual Credencial que autoriza el cambio.
+   * @param nuevaContrasena Credencial que se valida y se hashea.
+   * @param direccionIp Origen para la limitación de intentos.
+   * @param requestId Identificador de correlación de auditoría.
+   * @returns Credencial de la nueva sesión después del commit.
+   * @throws ErrorCredencialesAuth cuando la credencial ya no coincide o no se admite la solicitud.
+   */
   public async cambiarContrasena(
     userId: string,
     contrasenaActual: string,
@@ -147,19 +157,20 @@ export class ServicioRecuperacionAuth {
     }
 
     const passwordHash = await this.dependencias.hasheador.hash(nuevaContrasena);
+    const { registro, credencial } = this.dependencias.sesiones.preparar(userId);
     const actualizado = await this.dependencias.repositorio.cambiarContrasena(
-      userId,
+      registro,
+      cuenta.passwordHash,
       passwordHash,
-      ahora,
       this.crearEvento(userId, userId, 'AUTH_PASSWORD_CHANGE', 'SUCCESS', { requestId }),
     );
     if (!actualizado) {
       throw new ErrorCredencialesAuth('ACCOUNT_NOT_AVAILABLE', 401);
     }
 
-    await this.dependencias.limitador.reiniciarIntentos('RECOVERY', userId, direccionIp);
+    await this.dependencias.limitador.descontarReservaExitosa('RECOVERY', userId, direccionIp);
 
-    return this.dependencias.sesiones.crear(userId);
+    return credencial;
   }
 
   /** Solicita cambio o verificación del correo después de validar la contraseña actual. */
@@ -186,16 +197,22 @@ export class ServicioRecuperacionAuth {
     }
     const existente = await this.dependencias.repositorio.buscarCuentaPorCorreo(email);
     if (existente !== null && existente.id !== userId) {
-      throw new ErrorCredencialesAuth('EMAIL_TAKEN', 409);
+      await this.registrarCambioCorreoNoEnumerativo(userId, userId, cuenta.role, requestId);
+      return 'ACEPTADA';
     }
 
-    await this.crearYEnviarToken(
-      cuenta,
-      esVerificacionActual ? 'EMAIL_VERIFICATION' : 'EMAIL_CHANGE',
-      esVerificacionActual ? null : email,
-      { userId, role: cuenta.role },
-      requestId,
-    );
+    try {
+      await this.crearYEnviarToken(
+        cuenta,
+        esVerificacionActual ? 'EMAIL_VERIFICATION' : 'EMAIL_CHANGE',
+        esVerificacionActual ? null : email,
+        { userId, role: cuenta.role, propia: true },
+        requestId,
+      );
+    } catch (error) {
+      if (!esCorreoOcupado(error)) throw error;
+      await this.registrarCambioCorreoNoEnumerativo(userId, userId, cuenta.role, requestId);
+    }
 
     return 'ACEPTADA';
   }
@@ -236,10 +253,10 @@ export class ServicioRecuperacionAuth {
   /** Emite un enlace de activación para una invitación pendiente o para reenviarla. */
   public async solicitarInvitacion(
     userId: string,
-    actor: { readonly userId: string; readonly role: RolUsuario } | null,
+    actor: ActorSesionAdmin,
     direccionIp: string,
     requestId: string,
-  ): Promise<'ACEPTADA' | 'LIMITADA'> {
+  ): Promise<'ACEPTADA' | 'LIMITADA' | 'DELIVERY_FAILED'> {
     const cuenta = await this.dependencias.repositorio.buscarCuentaPorId(userId);
     if (cuenta === null) {
       throw new ErrorCredencialesAuth('USER_NOT_FOUND', 404);
@@ -252,18 +269,25 @@ export class ServicioRecuperacionAuth {
       return 'LIMITADA';
     }
 
-    await this.crearYEnviarToken(cuenta, 'ACTIVATION', null, actor, requestId);
+    const entregada = await this.crearYEnviarToken(
+      cuenta,
+      'ACTIVATION',
+      null,
+      actor,
+      requestId,
+      true,
+    );
 
-    return 'ACEPTADA';
+    return entregada ? 'ACEPTADA' : 'DELIVERY_FAILED';
   }
 
   /** Envía al ADMIN un enlace de restablecimiento o de activación sin asignar credenciales. */
   public async solicitarRestablecimientoAdmin(
     userId: string,
-    actor: { readonly userId: string; readonly role: RolUsuario },
+    actor: ActorSesionAdmin,
     direccionIp: string,
     requestId: string,
-  ): Promise<'ACEPTADA' | 'LIMITADA'> {
+  ): Promise<'ACEPTADA' | 'LIMITADA' | 'DELIVERY_FAILED'> {
     const cuenta = await this.dependencias.repositorio.buscarCuentaPorId(userId);
     if (cuenta === null) {
       throw new ErrorCredencialesAuth('USER_NOT_FOUND', 404);
@@ -280,7 +304,16 @@ export class ServicioRecuperacionAuth {
     ) {
       return 'ACEPTADA';
     }
-    await this.crearYEnviarToken(cuenta, purpose, null, actor, requestId);
+    const entregada = await this.crearYEnviarToken(
+      cuenta,
+      purpose,
+      null,
+      actor,
+      requestId,
+      purpose === 'ACTIVATION',
+    );
+
+    if (purpose === 'ACTIVATION' && !entregada) return 'DELIVERY_FAILED';
 
     return 'ACEPTADA';
   }
@@ -289,7 +322,7 @@ export class ServicioRecuperacionAuth {
   public async solicitarCambioCorreoAdmin(
     userId: string,
     correoNuevo: string,
-    actor: { readonly userId: string; readonly role: RolUsuario },
+    actor: ActorSesionAdmin,
     direccionIp: string,
     requestId: string,
   ): Promise<'ACEPTADA' | 'LIMITADA'> {
@@ -305,10 +338,16 @@ export class ServicioRecuperacionAuth {
     }
     const existente = await this.dependencias.repositorio.buscarCuentaPorCorreo(email);
     if (existente !== null && existente.id !== userId) {
-      throw new ErrorCredencialesAuth('EMAIL_TAKEN', 409);
+      await this.registrarCambioCorreoNoEnumerativo(actor.userId, userId, actor.role, requestId);
+      return 'ACEPTADA';
     }
 
-    await this.crearYEnviarToken(cuenta, 'EMAIL_CHANGE', email, actor, requestId);
+    try {
+      await this.crearYEnviarToken(cuenta, 'EMAIL_CHANGE', email, actor, requestId);
+    } catch (error) {
+      if (!esCorreoOcupado(error)) throw error;
+      await this.registrarCambioCorreoNoEnumerativo(actor.userId, userId, actor.role, requestId);
+    }
 
     return 'ACEPTADA';
   }
@@ -339,7 +378,7 @@ export class ServicioRecuperacionAuth {
       throw new ErrorCredencialesAuth('TOKEN_INVALID_OR_EXPIRED', 400);
     }
 
-    await this.dependencias.limitador.reiniciarIntentos(
+    await this.dependencias.limitador.descontarReservaExitosa(
       'RECOVERY',
       calcularDigestTokenOpaco(token),
       direccionIp,
@@ -437,14 +476,26 @@ export class ServicioRecuperacionAuth {
     );
   }
 
-  /** Persiste digest/auditoría antes del correo y solo guarda el enlace en memoria. */
+  /**
+   * Solicita la emisión con la cuenta observada y despacha correo después del commit.
+   * @param cuenta Credenciales, estado y dirección que deben seguir vigentes.
+   * @param purpose Flujo que se autoriza con el digest.
+   * @param targetEmail Dirección pendiente exclusivamente para cambio de correo.
+   * @param actor Identidad administrativa o propia cuando corresponda.
+   * @param requestId Identificador de correlación sin datos de cuenta.
+   * @remarks Una solicitud obsoleta no despacha ningún enlace.
+   */
   private async crearYEnviarToken(
     cuenta: CuentaCredencialesAuth,
     purpose: EntradaTokenRecuperacionAuth['purpose'],
     targetEmail: string | null,
-    actor: { readonly userId: string; readonly role: RolUsuario } | null,
+    actor:
+      | ActorSesionAdmin
+      | { readonly propia: true; readonly userId: string; readonly role: RolUsuario }
+      | null,
     requestId: string,
-  ): Promise<void> {
+    esperarEntrega = false,
+  ): Promise<boolean> {
     const ahora = this.dependencias.reloj.ahora();
     const token = crearTokenOpaco();
     const entrada: EntradaTokenRecuperacionAuth = {
@@ -462,44 +513,95 @@ export class ServicioRecuperacionAuth {
       requestId,
       ...(actor === null ? {} : { actorRole: actor.role }),
     };
-    await this.dependencias.repositorio.crearToken(
-      entrada,
-      this.crearEvento(actor?.userId ?? null, cuenta.id, accion, 'SUCCESS', metadata),
-    );
+    let emitido: boolean;
+    try {
+      emitido = await this.dependencias.repositorio.crearToken(
+        entrada,
+        this.crearEvento(actor?.userId ?? null, cuenta.id, accion, 'SUCCESS', metadata),
+        cuenta,
+        actor === null || 'propia' in actor ? null : actor.sessionId,
+      );
+    } catch (error) {
+      if (
+        error instanceof ErrorRepositorioUsuariosAdmin &&
+        (error.code === 'FORBIDDEN' || error.code === 'AUTH_REQUIRED')
+      ) {
+        throw new ErrorCredencialesAuth(error.code, error.code === 'FORBIDDEN' ? 403 : 401);
+      }
+      throw error;
+    }
+    if (!emitido) return false;
     const mensaje: MensajeCorreoAuth = {
       tipo: tipoCorreoToken(purpose),
       destinatario: purpose === 'EMAIL_CHANGE' ? (targetEmail ?? cuenta.email) : cuenta.email,
       enlace: crearEnlaceCorreoAuth(this.dependencias.publicAppOrigin, purpose, token.valor),
       venceEn: entrada.expiresAt,
     };
-    this.enviarEnSegundoPlano(mensaje, actor, requestId);
+    if (!esperarEntrega) {
+      this.enviarEnSegundoPlano(mensaje, cuenta.id, actor, requestId);
+      return true;
+    }
+
+    try {
+      await this.dependencias.correo.enviar(mensaje);
+      return true;
+    } catch {
+      await this.registrarFalloEntrega(cuenta.id, actor, requestId);
+      return false;
+    }
   }
 
   /** Entrega correo sin bloquear la respuesta pública ni propagar error sensible del transporte. */
   private enviarEnSegundoPlano(
     mensaje: MensajeCorreoAuth,
+    userId: string,
     actor: { readonly userId: string; readonly role: RolUsuario } | null,
     requestId: string,
   ): void {
-    const registrarFallo = async (): Promise<void> => {
+    try {
+      void this.dependencias.correo
+        .enviar(mensaje)
+        .catch(() => this.registrarFalloEntrega(userId, actor, requestId));
+    } catch {
+      void this.registrarFalloEntrega(userId, actor, requestId);
+    }
+  }
+
+  /** Registra un fallo de entrega sin conservar destinatarios, URL, token o causa SMTP. */
+  private async registrarFalloEntrega(
+    userId: string,
+    actor: { readonly userId: string; readonly role: RolUsuario } | null,
+    requestId: string,
+  ): Promise<void> {
+    try {
       await this.dependencias.auditoria.registrar(
         this.crearEvento(
           actor?.userId ?? null,
-          actor === null ? null : undefined,
+          actor === null ? null : userId,
           'RECOVERY_DELIVERY_FAILED',
           'FAILURE',
           { requestId },
         ),
       );
-    };
-
-    try {
-      void this.dependencias.correo
-        .enviar(mensaje)
-        .catch(() => registrarFallo().catch(() => undefined));
     } catch {
-      void registrarFallo().catch(() => undefined);
+      // El fallo de auditoría no debe convertir un error SMTP en un error con datos sensibles.
     }
+  }
+
+  /** Registra una solicitud de cambio suprimida con la misma forma de auditoría que una emitida. */
+  private registrarCambioCorreoNoEnumerativo(
+    actorUserId: string,
+    userId: string,
+    role: RolUsuario,
+    requestId: string,
+  ): Promise<void> {
+    return this.dependencias.auditoria.registrar(
+      this.crearEvento(actorUserId, userId, 'AUTH_EMAIL_CHANGE_REQUESTED', 'SUCCESS', {
+        purpose: 'EMAIL_CHANGE',
+        actorRole: role,
+        requestId,
+      }),
+    );
   }
 
   /** Construye evento de auditoría fijo sin correo, IP, contraseña, URL ni token. */
@@ -528,6 +630,11 @@ function traducirErrorFinalizacionCorreo(error: unknown): Error {
   }
 
   return error instanceof Error ? error : new Error('AUTH_CREDENTIAL_OPERATION_FAILED');
+}
+
+/** Identifica únicamente conflictos de correo que deben recibir la respuesta genérica. */
+function esCorreoOcupado(error: unknown): boolean {
+  return error instanceof ErrorRepositorioUsuariosAdmin && error.code === 'EMAIL_TAKEN';
 }
 
 /** Mapea el propósito a una acción fija y apta para auditoría. */

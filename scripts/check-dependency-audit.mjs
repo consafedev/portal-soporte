@@ -100,10 +100,10 @@ function denegar(reason) {
 }
 
 /**
- * Valida la estructura completa del informe y cuenta advisories por severidad.
+ * Valida el informe filtrado por el umbral high y cuenta alertas bloqueantes.
  *
  * @param report - Informe JSON devuelto por pnpm audit.
- * @returns Objeto con error descriptivo o conteos por severidad.
+ * @returns Objeto con error descriptivo o conteos por severidad reportada.
  */
 function validarInforme(report) {
   if (!tieneClavesExactas(report, CLAVES_INFORME)) {
@@ -195,12 +195,18 @@ function validarInforme(report) {
     conteos[advisory.severity] += 1;
   }
 
-  const totalVulnerabilidades = CLAVES_SEVERIDAD.reduce(
-    (total, severidad) => total + vulnerabilidades[severidad],
-    0,
-  );
-  if (totalHallazgos !== totalVulnerabilidades) {
-    return { error: 'el total de vulnerabilidades no coincide con las instancias reportadas' };
+  for (const severidad of ['info', 'low', 'moderate']) {
+    if (conteos[severidad] !== 0) {
+      return { error: 'pnpm incluyó una alerta inferior al umbral high configurado' };
+    }
+  }
+
+  for (const severidad of ['high', 'critical']) {
+    if (conteos[severidad] !== vulnerabilidades[severidad]) {
+      return {
+        error: `el resumen de alertas ${severidad} no coincide con los advisories reportados`,
+      };
+    }
   }
 
   return { conteos, totalHallazgos };

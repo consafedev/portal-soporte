@@ -62,6 +62,7 @@ export function cargarConfiguracionAuth(
     exigirVariable(variables, 'API_INTERNAL_ORIGIN'),
     entorno,
   );
+  const trustedProxyCidrs = validarListaProxies(variables['TRUSTED_PROXY_CIDRS'], entorno);
   const nombres = NOMBRES_COOKIE[entorno];
 
   return {
@@ -71,9 +72,7 @@ export function cargarConfiguracionAuth(
     cookieSesionNombre: nombres.sesion,
     cookieCsrfNombre: nombres.csrf,
     cookiesSecure: entorno === 'production',
-    trustedProxyCidrs: Object.freeze(
-      validarListaProxies(variables['TRUSTED_PROXY_CIDRS'], entorno),
-    ),
+    trustedProxyCidrs: Object.freeze(trustedProxyCidrs),
   };
 }
 
@@ -195,7 +194,7 @@ function parsearOrigen(valor: string, nombre: string): URL {
   return url;
 }
 
-/** Valida y copia la lista CIDR sin aceptar comodines, conteos de saltos ni valores vacíos. */
+/** Valida la lista CIDR; una lista ausente confía en el peer del socket y no en proxies. */
 function validarListaProxies(valor: string | undefined, entorno: EntornoAuth): string[] {
   if (valor === undefined || valor.trim().length === 0) {
     return [];
@@ -260,7 +259,20 @@ function validarCidrProxy(valor: string, entorno: EntornoAuth): string {
     throw new Error('TRUSTED_PROXY_CIDRS solo admite direcciones IP o CIDR válidos.');
   }
 
-  if (entorno !== 'production' && !esLoopback(direccion)) {
+  const longitudPrefijo = prefijo === undefined ? bitsMaximos : Number(prefijo);
+  const direccionSinCorchetes = direccion.toLowerCase().replace(/^\[|\]$/gu, '');
+  if (
+    longitudPrefijo === 0 ||
+    direccionSinCorchetes === '0.0.0.0' ||
+    direccionSinCorchetes === '::'
+  ) {
+    throw new Error('TRUSTED_PROXY_CIDRS no admite direcciones universales o no especificadas.');
+  }
+
+  const esRangoLoopbackCompleto =
+    (versionIp === 4 && esLoopback(direccion) && longitudPrefijo >= 8) ||
+    (versionIp === 6 && direccionSinCorchetes === '::1' && longitudPrefijo === 128);
+  if (entorno !== 'production' && !esRangoLoopbackCompleto) {
     throw new Error('TRUSTED_PROXY_CIDRS solo puede confiar en loopback fuera de producción.');
   }
 

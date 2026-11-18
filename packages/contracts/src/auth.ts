@@ -52,6 +52,15 @@ export const publicUserResponseSchema = Type.Object(propiedadesUsuarioPublico, {
 /** Tipo de identidad pública serializado en JSON. */
 export type RespuestaUsuarioPublico = Static<typeof publicUserResponseSchema>;
 
+/** Envoltura de identidad devuelta por login y consulta de la sesión vigente. */
+export const authIdentityResponseSchema = Type.Object(
+  { user: publicUserResponseSchema },
+  { additionalProperties: false, description: 'Identidad autenticada sin credenciales.' },
+);
+
+/** Tipo de la envoltura de identidad autenticada. */
+export type RespuestaIdentidadAuth = Static<typeof authIdentityResponseSchema>;
+
 /** Respuesta acotada para que ADMIN gestione cuentas del portal. */
 export const adminUserResponseSchema = Type.Object(
   {
@@ -65,6 +74,9 @@ export const adminUserResponseSchema = Type.Object(
       description: 'Fecha de verificación UTC o null si falta verificar.',
     }),
     status: estadoUsuarioSchema,
+    hasPassword: Type.Boolean({
+      description: 'Indica si la cuenta tiene una credencial configurada, sin incluirla.',
+    }),
     createdAt: Type.String({ pattern: PATRON_FECHA_UTC, description: 'Fecha UTC de creación.' }),
   },
   {
@@ -75,6 +87,32 @@ export const adminUserResponseSchema = Type.Object(
 
 /** Tipo del DTO administrativo serializado en JSON. */
 export type RespuestaUsuarioAdmin = Static<typeof adminUserResponseSchema>;
+
+/** Estado observable del envío inicial del enlace de activación. */
+export const estadoInvitacionAltaSchema = Type.Union(
+  [Type.Literal('ACCEPTED'), Type.Literal('RATE_LIMITED'), Type.Literal('DELIVERY_FAILED')],
+  { description: 'Resultado seguro de la entrega de la invitación administrativa.' },
+);
+
+/** Respuesta HTTP 201 que confirma el alta y comunica el estado real de la invitación. */
+export const adminCreateUserResponseSchema = Type.Object(
+  {
+    user: adminUserResponseSchema,
+    invitationStatus: estadoInvitacionAltaSchema,
+  },
+  {
+    additionalProperties: false,
+    description: 'Respuesta 201 con la cuenta creada sin secretos y el resultado de su enlace.',
+  },
+);
+
+/** Tipo de respuesta administrativa de alta y envío de invitación. */
+export type RespuestaAltaUsuarioAdmin = Static<typeof adminCreateUserResponseSchema>;
+
+/** Lista explícita de DTOs permitidos en el listado administrativo de usuarios. */
+export const adminUserListResponseSchema = Type.Array(adminUserResponseSchema, {
+  description: 'Cuentas visibles únicamente para la administración autorizada.',
+});
 
 /** Entrada para autenticar por username y contraseña. */
 export const loginRequestSchema = Type.Object(
@@ -275,3 +313,12 @@ export const recoveryAcceptedResponseSchema = Type.Object(
 
 /** Tipo de respuesta que no revela cuentas durante recuperación. */
 export type RespuestaRecuperacionAceptada = Static<typeof recoveryAcceptedResponseSchema>;
+
+/** Conteo no sensible de sesiones revocadas por ADMIN. */
+export const adminRevokedSessionsResponseSchema = Type.Object(
+  { revokedSessions: Type.Integer({ minimum: 0 }) },
+  { additionalProperties: false, description: 'Resultado público de revocación de sesiones.' },
+);
+
+/** Tipo de respuesta de una operación administrativa de sesiones. */
+export type RespuestaSesionesRevocadasAuth = Static<typeof adminRevokedSessionsResponseSchema>;

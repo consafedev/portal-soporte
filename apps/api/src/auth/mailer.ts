@@ -75,6 +75,19 @@ export class AdaptadorCorreoSmtp implements ServicioCorreoAuth {
   }
 }
 
+/** Rechaza los flujos de correo cuando el SMTP no está configurado fuera de producción. */
+export class ServicioCorreoNoConfigurado implements ServicioCorreoAuth {
+  /**
+   * Falla de forma cerrada sin guardar ni publicar destinatarios, enlaces o tokens.
+   *
+   * @returns Promesa rechazada con un código SMTP fijo para manejo no enumerativo.
+   * @throws ErrorServicioCorreoAuth cuando no existe SMTP configurado.
+   */
+  public async enviar(): Promise<void> {
+    throw new ErrorServicioCorreoAuth();
+  }
+}
+
 /** Crea un transporte SMTP con timeout y TLS obligatorio para STARTTLS o TLS implícito. */
 export function crearAdaptadorCorreoSmtp(
   configuracion: ConfiguracionTransporteSmtpAuth & { readonly remitente: string },

@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { afterAll, describe, expect, it } from 'vitest';
 import { PostgresAuthRepository } from '../../apps/api/src/auth/postgres-auth-repository.js';
 import { ServicioSesion } from '../../apps/api/src/auth/session-service.js';
 import { crearClienteBaseDatosAuth } from '../../apps/api/src/db/client.js';
-import { sessions, users } from '../../apps/api/src/db/schema.js';
+import { auditEvents, recoveryTokens, sessions, users } from '../../apps/api/src/db/schema.js';
 import type { RelojAuth } from '../../packages/core/src/auth/ports.js';
 
 const baseUrl = process.env['TEST_DATABASE_URL'];
@@ -86,6 +86,170 @@ function definirPruebasDeRepositorioSesion(): void {
   it('guarda solo el digest y resuelve cuenta y rol actuales', pruebaDigestYRolVigente);
   it('deniega sesión revocada y sesión de cuenta desactivada', pruebaRevocacionYDesactivacion);
   it('renueva el límite inactivo sin mover la expiración absoluta', pruebaRenovacionPostgres);
+  it('exige el hash vigente para confirmar el login y su auditoría', async () => {
+    const repositorio = exigirRepositorio();
+    const userId = await crearUsuarioIntegracion();
+    try {
+      const sesion = sesionSintetica(userId);
+      const evento = eventoSintetico(userId);
+      const usuario = await repositorio.confirmarLogin(
+        sesion,
+        'hash-anterior',
+        `test_${userId.slice(0, 8)}`,
+        evento,
+      );
+      expect(usuario).toBeNull();
+      expect(
+        await exigirBaseDatos()
+          .select({ id: sessions.id })
+          .from(sessions)
+          .where(eq(sessions.userId, userId)),
+      ).toHaveLength(0);
+    } finally {
+      await borrarUsuarioIntegracion(userId);
+    }
+  });
+  it('descarta un cambio voluntario basado en un hash anterior', async () => {
+    const userId = await crearUsuarioIntegracion();
+    try {
+      const actualizado = await exigirRepositorio().cambiarContrasena(
+        sesionSintetica(userId),
+        'hash-anterior',
+        'hash-nuevo',
+        eventoSintetico(userId),
+      );
+      expect(actualizado).toBe(false);
+      expect((await exigirRepositorio().buscarCuentaPorId(userId))?.passwordHash).toBe(
+        'hash-sintetico-de-integracion',
+      );
+    } finally {
+      await borrarUsuarioIntegracion(userId);
+    }
+  });
+  it('descarta la emisión cuando cambió el correo leído', async () => {
+    const repositorio = exigirRepositorio();
+    const userId = await crearUsuarioIntegracion();
+    try {
+      const cuenta = await repositorio.buscarCuentaPorId(userId);
+      if (!cuenta) throw new Error('Falta la cuenta sintética.');
+      const token = {
+        id: randomUUID(),
+        userId,
+        tokenHash: 'b'.repeat(64),
+        targetEmail: null,
+        purpose: 'EMAIL_VERIFICATION' as const,
+        createdAt: instanteInicial,
+        expiresAt: new Date(instanteInicial.getTime() + 60_000),
+      };
+      const emitido = await repositorio.crearToken(
+        token,
+        eventoSintetico(userId),
+        {
+          ...cuenta,
+          emailNormalized: 'anterior@example.test',
+        },
+        null,
+      );
+      expect(emitido).toBe(false);
+      expect(
+        await exigirBaseDatos()
+          .select({ id: recoveryTokens.id })
+          .from(recoveryTokens)
+          .where(eq(recoveryTokens.userId, userId)),
+      ).toHaveLength(0);
+    } finally {
+      await borrarUsuarioIntegracion(userId);
+    }
+  });
+  it('conserva un único token vigente tras dos emisiones del mismo propósito', async () => {
+    const repositorio = exigirRepositorio();
+    const userId = await crearUsuarioIntegracion();
+    try {
+      const cuenta = await repositorio.buscarCuentaPorId(userId);
+      if (!cuenta) throw new Error('Falta la cuenta sintética.');
+      const resultados = await Promise.all(
+        ['c', 'd'].map((letra) =>
+          repositorio.crearToken(
+            {
+              id: randomUUID(),
+              userId,
+              tokenHash: letra.repeat(64),
+              purpose: 'EMAIL_VERIFICATION',
+              targetEmail: null,
+              createdAt: instanteInicial,
+              expiresAt: new Date(instanteInicial.getTime() + 60_000),
+            },
+            eventoSintetico(userId),
+            cuenta,
+            null,
+          ),
+        ),
+      );
+      expect(resultados).toEqual([true, true]);
+      expect(
+        await exigirBaseDatos()
+          .select({ id: recoveryTokens.id })
+          .from(recoveryTokens)
+          .where(and(eq(recoveryTokens.userId, userId), isNull(recoveryTokens.usedAt))),
+      ).toHaveLength(1);
+    } finally {
+      await borrarUsuarioIntegracion(userId);
+    }
+  });
+  it('revierte hash, sesiones y auditoría si falla la inserción de la sesión rotada', async () => {
+    const base = exigirBaseDatos();
+    const repositorio = exigirRepositorio();
+    const userId = await crearUsuarioIntegracion();
+    try {
+      const sesion = sesionSintetica(userId);
+      await repositorio.crear(sesion);
+      await expect(
+        repositorio.cambiarContrasena(
+          sesion,
+          'hash-sintetico-de-integracion',
+          'hash-nuevo',
+          eventoSintetico(userId),
+        ),
+      ).rejects.toThrow();
+      expect((await repositorio.buscarCuentaPorId(userId))?.passwordHash).toBe(
+        'hash-sintetico-de-integracion',
+      );
+      expect((await repositorio.buscarPorHash(sesion.tokenHash))?.sesion.revokedAt).toBeNull();
+      expect(
+        await base
+          .select({ id: auditEvents.id })
+          .from(auditEvents)
+          .where(eq(auditEvents.targetUserId, userId)),
+      ).toHaveLength(0);
+    } finally {
+      await borrarUsuarioIntegracion(userId);
+    }
+  });
+}
+
+/** Devuelve un registro de sesión sintético para comprobar transacciones del repositorio. */
+function sesionSintetica(userId: string) {
+  return {
+    id: randomUUID(),
+    userId,
+    tokenHash: 'a'.repeat(64),
+    createdAt: instanteInicial,
+    lastUsedAt: instanteInicial,
+    idleExpiresAt: new Date(instanteInicial.getTime() + 60_000),
+    absoluteExpiresAt: new Date(instanteInicial.getTime() + 120_000),
+  };
+}
+
+/** Genera un evento sintético dirigido a la cuenta aislada del caso. */
+function eventoSintetico(userId: string) {
+  return {
+    actorUserId: userId,
+    targetUserId: userId,
+    action: 'AUTH_TEST',
+    outcome: 'SUCCESS' as const,
+    metadata: {},
+    createdAt: instanteInicial,
+  };
 }
 
 /** Comprueba almacenamiento exclusivo del digest y lectura de la identidad actual. */

@@ -12,21 +12,9 @@ permissions:
 jobs:
   calidad:
     name: Calidad y seguridad básica
-    runs-on: ubuntu-latest
-    services:
-      postgres-auth:
-        image: postgres:18.7
-        env:
-          POSTGRES_USER: ps003_test
-          POSTGRES_DB: portal_ps003_test
-          POSTGRES_HOST_AUTH_METHOD: trust
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U ps003_test -d portal_ps003_test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+    runs-on: ubuntu-24.04
+    env:
+      PG_BIN_DIR: /usr/lib/postgresql/18/bin
     steps:
       - name: Obtener el repositorio
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -48,8 +36,38 @@ jobs:
           test "$(node --version)" = "v24.22.3"
           test "$(pnpm --version)" = "12.21.0"
 
+      - name: Preparar binarios PostgreSQL 18.7 en el runner efímero
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-common ca-certificates curl gpg
+          sudo install -d -m 0755 /usr/share/postgresql-common/pgdg
+          sudo curl --fail --silent --show-error --location \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            --output /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+          fingerprint="$(gpg --show-keys --with-colons /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc | awk -F: '$1 == "fpr" { print $10; exit }')"
+          test "$fingerprint" = "B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8"
+          printf '%s\n' \
+            'Types: deb' \
+            'URIs: https://apt.postgresql.org/pub/repos/apt' \
+            'Suites: noble-pgdg' \
+            'Architectures: amd64' \
+            'Components: main' \
+            'Signed-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc' \
+            | sudo tee /etc/apt/sources.list.d/pgdg.sources >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y postgresql-18=18.7-1.pgdg24.04+2
+          /usr/lib/postgresql/18/bin/postgres --version
+          version="$(/usr/lib/postgresql/18/bin/postgres --version | sed -nE 's/^postgres \(PostgreSQL\) ([0-9]+\.[0-9]+).*/\1/p')"
+          test "$version" = "18.7"
+          if sudo pg_ctlcluster 18 main status >/dev/null 2>&1; then
+            sudo pg_ctlcluster 18 main stop
+          fi
+
       - name: Instalar dependencias fijadas
         run: pnpm install --frozen-lockfile
+
+      - name: Instalar Chromium de Playwright
+        run: pnpm exec playwright install --with-deps chromium
 
       - name: Verificar skills y política de agentes
         run: pnpm verify:skills
@@ -64,9 +82,10 @@ jobs:
         run: pnpm test
 
       - name: Ejecutar pruebas de integración en PostgreSQL aislado
-        env:
-          TEST_DATABASE_URL: postgres://ps003_test@127.0.0.1:5432/portal_ps003_test
         run: pnpm test:integration
+
+      - name: Verificar CLI de migración en PostgreSQL aislado
+        run: pnpm test:migrate-cli
 
       - name: Construir aplicaciones
         env:
@@ -76,6 +95,9 @@ jobs:
       # Next.js genera .next/types, que next-env.d.ts incluye en el typecheck.
       - name: Comprobar tipos
         run: pnpm typecheck
+
+      - name: Validar flujos de autenticación en navegador aislado
+        run: pnpm test:e2e
 
       - name: Buscar secretos
         run: pnpm check:secrets

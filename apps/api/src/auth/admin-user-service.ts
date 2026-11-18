@@ -11,15 +11,13 @@ import {
   esNombreUsuarioValido,
 } from '../../../../packages/core/src/auth/policies.js';
 import type {
+  ActorSesionAdmin,
   CambiosUsuarioAdminPersistidos,
   EntradaUsuarioAdminPersistida,
   RepositorioUsuariosAdmin,
 } from '../../../../packages/core/src/auth/admin-ports.js';
 import { ErrorRepositorioUsuariosAdmin } from '../../../../packages/core/src/auth/admin-ports.js';
-import type {
-  RespuestaUsuarioAdmin,
-  RolUsuario,
-} from '../../../../packages/core/src/auth/models.js';
+import type { RespuestaUsuarioAdmin } from '../../../../packages/core/src/auth/models.js';
 import type { RelojAuth } from '../../../../packages/core/src/auth/ports.js';
 
 export type {
@@ -28,11 +26,7 @@ export type {
 } from '../../../../packages/core/src/auth/admin-ports.js';
 
 /** Rol e identidad autenticada que autorizó una operación administrativa. */
-export interface ActorUsuarioAdmin {
-  /** UUID del actor verificado por el prehandler de sesión. */
-  readonly userId: string;
-  /** Rol actual obtenido desde PostgreSQL para esta petición. */
-  readonly role: RolUsuario;
+export interface ActorUsuarioAdmin extends ActorSesionAdmin {
   /** Identificador de solicitud no secreto para correlación de auditoría. */
   readonly requestId: string;
 }
@@ -42,7 +36,7 @@ export class ErrorUsuarioAdmin extends Error {
   /** Construye un error sin valores de entrada, SQL, contraseñas o metadatos internos. */
   public constructor(
     public readonly code: string,
-    public readonly statusCode: 400 | 403 | 404 | 409 | 503,
+    public readonly statusCode: 400 | 401 | 403 | 404 | 409 | 503,
   ) {
     super(code);
     this.name = 'ErrorUsuarioAdmin';
@@ -102,6 +96,7 @@ export class ServicioUsuariosAdmin {
         this.crearEvento(actor, 'ADMIN_USER_CREATED', entrada.id, {
           role: solicitud.role,
         }),
+        actor.sessionId,
       );
     } catch (error) {
       throw traducirErrorRepositorio(error);
@@ -155,6 +150,7 @@ export class ServicioUsuariosAdmin {
         this.crearEvento(actor, 'ADMIN_USER_UPDATED', idUsuario, {
           changedFields: camposModificados.join(','),
         }),
+        actor.sessionId,
       );
       if (usuario === null) {
         throw new ErrorUsuarioAdmin('USER_NOT_FOUND', 404);
@@ -173,6 +169,7 @@ export class ServicioUsuariosAdmin {
         idUsuario,
         this.reloj.ahora(),
         this.crearEvento(actor, 'ADMIN_USER_SESSIONS_REVOKED', idUsuario, {}),
+        actor.sessionId,
       );
       if (cantidad === null) {
         throw new ErrorUsuarioAdmin('USER_NOT_FOUND', 404);
@@ -212,7 +209,9 @@ function traducirErrorRepositorio(error: unknown): ErrorUsuarioAdmin {
     return new ErrorUsuarioAdmin('ADMIN_OPERATION_FAILED', 503);
   }
 
-  const estadosHttp: Record<typeof error.code, 404 | 409 | 503> = {
+  const estadosHttp: Record<typeof error.code, 401 | 403 | 404 | 409 | 503> = {
+    AUTH_REQUIRED: 401,
+    FORBIDDEN: 403,
     ADMIN_ALREADY_EXISTS: 409,
     LAST_ADMIN_REQUIRED: 409,
     AUTH_INVARIANT_UNAVAILABLE: 503,

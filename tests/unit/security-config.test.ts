@@ -14,8 +14,10 @@ const entornoBase = {
 function definirPruebasDeConfiguracionAuth(): void {
   it('configura cookies distintas y no Secure en desarrollo loopback', pruebaCookiesDesarrollo);
   it('exige HTTPS y cookies seguras en producción', pruebaCookiesProduccion);
+  it('mantiene cerrada una allowlist vacía de proxy en producción', pruebaProxyProduccionVacio);
   it('usa el nombre de cookie de pruebas solo en loopback', pruebaCookiesPrueba);
   it('valida y conserva proxies CIDR explícitos', pruebaListaProxies);
+  it('limita CIDR de desarrollo a rangos enteros de loopback', pruebaRangosLoopbackProxy);
   it('rechaza orígenes públicos/inseguros o cabeceras proxy ambiguas', pruebaRechazaConfigInsegura);
   it('exige configuración SMTP segura en producción y permite ausencia local', pruebaSmtp);
   it('decodifica solo una clave HMAC canónica de 32 bytes', pruebaClaveHmac);
@@ -75,12 +77,24 @@ function pruebaCookiesProduccion(): void {
     NODE_ENV: 'production',
     PUBLIC_APP_ORIGIN: 'https://portal.example.test',
     API_INTERNAL_ORIGIN: 'http://auth-api.internal:4000',
+    TRUSTED_PROXY_CIDRS: '10.20.30.40/32',
   });
 
   expect(configuracion.cookieSesionNombre).toBe('__Host-portal_session');
   expect(configuracion.cookieCsrfNombre).toBe('__Host-portal_csrf');
   expect(configuracion.cookiesSecure).toBe(true);
   expect(configuracion.publicAppOrigin).toBe('https://portal.example.test');
+}
+
+/** Comprueba que una allowlist vacía en producción no confíe en peers reenviados. */
+function pruebaProxyProduccionVacio(): void {
+  const configuracion = cargarConfiguracionAuth({
+    NODE_ENV: 'production',
+    PUBLIC_APP_ORIGIN: 'https://portal.example.test',
+    API_INTERNAL_ORIGIN: 'http://auth-api.internal:4000',
+  });
+
+  expect(configuracion.trustedProxyCidrs).toEqual([]);
 }
 
 /** Comprueba que NODE_ENV=test no reutilice nombres de desarrollo o producción. */
@@ -102,6 +116,30 @@ function pruebaListaProxies(): void {
   });
 
   expect(configuracion.trustedProxyCidrs).toEqual(['10.20.0.0/16', '2001:db8::/48']);
+}
+
+/** Comprueba que los rangos confiables completos sean loopback y nunca universales. */
+function pruebaRangosLoopbackProxy(): void {
+  expect(
+    cargarConfiguracionAuth({
+      NODE_ENV: 'development',
+      ...entornoBase,
+      TRUSTED_PROXY_CIDRS: '127.0.0.0/8, ::1/128',
+    }).trustedProxyCidrs,
+  ).toEqual(['127.0.0.0/8', '::1/128']);
+
+  for (const proxies of ['0.0.0.0/0', '::/0', '127.0.0.1/7', '::1/0', '0.0.0.0', '::']) {
+    const entorno = proxies === '127.0.0.1/7' || proxies === '::1/0' ? 'development' : 'production';
+    expect(() =>
+      cargarConfiguracionAuth({
+        NODE_ENV: entorno,
+        PUBLIC_APP_ORIGIN:
+          entorno === 'development' ? entornoBase.PUBLIC_APP_ORIGIN : 'https://portal.example.test',
+        API_INTERNAL_ORIGIN: entornoBase.API_INTERNAL_ORIGIN,
+        TRUSTED_PROXY_CIDRS: proxies,
+      }),
+    ).toThrow();
+  }
 }
 
 /** Comprueba rechazo de esquemas, hosts internos y valores proxy no admitidos. */

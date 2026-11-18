@@ -1,15 +1,10 @@
-import type { JSX } from 'react';
+import { redirect } from 'next/navigation';
 
 /**
- * Muestra una confirmación neutral de que la ruta web del bootstrap está disponible.
+ * Envía la ruta raíz a la pantalla de autenticación sin crear un dashboard.
  *
- * @returns Una estructura semántica mínima, sin navegación ni operaciones de producto.
+ * @returns No devuelve interfaz; Next.js ejecuta la navegación hacia login.
  */
-export default function Page(): JSX.Element {
-  return (
-    <main>
-      <h1>Portal de Soporte e-Billia</h1>
-      <p>Base técnica en preparación.</p>
-    </main>
-  );
+export default function Page(): never {
+  redirect('/login');
 }

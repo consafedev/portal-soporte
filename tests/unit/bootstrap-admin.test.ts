@@ -26,6 +26,7 @@ function crearRepositorioCapturado(
         email: entrada.email,
         emailVerifiedAt: null,
         status: 'ACTIVE',
+        hasPassword: true,
         createdAt: entrada.createdAt,
       };
     },

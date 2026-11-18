@@ -33,6 +33,8 @@ export interface RespuestaUsuarioAdmin extends RespuestaUsuarioPublico {
   readonly emailVerifiedAt: Date | null;
   /** Estado actual de la cuenta. */
   readonly status: EstadoUsuario;
+  /** Indica si la cuenta tiene una credencial configurada, sin exponer su hash. */
+  readonly hasPassword: boolean;
   /** Fecha UTC de creación de la cuenta. */
   readonly createdAt: Date;
 }

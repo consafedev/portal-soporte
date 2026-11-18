@@ -27,12 +27,15 @@ const usuarioAdmin = `admin_${sufijo}`;
 const usuarioSupport = `support_${sufijo}`;
 const contrasenaSintetica = 'Clave admin sintética Unicode ñ';
 const origen = 'http://127.0.0.1:3000';
-const ahora = new Date('2026-11-17T14:00:00.000Z');
+const ahora = new Date();
+// La cabecera Expires de la cookie expresa solo segundos completos.
+ahora.setUTCMilliseconds(0);
+let instanteAuth = new Date(ahora);
 /** Reloj estable para persistir sesiones y auditoría dentro de las pruebas. */
 const reloj: RelojAuth = {
-  /** Devuelve una copia del instante fijo de integración. */
+  /** Devuelve una copia del instante controlado por la prueba de renovación de cookie. */
   ahora(): Date {
-    return new Date(ahora);
+    return new Date(instanteAuth);
   },
 };
 /** Tipo inferido de la aplicación para comprobar las rutas sin abrir un socket. */
@@ -43,6 +46,9 @@ let servicioAdmin: ServicioUsuariosAdmin | null = null;
 let cookieAdmin: string | null = null;
 let cookieSupport: string | null = null;
 let idNuevoUsuario: string | null = null;
+let limitadorAdmin: LimitadorIntentosPostgres | null = null;
+let fallarCorreoAdmin = false;
+const idsUsuariosCreados: string[] = [];
 const mensajesAdmin: MensajeCorreoAuth[] = [];
 
 /** Recupera el único PostgreSQL efímero de la suite o falla de forma explícita. */
@@ -177,12 +183,16 @@ async function prepararAdministracion(): Promise<void> {
   );
   const usuariosAdmin = new ServicioUsuariosAdmin(repositorio, reloj);
   const limitador = new LimitadorIntentosPostgres(exigirBasePrueba(), Buffer.alloc(32, 29));
+  limitadorAdmin = limitador;
   const recuperacion = new ServicioRecuperacionAuth({
     repositorio,
     hasheador,
     correo: {
       /** Conserva mensajes falsos solo en memoria para inspeccionar propósito/destino. */
       async enviar(mensaje) {
+        if (fallarCorreoAdmin) {
+          throw new Error('Fallo SMTP sintético.');
+        }
         mensajesAdmin.push(mensaje);
       },
     },
@@ -215,9 +225,7 @@ async function prepararAdministracion(): Promise<void> {
 async function cerrarAdministracion(): Promise<void> {
   await aplicacion?.close();
   const usuariosTemporales: string[] = [idAdmin, idSupport];
-  if (idNuevoUsuario !== null) {
-    usuariosTemporales.push(idNuevoUsuario);
-  }
+  usuariosTemporales.push(...idsUsuariosCreados);
   await exigirBasePrueba()
     .delete(auditEvents)
     .where(
@@ -232,6 +240,37 @@ async function cerrarAdministracion(): Promise<void> {
 
 /** Ejecuta requests administrativos con cookie de sesión y CSRF vigentes. */
 function definirPruebasAdmin(): void {
+  it('renueva el vencimiento de la cookie al extender una sesión por actividad', async () => {
+    const cookie = cookieAdmin;
+    if (cookie === null) {
+      throw new Error('La prueba requiere la sesión ADMIN preparada.');
+    }
+    const instanteRenovado = new Date(ahora.getTime() + 20 * 60_000);
+    instanteAuth = instanteRenovado;
+    try {
+      const respuesta = await exigirAplicacion().inject({
+        method: 'GET',
+        url: '/api/v1/admin/users',
+        headers: { cookie },
+      });
+      const setCookie = respuesta.headers['set-cookie'];
+      const cookies = Array.isArray(setCookie)
+        ? setCookie.filter((valor): valor is string => typeof valor === 'string')
+        : typeof setCookie === 'string'
+          ? [setCookie]
+          : [];
+      const cookieRenovada = cookies.find((valor) => valor.startsWith('portal_test_session='));
+      const fechaExpiracion = cookieRenovada?.match(/Expires=([^;]+)/u)?.[1];
+
+      expect(respuesta.statusCode).toBe(200);
+      expect(fechaExpiracion).toBeDefined();
+      expect(new Date(fechaExpiracion ?? '').getTime()).toBe(
+        instanteRenovado.getTime() + 30 * 60_000,
+      );
+    } finally {
+      instanteAuth = new Date(ahora);
+    }
+  });
   it('devuelve 401 sin sesión y audita 403 para SUPPORT en rutas administrativas', async () => {
     const anónimo = await exigirAplicacion().inject({ method: 'GET', url: '/api/v1/admin/users' });
     const cookie = cookieSupport;
@@ -339,22 +378,39 @@ function definirPruebasAdmin(): void {
         role: 'SUPPORT',
       },
     });
-    const idCreado = respuesta.json<{ id: string }>().id;
+    const resultadoAlta = respuesta.json<{
+      user: { id: string };
+      invitationStatus: 'ACCEPTED' | 'RATE_LIMITED' | 'DELIVERY_FAILED';
+    }>();
+    const idCreado = resultadoAlta.user.id;
     idNuevoUsuario = idCreado;
+    idsUsuariosCreados.push(idCreado);
     const fila = await exigirBasePrueba().select().from(users).where(eq(users.id, idCreado));
 
     expect(respuesta.statusCode).toBe(201);
-    expect(respuesta.json()).toMatchObject({
-      username: `new_${sufijo}`,
-      email: `new_${sufijo}@example.test`,
-      status: 'PENDING_ACTIVATION',
-      emailVerifiedAt: null,
+    expect(resultadoAlta).toMatchObject({
+      user: {
+        username: `new_${sufijo}`,
+        email: `new_${sufijo}@example.test`,
+        status: 'PENDING_ACTIVATION',
+        emailVerifiedAt: null,
+        hasPassword: false,
+      },
+      invitationStatus: 'ACCEPTED',
     });
     expect(respuesta.body).not.toContain('passwordHash');
     expect(respuesta.body).not.toContain('password');
     expect(fila).toHaveLength(1);
     expect(fila[0]?.passwordHash).toBeNull();
   });
+  it(
+    'expone el estado de invitación y nunca presenta como enviado un correo limitado o fallido',
+    pruebaEstadosDeEntregaAlta,
+  );
+  it(
+    'permite cancelar y reactivar una invitación invalidando sesiones y tokens anteriores',
+    pruebaCancelarYReactivarInvitacion,
+  );
 
   it('permite a ADMIN enviar reset sin devolver ni almacenar el token en claro', async () => {
     const cookie = cookieAdmin;
@@ -396,6 +452,12 @@ function definirPruebasAdmin(): void {
       throw new Error('La prueba requiere la sesión ADMIN preparada.');
     }
     const mensajesPrevios = mensajesAdmin.length;
+    const ocupado = await exigirAplicacion().inject({
+      method: 'POST',
+      url: `/api/v1/admin/users/${idSupport}/email-change`,
+      headers: await headersDeEscritura(cookie),
+      payload: { newEmail: `${usuarioAdmin}@example.test` },
+    });
     const respuesta = await exigirAplicacion().inject({
       method: 'POST',
       url: `/api/v1/admin/users/${idSupport}/email-change`,
@@ -423,6 +485,8 @@ function definirPruebasAdmin(): void {
       .where(eq(users.id, idSupport));
 
     expect(respuesta.statusCode).toBe(202);
+    expect(ocupado.statusCode).toBe(respuesta.statusCode);
+    expect(ocupado.json()).toEqual(respuesta.json());
     expect(respuesta.body).not.toContain(token);
     expect(filas).toContainEqual({
       tokenHash: expect.stringMatching(/^[0-9a-f]{64}$/u),
@@ -443,12 +507,24 @@ function definirPruebasAdmin(): void {
       url: '/api/v1/admin/users',
       headers: { cookie },
     });
-    const usuariosRespuesta =
-      respuesta.json<Array<{ id: string; email: string; role: string; status: string }>>();
+    const usuariosRespuesta = respuesta.json<
+      Array<{
+        id: string;
+        email: string;
+        role: string;
+        status: string;
+        hasPassword: boolean;
+      }>
+    >();
 
     expect(respuesta.statusCode).toBe(200);
     expect(usuariosRespuesta.some((usuario) => usuario.id === idAdmin)).toBe(true);
     expect(usuariosRespuesta.some((usuario) => usuario.id === idSupport)).toBe(true);
+    expect(usuariosRespuesta.find((usuario) => usuario.id === idAdmin)?.hasPassword).toBe(true);
+    expect(usuariosRespuesta.find((usuario) => usuario.id === idSupport)?.hasPassword).toBe(true);
+    expect(usuariosRespuesta.find((usuario) => usuario.id === idNuevoUsuario)?.hasPassword).toBe(
+      false,
+    );
     expect(respuesta.body).not.toContain('passwordHash');
     expect(respuesta.body).not.toContain(contrasenaSintetica);
   });
@@ -469,15 +545,20 @@ function definirPruebasAdmin(): void {
       createdAt: new Date(ahora),
       updatedAt: new Date(ahora),
     };
+    const sesion = await new ServicioSesion(repositorio, reloj).crear(idAdmin);
     const error = await repositorio
-      .crearUsuario(entrada, {
-        actorUserId: idAdmin,
-        action: 'ADMIN_USER_CREATED',
-        targetUserId: entrada.id,
-        outcome: 'SUCCESS',
-        metadata: {},
-        createdAt: new Date(ahora),
-      })
+      .crearUsuario(
+        entrada,
+        {
+          actorUserId: idAdmin,
+          action: 'ADMIN_USER_CREATED',
+          targetUserId: entrada.id,
+          outcome: 'SUCCESS',
+          metadata: {},
+          createdAt: new Date(ahora),
+        },
+        sesion.sessionId,
+      )
       .then(
         () => null,
         (rechazo: unknown) => rechazo,
@@ -628,7 +709,16 @@ function definirPruebasAdmin(): void {
         servicio.actualizar(
           idSupport,
           { displayName: 'No debe confirmarse' },
-          { userId: idAdmin, role: 'ADMIN', requestId: 'audit-rollback-test' },
+          {
+            userId: idAdmin,
+            role: 'ADMIN',
+            sessionId: (
+              await new ServicioSesion(new PostgresAuthRepository(exigirBasePrueba()), reloj).crear(
+                idAdmin,
+              )
+            ).sessionId,
+            requestId: 'audit-rollback-test',
+          },
         ),
       ).rejects.toThrow();
       const cuenta = await base.select().from(users).where(eq(users.id, idSupport));
@@ -701,6 +791,169 @@ function definirPruebasAdmin(): void {
     expect(respuesta.json()).toMatchObject({ role: 'ADMIN' });
     expect(consulta.statusCode).toBe(401);
   });
+}
+
+/**
+ * Comprueba los resultados expuestos para la entrega SMTP de una cuenta recién creada.
+ *
+ * @returns Promesa resuelta cuando se verifican limitación y fallo de transporte.
+ */
+async function pruebaEstadosDeEntregaAlta(): Promise<void> {
+  const cookie = cookieAdmin;
+  const limitador = limitadorAdmin;
+  if (cookie === null || limitador === null) {
+    throw new Error('La prueba requiere una sesión ADMIN y el limitador sintético.');
+  }
+
+  const registrarIntentoOriginal = limitador.registrarIntento;
+  limitador.registrarIntento = async () => false;
+  let respuestaLimitada;
+  try {
+    respuestaLimitada = await exigirAplicacion().inject({
+      method: 'POST',
+      url: '/api/v1/admin/users',
+      headers: await headersDeEscritura(cookie),
+      payload: {
+        username: `limited_${sufijo}`,
+        email: `limited_${sufijo}@example.test`,
+        displayName: 'Invitación limitada',
+        role: 'SUPPORT',
+      },
+    });
+  } finally {
+    limitador.registrarIntento = registrarIntentoOriginal;
+  }
+  const resultadoLimitado = respuestaLimitada.json<{
+    user?: { id: string };
+    invitationStatus: string;
+  }>();
+  if (resultadoLimitado.user !== undefined) {
+    idsUsuariosCreados.push(resultadoLimitado.user.id);
+  }
+
+  const cantidadMensajes = mensajesAdmin.length;
+  fallarCorreoAdmin = true;
+  let respuestaFallida;
+  try {
+    respuestaFallida = await exigirAplicacion().inject({
+      method: 'POST',
+      url: '/api/v1/admin/users',
+      headers: await headersDeEscritura(cookie),
+      payload: {
+        username: `smtp_${sufijo}`,
+        email: `smtp_${sufijo}@example.test`,
+        displayName: 'Invitación con fallo SMTP',
+        role: 'SUPPORT',
+      },
+    });
+  } finally {
+    fallarCorreoAdmin = false;
+  }
+  const resultadoFallido = respuestaFallida.json<{
+    user?: { id: string };
+    invitationStatus: string;
+  }>();
+  if (resultadoFallido.user !== undefined) {
+    idsUsuariosCreados.push(resultadoFallido.user.id);
+  }
+
+  expect(respuestaLimitada.statusCode).toBe(201);
+  expect(resultadoLimitado.invitationStatus).toBe('RATE_LIMITED');
+  expect(respuestaLimitada.body).not.toContain('passwordHash');
+  expect(respuestaFallida.statusCode).toBe(201);
+  expect(resultadoFallido.invitationStatus).toBe('DELIVERY_FAILED');
+  expect(respuestaFallida.body).not.toContain('passwordHash');
+  expect(mensajesAdmin).toHaveLength(cantidadMensajes);
+}
+
+/**
+ * Comprueba que una invitación cancelada no conserve tokens ni sesiones autorizables.
+ *
+ * @returns Promesa resuelta después de cancelar, reactivar y comprobar los enlaces.
+ */
+async function pruebaCancelarYReactivarInvitacion(): Promise<void> {
+  const cookie = cookieAdmin;
+  const id = idNuevoUsuario;
+  if (cookie === null || id === null) {
+    throw new Error('La prueba requiere una invitación aceptada en la prueba anterior.');
+  }
+  const base = exigirBasePrueba();
+  const instante = new Date(ahora);
+  await base.insert(sessions).values({
+    id: randomUUID(),
+    userId: id,
+    tokenHash: 'c'.repeat(64),
+    createdAt: instante,
+    lastUsedAt: instante,
+    idleExpiresAt: new Date(instante.getTime() + 30 * 60_000),
+    absoluteExpiresAt: new Date(instante.getTime() + 8 * 60 * 60_000),
+  });
+  const tokensAntes = await base
+    .select({ tokenHash: recoveryTokens.tokenHash })
+    .from(recoveryTokens)
+    .where(eq(recoveryTokens.userId, id));
+  const cancelar = await exigirAplicacion().inject({
+    method: 'PATCH',
+    url: `/api/v1/admin/users/${id}`,
+    headers: await headersDeEscritura(cookie),
+    payload: { status: 'DISABLED' },
+  });
+  const estadoCancelado = await base.select().from(users).where(eq(users.id, id));
+  const tokensCancelados = await base
+    .select({ usedAt: recoveryTokens.usedAt })
+    .from(recoveryTokens)
+    .where(eq(recoveryTokens.userId, id));
+  const sesionesCanceladas = await base
+    .select({ revokedAt: sessions.revokedAt })
+    .from(sessions)
+    .where(eq(sessions.userId, id));
+
+  expect(cancelar.statusCode).toBe(200);
+  expect(estadoCancelado[0]?.status).toBe('DISABLED');
+  expect(estadoCancelado[0]?.passwordHash).toBeNull();
+  expect(tokensCancelados).toHaveLength(tokensAntes.length);
+  expect(tokensCancelados.every((token) => token.usedAt !== null)).toBe(true);
+  expect(sesionesCanceladas.every((sesion) => sesion.revokedAt !== null)).toBe(true);
+
+  const reactivar = await exigirAplicacion().inject({
+    method: 'PATCH',
+    url: `/api/v1/admin/users/${id}`,
+    headers: await headersDeEscritura(cookie),
+    payload: { status: 'PENDING_ACTIVATION' },
+  });
+  const reenviar = await exigirAplicacion().inject({
+    method: 'POST',
+    url: `/api/v1/admin/users/${id}/reset`,
+    headers: await headersDeEscritura(cookie),
+  });
+  const mensajesReactivacion = mensajesAdmin.filter(
+    (mensaje) => mensaje.destinatario === `new_${sufijo}@example.test`,
+  );
+  const tokensReactivados = await base
+    .select({ tokenHash: recoveryTokens.tokenHash, usedAt: recoveryTokens.usedAt })
+    .from(recoveryTokens)
+    .where(eq(recoveryTokens.userId, id));
+  fallarCorreoAdmin = true;
+  let reenvioFallido;
+  try {
+    reenvioFallido = await exigirAplicacion().inject({
+      method: 'POST',
+      url: `/api/v1/admin/users/${id}/reset`,
+      headers: await headersDeEscritura(cookie),
+    });
+  } finally {
+    fallarCorreoAdmin = false;
+  }
+
+  expect(reactivar.statusCode).toBe(200);
+  expect(reenviar.statusCode).toBe(202);
+  expect(mensajesReactivacion).toHaveLength(2);
+  expect(tokensReactivados.filter((token) => token.usedAt === null)).toHaveLength(1);
+  expect(tokensReactivados.find((token) => token.usedAt === null)?.tokenHash).not.toBe(
+    tokensAntes[0]?.tokenHash,
+  );
+  expect(reenvioFallido.statusCode).toBe(503);
+  expect(reenvioFallido.json()).toMatchObject({ code: 'SMTP_DELIVERY_FAILED' });
 }
 
 describe('rutas de administración de usuarios sobre PostgreSQL aislado', definirPruebasAdmin);

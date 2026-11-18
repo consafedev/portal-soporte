@@ -1,13 +1,16 @@
-import { Type } from '@sinclair/typebox';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
   adminCreateUserSchema,
+  adminCreateUserResponseSchema,
   adminEmailChangeRequestSchema,
+  adminRevokedSessionsResponseSchema,
   adminUpdateUserSchema,
+  adminUserListResponseSchema,
   adminUserResponseSchema,
   publicErrorResponseSchema,
   recoveryAcceptedResponseSchema,
   userIdParamsSchema,
+  type RespuestaAltaUsuarioAdmin,
   type SolicitudAltaUsuarioAdmin,
   type SolicitudModificacionUsuarioAdmin,
   type SolicitudCambioCorreoAdmin,
@@ -26,12 +29,6 @@ import {
 } from '../auth/authorization.js';
 import type { ServicioSesion } from '../auth/session-service.js';
 import { ErrorCredencialesAuth, ServicioRecuperacionAuth } from '../auth/recovery-service.js';
-
-const respuestaListaUsuariosSchema = Type.Array(adminUserResponseSchema);
-const respuestaRevocacionSchema = Type.Object(
-  { revokedSessions: Type.Integer({ minimum: 0 }) },
-  { additionalProperties: false },
-);
 
 /** Dependencias para registrar rutas protegidas de administración de identidades. */
 export interface DependenciasRutasUsuariosAdmin {
@@ -57,7 +54,7 @@ export async function registrarRutasUsuariosAdmin(
   registrarDecoradorContextoAuth(aplicacion);
 
   await aplicacion.register(async (rutas) => {
-    rutas.setErrorHandler((error, solicitud, respuesta) => {
+    rutas.setErrorHandler(async (error, solicitud, respuesta) => {
       if (
         typeof error === 'object' &&
         error !== null &&
@@ -67,6 +64,28 @@ export async function registrarRutasUsuariosAdmin(
         return respuesta.code(400).send({
           code: 'INVALID_REQUEST',
           message: 'La solicitud no tiene un formato válido.',
+        });
+      }
+      if (
+        (error instanceof ErrorUsuarioAdmin || error instanceof ErrorCredencialesAuth) &&
+        (error.code === 'AUTH_REQUIRED' || error.code === 'FORBIDDEN')
+      ) {
+        const sesionCaduca = error.code === 'AUTH_REQUIRED';
+        if (sesionCaduca) {
+          respuesta.clearCookie(dependencias.configuracion.cookieSesionNombre, {
+            httpOnly: true,
+            path: '/',
+            sameSite: 'strict',
+            secure: dependencias.configuracion.cookiesSecure,
+          });
+        }
+        await dependencias.auditoria.registrar({
+          actorUserId: sesionCaduca ? null : (solicitud.authContext?.usuario.id ?? null),
+          action: 'AUTHORIZATION_DENIED',
+          targetUserId: null,
+          outcome: 'DENIED',
+          metadata: { requestId: solicitud.id },
+          createdAt: dependencias.reloj.ahora(),
         });
       }
       if (error instanceof ErrorUsuarioAdmin) {
@@ -110,14 +129,19 @@ export async function registrarRutasUsuariosAdmin(
     ) {
       const actor = exigirActorAdmin(solicitud);
       const usuario = await dependencias.usuarios.crear(solicitud.body, actor);
-      await dependencias.recuperacion.solicitarInvitacion(
+      const resultado = await dependencias.recuperacion.solicitarInvitacion(
         usuario.id,
         actor,
         solicitud.ip,
         solicitud.id,
       );
-
-      return respuesta.code(201).send(usuario);
+      const invitationStatus: RespuestaAltaUsuarioAdmin['invitationStatus'] =
+        resultado === 'ACEPTADA'
+          ? 'ACCEPTED'
+          : resultado === 'LIMITADA'
+            ? 'RATE_LIMITED'
+            : 'DELIVERY_FAILED';
+      return respuesta.code(201).send({ user: usuario, invitationStatus });
     }
 
     /** Actualiza campos permitidos y conserva el correo hasta verificar el cambio. */
@@ -169,6 +193,12 @@ export async function registrarRutasUsuariosAdmin(
           message: 'Espera antes de volver a solicitar este proceso.',
         });
       }
+      if (resultado === 'DELIVERY_FAILED') {
+        return respuesta.code(503).send({
+          code: 'SMTP_DELIVERY_FAILED',
+          message: 'No fue posible entregar el enlace. Vuelve a intentarlo más tarde.',
+        });
+      }
 
       return respuesta.code(202).send({ accepted: true });
     }
@@ -204,7 +234,7 @@ export async function registrarRutasUsuariosAdmin(
         preHandler,
         schema: {
           response: {
-            200: respuestaListaUsuariosSchema,
+            200: adminUserListResponseSchema,
             401: publicErrorResponseSchema,
             403: publicErrorResponseSchema,
           },
@@ -219,12 +249,11 @@ export async function registrarRutasUsuariosAdmin(
         schema: {
           body: adminCreateUserSchema,
           response: {
-            201: adminUserResponseSchema,
+            201: adminCreateUserResponseSchema,
             400: publicErrorResponseSchema,
             401: publicErrorResponseSchema,
             403: publicErrorResponseSchema,
             409: publicErrorResponseSchema,
-            503: publicErrorResponseSchema,
           },
         },
       },
@@ -260,7 +289,7 @@ export async function registrarRutasUsuariosAdmin(
         schema: {
           params: userIdParamsSchema,
           response: {
-            200: respuestaRevocacionSchema,
+            200: adminRevokedSessionsResponseSchema,
             401: publicErrorResponseSchema,
             403: publicErrorResponseSchema,
             404: publicErrorResponseSchema,
@@ -281,6 +310,7 @@ export async function registrarRutasUsuariosAdmin(
             403: publicErrorResponseSchema,
             404: publicErrorResponseSchema,
             429: publicErrorResponseSchema,
+            503: publicErrorResponseSchema,
           },
         },
       },
@@ -321,6 +351,7 @@ function exigirActorAdmin(solicitud: FastifyRequest): ActorUsuarioAdmin {
 
   return {
     userId: contexto.usuario.id,
+    sessionId: contexto.sessionId,
     role: contexto.usuario.role,
     requestId: solicitud.id,
   };
@@ -329,6 +360,7 @@ function exigirActorAdmin(solicitud: FastifyRequest): ActorUsuarioAdmin {
 /** Mapea códigos administrativos a mensajes fijos que no incluyen valores suministrados. */
 function obtenerMensajeErrorAdmin(codigo: string): string {
   const mensajes: Record<string, string> = {
+    AUTH_REQUIRED: 'Se requiere una sesión vigente.',
     ACTIVATION_REQUIRED: 'La cuenta debe completar su activación antes de cambiar su estado.',
     ADMIN_ALREADY_EXISTS: 'Ya existe un administrador inicial activo.',
     AUTH_INVARIANT_UNAVAILABLE: 'La operación administrativa no está disponible.',

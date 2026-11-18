@@ -71,6 +71,20 @@ async function pruebaHashPendienteYActivo(): Promise<void> {
     ['00000000-0000-4000-8000-000000000001'],
   );
 
+  await database.query(
+    `INSERT INTO users (id, username, username_normalized, display_name, email, email_normalized, role, status)
+     VALUES ($1, 'cancelada_1', 'cancelada_1', 'Invitación cancelada', 'cancelada@example.test', 'cancelada@example.test', 'SUPPORT', 'DISABLED')`,
+    ['00000000-0000-4000-8000-000000000007'],
+  );
+
+  await expect(
+    database.query(
+      `INSERT INTO users (id, username, username_normalized, display_name, email, email_normalized, email_verified_at, role, status)
+       VALUES ($1, 'verificada_1', 'verificada_1', 'Invitación verificada', 'verificada@example.test', 'verificada@example.test', '2026-11-18T00:00:00Z', 'SUPPORT', 'DISABLED')`,
+      ['00000000-0000-4000-8000-000000000008'],
+    ),
+  ).rejects.toThrow();
+
   await expect(
     database.query(
       `INSERT INTO users (id, username, username_normalized, display_name, email, email_normalized, role, status)

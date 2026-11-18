@@ -1,5 +1,5 @@
 import { createHmac } from 'node:crypto';
-import { inArray, lte, sql } from 'drizzle-orm';
+import { eq, lte, sql } from 'drizzle-orm';
 import type {
   LimitadorIntentosAuth,
   TipoIntentoAuth,
@@ -60,20 +60,19 @@ export class LimitadorIntentosPostgres implements LimitadorIntentosAuth {
     });
   }
 
-  /** Elimina contadores de login tras validar credenciales y evita retener identificadores. */
-  public async reiniciarIntentos(
+  /** Descuenta la reserva de una autenticación correcta y conserva fallos concurrentes. */
+  public async descontarReservaExitosa(
     tipo: TipoIntentoAuth,
     identificador: string,
     direccionIp: string,
   ): Promise<void> {
     const alcances = resolverAlcances(tipo);
-    const claves = [
-      this.calcularClave(alcances.cuenta, identificador, direccionIp),
-      this.calcularClave(alcances.red, '', direccionIp),
-    ];
-    await this.database
-      .delete(authThrottleWindows)
-      .where(inArray(authThrottleWindows.keyHash, claves));
+    const claveCuenta = this.calcularClave(alcances.cuenta, identificador, direccionIp);
+    const claveRed = this.calcularClave(alcances.red, '', direccionIp);
+    await this.database.transaction(async (transaccion) => {
+      await descontarContadorReservado(transaccion, claveCuenta, MAX_INTENTOS_CUENTA);
+      await descontarContadorReservado(transaccion, claveRed, MAX_INTENTOS_RED);
+    });
   }
 
   /** HMAC-SHA-256 de alcance, identificador e IP sin guardar los originales. */
@@ -150,4 +149,28 @@ async function incrementarContador(
   }
 
   return fila;
+}
+
+/** Descuenta una solicitud correcta sin borrar los fallos de otras solicitudes concurrentes. */
+async function descontarContadorReservado(
+  transaccion: Parameters<Parameters<BaseDatosAuth['transaction']>[0]>[0],
+  keyHash: string,
+  umbral: number,
+): Promise<void> {
+  const [fila] = await transaccion
+    .update(authThrottleWindows)
+    .set({
+      attemptCount: sql`GREATEST(${authThrottleWindows.attemptCount} - 1, 0)`,
+      blockedUntil: sql`CASE
+        WHEN ${authThrottleWindows.attemptCount} <= ${umbral} THEN NULL
+        ELSE ${authThrottleWindows.blockedUntil}
+      END`,
+      updatedAt: new Date(),
+    })
+    .where(eq(authThrottleWindows.keyHash, keyHash))
+    .returning({ attemptCount: authThrottleWindows.attemptCount });
+
+  if (fila?.attemptCount === 0) {
+    await transaccion.delete(authThrottleWindows).where(eq(authThrottleWindows.keyHash, keyHash));
+  }
 }

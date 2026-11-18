@@ -30,24 +30,34 @@ export function registrarDecoradorContextoAuth(aplicacion: FastifyInstance): voi
   }
 }
 
-/** Resuelve la cookie opaca y carga el rol vigente antes de autorizar una ruta privada. */
+/**
+ * Resuelve la cookie opaca, renueva su vencimiento inactivo y carga el rol actual.
+ * @param sesiones Servicio PostgreSQL que valida y renueva el límite de inactividad.
+ * @param configuracion Nombres de cookies y política `Secure` del entorno activo.
+ * @returns Prehandler que asigna identidad vigente o responde `401` y limpia credenciales inválidas.
+ */
 export function requireAuthenticatedSession(
   sesiones: ServicioSesion,
   configuracion: ConfiguracionAuth,
 ): preHandlerAsyncHookHandler {
   return async (solicitud, respuesta) => {
     const token = solicitud.cookies[configuracion.cookieSesionNombre];
-    const sesion = token === undefined ? null : await sesiones.resolverVigente(token);
+    if (token === undefined) {
+      return respuesta.code(401).send({
+        code: 'AUTH_REQUIRED',
+        message: 'Se requiere una sesión vigente.',
+      });
+    }
+
+    const sesion = await sesiones.resolverVigente(token);
 
     if (sesion === null) {
-      if (token !== undefined) {
-        respuesta.clearCookie(configuracion.cookieSesionNombre, {
-          path: '/',
-          sameSite: 'strict',
-          secure: configuracion.cookiesSecure,
-          httpOnly: true,
-        });
-      }
+      respuesta.clearCookie(configuracion.cookieSesionNombre, {
+        path: '/',
+        sameSite: 'strict',
+        secure: configuracion.cookiesSecure,
+        httpOnly: true,
+      });
 
       return respuesta.code(401).send({
         code: 'AUTH_REQUIRED',
@@ -56,6 +66,13 @@ export function requireAuthenticatedSession(
     }
 
     solicitud.authContext = { sessionId: sesion.sessionId, usuario: sesion.usuario };
+    respuesta.setCookie(configuracion.cookieSesionNombre, token, {
+      httpOnly: true,
+      secure: configuracion.cookiesSecure,
+      sameSite: 'strict',
+      path: '/',
+      expires: sesion.idleExpiresAt,
+    });
   };
 }
 

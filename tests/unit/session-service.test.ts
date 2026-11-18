@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ServicioSesion } from '../../apps/api/src/auth/session-service.js';
 import type {
   CuentaSesion,
@@ -29,6 +29,10 @@ class RelojDePrueba {
 
 /** Repositorio determinista para probar reglas puras del servicio de sesiones. */
 class RepositorioSesionesMemoria implements RepositorioSesiones {
+  /** Observa el digest, la correlación y el instante enviados al cierre transaccional. */
+  public readonly cerrarSesion = vi
+    .fn<RepositorioSesiones['cerrarSesion']>()
+    .mockResolvedValue(undefined);
   private readonly registros = new Map<string, RegistroSesionActual>();
   private cuenta: CuentaSesion = {
     id: idUsuario,
@@ -157,6 +161,19 @@ function definirPruebasDeSesion(): void {
   it('usa el rol vigente de la cuenta en cada resolución', pruebaRolVigente);
   it('revoca todas las demás sesiones de una cuenta', pruebaRevocaOtrasSesiones);
   it('no consulta el repositorio ante una credencial malformada', pruebaTokenMalformado);
+  it('entrega solo el digest o null al cierre auditado', pruebaCierreConDigest);
+}
+
+/** Comprueba que el logout preserve la correlación y no entregue el secreto al repositorio. */
+async function pruebaCierreConDigest(): Promise<void> {
+  const { servicio, repositorio } = crearSujetoSesion();
+  const sesion = await servicio.crear(idUsuario);
+  await servicio.cerrarSesion(sesion.token, 'solicitud-valida');
+  await servicio.cerrarSesion('malformada', 'solicitud-anonima');
+  expect(repositorio.cerrarSesion.mock.calls).toEqual([
+    [createHash('sha256').update(sesion.token).digest('hex'), 'solicitud-valida', fechaInicial],
+    [null, 'solicitud-anonima', fechaInicial],
+  ]);
 }
 
 /** Comprueba los plazos aprobados en la sesión recién creada. */

@@ -1,12 +1,12 @@
 import { Type } from '@sinclair/typebox';
 import type { FastifyInstance } from 'fastify';
 import {
+  authIdentityResponseSchema,
   csrfResponseSchema,
   loginRequestSchema,
   publicErrorResponseSchema,
-  publicUserResponseSchema,
   type RespuestaErrorPublico,
-  type RespuestaUsuarioPublico,
+  type RespuestaIdentidadAuth,
   type SolicitudLogin,
 } from '../../../../packages/contracts/src/auth.js';
 import type {
@@ -20,17 +20,8 @@ import { normalizarUsuario } from '../../../../packages/core/src/auth/policies.j
 import { crearTokenOpaco } from '../auth/token-service.js';
 import { ServicioSesion } from '../auth/session-service.js';
 
-const respuestaLoginSchema = Type.Object(
-  { user: publicUserResponseSchema },
-  { additionalProperties: false },
-);
-const respuestaMeSchema = Type.Object(
-  { user: publicUserResponseSchema },
-  { additionalProperties: false },
-);
-
 /** Unión de la identidad autenticada y del error genérico de credenciales. */
-type RespuestaLogin = { readonly user: RespuestaUsuarioPublico } | RespuestaErrorPublico;
+type RespuestaLogin = RespuestaIdentidadAuth | RespuestaErrorPublico;
 
 /**
  * Registra endpoints de CSRF, login, logout y consulta de identidad.
@@ -78,7 +69,7 @@ export function registrarRutasAuth(
       schema: {
         body: loginRequestSchema,
         response: {
-          200: respuestaLoginSchema,
+          200: authIdentityResponseSchema,
           401: publicErrorResponseSchema,
           429: publicErrorResponseSchema,
         },
@@ -116,6 +107,7 @@ export function registrarRutasAuth(
       const resultado = await autenticacion.iniciarSesion(
         solicitud.body.username,
         solicitud.body.password,
+        solicitud.id,
       );
       if (!resultado.autenticado) {
         respuesta.clearCookie(configuracion.cookieSesionNombre, opcionesCookie(configuracion));
@@ -126,7 +118,7 @@ export function registrarRutasAuth(
         });
       }
 
-      await limitador.reiniciarIntentos('LOGIN', usernameNormalizado, solicitud.ip);
+      await limitador.descontarReservaExitosa('LOGIN', usernameNormalizado, solicitud.ip);
 
       respuesta.setCookie(configuracion.cookieSesionNombre, resultado.tokenSesion, {
         httpOnly: true,
@@ -146,19 +138,7 @@ export function registrarRutasAuth(
     { schema: { response: { 204: Type.Null() } } },
     async (solicitud, respuesta) => {
       const token = solicitud.cookies[configuracion.cookieSesionNombre];
-      const sesionVigente = token === undefined ? null : await sesiones.resolverVigente(token);
-      if (token !== undefined) {
-        await sesiones.revocar(token);
-      }
-
-      await auditoria.registrar({
-        actorUserId: sesionVigente?.usuario.id ?? null,
-        action: 'AUTH_LOGOUT',
-        targetUserId: sesionVigente?.usuario.id ?? null,
-        outcome: 'SUCCESS',
-        metadata: {},
-        createdAt: reloj.ahora(),
-      });
+      await sesiones.cerrarSesion(token, solicitud.id);
 
       respuesta.clearCookie(configuracion.cookieSesionNombre, opcionesCookie(configuracion));
       respuesta.clearCookie(configuracion.cookieCsrfNombre, opcionesCookie(configuracion));
@@ -173,7 +153,7 @@ export function registrarRutasAuth(
     {
       schema: {
         response: {
-          200: respuestaMeSchema,
+          200: authIdentityResponseSchema,
           401: publicErrorResponseSchema,
         },
       },

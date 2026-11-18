@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { EventoAuditoriaAuth } from '../../packages/core/src/auth/ports.js';
 import { ServicioAutenticacionCore } from '../../apps/api/src/auth/auth-service.js';
 import { LimitadorIntentosPostgres } from '../../apps/api/src/auth/attempt-limiter.js';
 import { Argon2PasswordHasher } from '../../apps/api/src/auth/argon2-password-hasher.js';
@@ -12,8 +11,8 @@ import { ServicioRecuperacionAuth } from '../../apps/api/src/auth/recovery-servi
 import { cargarConfiguracionAuth } from '../../apps/api/src/config.js';
 import { crearServidorAuth } from '../../apps/api/src/server.js';
 import { crearClienteBaseDatosAuth } from '../../apps/api/src/db/client.js';
-import { sessions, users } from '../../apps/api/src/db/schema.js';
-import type { RelojAuth, EscritorAuditoriaAuth } from '../../packages/core/src/auth/ports.js';
+import { auditEvents, sessions, users } from '../../apps/api/src/db/schema.js';
+import type { RelojAuth } from '../../packages/core/src/auth/ports.js';
 
 const baseUrl = process.env['TEST_DATABASE_URL'];
 const database =
@@ -34,19 +33,8 @@ const relojFijo: RelojAuth = {
   },
 };
 
-/** Captura eventos de auditoría en memoria, sin imprimir información del caso. */
-class AuditoriaIntegracion implements EscritorAuditoriaAuth {
-  public readonly eventos: EventoAuditoriaAuth[] = [];
-
-  /** Conserva el evento allowlistado para revisar su forma sin acceder a logs. */
-  public async registrar(evento: EventoAuditoriaAuth): Promise<void> {
-    this.eventos.push(evento);
-  }
-}
-
 let aplicacion: AplicacionAuthPrueba | null = null;
 let cookieSesionDePrueba: string | null = null;
-let auditoria: AuditoriaIntegracion | null = null;
 let autenticacionCompartida: ServicioAutenticacionCore | null = null;
 let sesionesCompartidas: ServicioSesion | null = null;
 let limitadorCompartido: LimitadorIntentosPostgres | null = null;
@@ -128,13 +116,11 @@ async function prepararRutasAuth(): Promise<void> {
   const repositorio = new PostgresAuthRepository(exigirBasePrueba());
   const sesionesAuth = new ServicioSesion(repositorio, relojFijo);
   sesionesCompartidas = sesionesAuth;
-  const auditoriaLocal = new AuditoriaIntegracion();
-  auditoria = auditoriaLocal;
   const autenticacion = new ServicioAutenticacionCore(
     repositorio,
     hasheador,
     sesionesAuth,
-    auditoriaLocal,
+    repositorio,
     relojFijo,
   );
   autenticacionCompartida = autenticacion;
@@ -145,7 +131,7 @@ async function prepararRutasAuth(): Promise<void> {
     hasheador,
     correo: { async enviar() {} },
     limitador,
-    auditoria: auditoriaLocal,
+    auditoria: repositorio,
     sesiones: sesionesAuth,
     reloj: relojFijo,
     publicAppOrigin: origenPublicoPrueba,
@@ -160,7 +146,7 @@ async function prepararRutasAuth(): Promise<void> {
     configuracion,
     autenticacion,
     sesiones: sesionesAuth,
-    auditoria: auditoriaLocal,
+    auditoria: repositorio,
     reloj: relojFijo,
     limitador,
     recuperacion,
@@ -253,10 +239,11 @@ async function pruebaCookiesProduccion(): Promise<void> {
       NODE_ENV: 'production',
       PUBLIC_APP_ORIGIN: 'https://portal.example.test',
       API_INTERNAL_ORIGIN: 'http://auth-api.internal:4000',
+      TRUSTED_PROXY_CIDRS: '127.0.0.1/32',
     }),
     autenticacion: exigirAutenticacion(),
     sesiones: exigirServicioSesiones(),
-    auditoria: auditoria ?? new AuditoriaIntegracion(),
+    auditoria: new PostgresAuthRepository(exigirBasePrueba()),
     reloj: relojFijo,
     limitador: exigirLimitador(),
     recuperacion: exigirServicioRecuperacion(),
@@ -459,7 +446,16 @@ async function pruebaLogoutRevocaSesion(): Promise<void> {
     url: '/api/v1/auth/me',
     headers: { cookie: cookieSesion },
   });
-  const eventos = auditoria?.eventos ?? [];
+  const [eventoLogin] = await exigirBasePrueba()
+    .select({ metadata: auditEvents.metadata })
+    .from(auditEvents)
+    .where(
+      and(
+        eq(auditEvents.actorUserId, idUsuario),
+        eq(auditEvents.action, 'AUTH_LOGIN'),
+        eq(auditEvents.outcome, 'SUCCESS'),
+      ),
+    );
   const cookiesSet = respuesta.headers['set-cookie'];
   const valoresCookies =
     typeof cookiesSet === 'string'
@@ -475,12 +471,93 @@ async function pruebaLogoutRevocaSesion(): Promise<void> {
     ),
   ).toBe(true);
   expect(respuestaMe.statusCode).toBe(401);
-  expect(
-    eventos.some((evento) => evento.action === 'AUTH_LOGIN' && evento.outcome === 'SUCCESS'),
-  ).toBe(true);
-  expect(
-    eventos.some((evento) => evento.action === 'AUTH_LOGOUT' && evento.outcome === 'SUCCESS'),
-  ).toBe(true);
+  const [eventoLogout] = await exigirBasePrueba()
+    .select({ metadata: auditEvents.metadata })
+    .from(auditEvents)
+    .where(
+      and(
+        eq(auditEvents.action, 'AUTH_LOGOUT'),
+        eq(auditEvents.actorUserId, idUsuario),
+        eq(auditEvents.outcome, 'SUCCESS'),
+      ),
+    );
+  expect(eventoLogin?.metadata).toMatchObject({ actorRole: 'SUPPORT' });
+  expect(eventoLogin?.metadata['requestId']).toEqual(expect.any(String));
+  expect(eventoLogout?.metadata).toMatchObject({ actorRole: 'SUPPORT' });
+  expect(eventoLogout?.metadata['requestId']).toEqual(expect.any(String));
+}
+
+/** Fuerza un fallo de auditoría en el clúster efímero y comprueba el rollback de la sesión. */
+async function pruebaRollbackLogout(): Promise<void> {
+  const base = exigirBasePrueba();
+  const sesion = await exigirServicioSesiones().crear(idUsuario);
+  const csrf = await obtenerCsrf();
+  await base.execute(
+    sql`ALTER TABLE audit_events ADD CONSTRAINT prueba_rechazo_logout CHECK (action <> 'AUTH_LOGOUT') NOT VALID`,
+  );
+  try {
+    const respuesta = await exigirAplicacion().inject({
+      method: 'POST',
+      url: '/api/v1/auth/logout',
+      headers: crearHeadersEscritura(csrf, `portal_test_session=${sesion.token}`),
+    });
+    const [registro] = await base
+      .select({ revokedAt: sessions.revokedAt })
+      .from(sessions)
+      .where(eq(sessions.id, sesion.sessionId));
+    expect(registro?.revokedAt).toBeNull();
+    expect(respuesta.statusCode).toBe(500);
+    expect(respuesta.headers['set-cookie']).toBeUndefined();
+  } finally {
+    await base.execute(sql`ALTER TABLE audit_events DROP CONSTRAINT prueba_rechazo_logout`);
+  }
+}
+
+/** Comprueba un único evento anónimo por logout sin credencial vigente. */
+async function pruebaLogoutAnonimo(): Promise<void> {
+  const csrf = await obtenerCsrf();
+  const base = exigirBasePrueba();
+  const condicion = and(eq(auditEvents.action, 'AUTH_LOGOUT'), isNull(auditEvents.actorUserId));
+  const anteriores = await base.select({ id: auditEvents.id }).from(auditEvents).where(condicion);
+  const servicio = exigirServicioSesiones();
+  const revocada = await servicio.crear(idUsuario);
+  await servicio.revocar(revocada.token);
+  const vencida = await servicio.crear(idUsuario);
+  await base
+    .update(sessions)
+    .set({ idleExpiresAt: instantePrueba })
+    .where(eq(sessions.id, vencida.sessionId));
+  const cookies = [
+    undefined,
+    'portal_test_session=malformada',
+    `portal_test_session=${Buffer.alloc(32, 2).toString('base64url')}`,
+    `portal_test_session=${revocada.token}`,
+    `portal_test_session=${vencida.token}`,
+  ];
+  for (const cookie of cookies) {
+    const respuesta = await exigirAplicacion().inject({
+      method: 'POST',
+      url: '/api/v1/auth/logout',
+      headers: crearHeadersEscritura(csrf, cookie),
+    });
+    expect(respuesta.statusCode).toBe(204);
+  }
+  const posteriores = await base
+    .select({
+      id: auditEvents.id,
+      metadata: auditEvents.metadata,
+      objetivo: auditEvents.targetUserId,
+    })
+    .from(auditEvents)
+    .where(condicion);
+  const nuevos = posteriores.filter(
+    (fila) => !anteriores.some((anterior) => anterior.id === fila.id),
+  );
+  expect(nuevos).toHaveLength(cookies.length);
+  for (const fila of nuevos) {
+    expect(fila.metadata).toEqual({ requestId: expect.any(String) });
+    expect(fila.objetivo).toBeNull();
+  }
 }
 
 /** Agrupa pruebas de origen, anti-enumeración, sesión y controles de cookie del API. */
@@ -498,6 +575,8 @@ function definirPruebasDeRutasAuth(): void {
     pruebaIgnoraHeadersProxyFalsificados,
   );
   it('cierra la sesión y bloquea la cookie revocada', pruebaLogoutRevocaSesion);
+  it('revierte el logout si PostgreSQL rechaza el evento', pruebaRollbackLogout);
+  it('registra logout anónimo para cookies ausentes o inválidas', pruebaLogoutAnonimo);
 }
 
 describe('rutas de autenticación con PostgreSQL aislado', definirPruebasDeRutasAuth);

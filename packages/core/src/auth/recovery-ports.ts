@@ -1,5 +1,5 @@
 import type { EstadoUsuario, RolUsuario } from './models.js';
-import type { EventoAuditoriaAuth } from './ports.js';
+import type { EventoAuditoriaAuth, SesionPersistida } from './ports.js';
 
 /** Propósitos cerrados de tokens de un solo uso de autenticación. */
 export type PropositoTokenAuth =
@@ -64,8 +64,14 @@ export interface RepositorioCredencialesAuth {
   buscarCuentaPorCorreo(emailNormalizado: string): Promise<CuentaCredencialesAuth | null>;
   /** Busca cuenta por UUID para validar reautenticación y acciones administrativas. */
   buscarCuentaPorId(userId: string): Promise<CuentaCredencialesAuth | null>;
-  /** Invalida tokens previos del mismo propósito, inserta el digest y audita atómicamente. */
-  crearToken(entrada: EntradaTokenRecuperacionAuth, evento: EventoAuditoriaAuth): Promise<void>;
+  /** Revalida la cuenta esperada, reemplaza tokens del propósito y audita. Devuelve false si cambió. */
+  crearToken(
+    entrada: EntradaTokenRecuperacionAuth,
+    evento: EventoAuditoriaAuth,
+    esperada: CuentaCredencialesAuth,
+    /** UUID de sesión para administración; null para recuperación pública o cambio propio reautenticado. */
+    sesionAdmin: string | null,
+  ): Promise<boolean>;
   /** Consume token vigente del propósito exacto y muta cuenta/sesiones/auditoría en transacción. */
   consumirToken(
     tokenHash: string,
@@ -73,11 +79,11 @@ export interface RepositorioCredencialesAuth {
     ahora: Date,
     evento: EventoAuditoriaAuth,
   ): Promise<boolean>;
-  /** Reemplaza hash y revoca todas las sesiones en la transacción auditada. */
+  /** Si sigue vigente el hash verificado, rota contraseña y sesión e invalida tokens en una transacción auditada. */
   cambiarContrasena(
-    userId: string,
+    sesionNueva: SesionPersistida,
+    hashVerificado: string,
     passwordHash: string,
-    ahora: Date,
     evento: EventoAuditoriaAuth,
   ): Promise<boolean>;
 }
@@ -95,7 +101,7 @@ export interface LimitadorIntentosAuth {
     ahora: Date,
   ): Promise<boolean>;
   /** Elimina contadores tras un login válido para la misma clave HMAC. */
-  reiniciarIntentos(
+  descontarReservaExitosa(
     tipo: TipoIntentoAuth,
     identificador: string,
     direccionIp: string,

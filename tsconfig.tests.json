@@ -5,5 +5,11 @@
     "moduleResolution": "NodeNext",
     "types": ["node"]
   },
-  "include": ["tests/**/*.ts", "scripts/**/*.ts", "vitest*.ts", "drizzle.config.ts"]
+  "include": [
+    "tests/**/*.ts",
+    "scripts/**/*.ts",
+    "vitest*.ts",
+    "drizzle.config.ts",
+    "playwright.config.ts"
+  ]
 }

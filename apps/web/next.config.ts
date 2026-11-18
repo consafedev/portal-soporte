@@ -17,6 +17,39 @@ const configuracion: NextConfig = {
       },
     ];
   },
+  async headers() {
+    const headersSinCache = [
+      { key: 'Cache-Control', value: 'no-store, max-age=0' },
+      { key: 'Referrer-Policy', value: 'no-referrer' },
+      { key: 'X-Content-Type-Options', value: 'nosniff' },
+    ];
+    const evaluacionDesarrollo = modoProxy === 'development' ? " 'unsafe-eval'" : '';
+
+    return [
+      {
+        source: '/api/v1/:path*',
+        headers: headersSinCache,
+      },
+      {
+        source: '/recover-access/complete',
+        headers: [
+          ...headersSinCache,
+          {
+            key: 'Content-Security-Policy',
+            value: `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; script-src 'self' 'unsafe-inline'${evaluacionDesarrollo}; style-src 'self' 'unsafe-inline'`,
+          },
+        ],
+      },
+      {
+        source: '/profile/:path*',
+        headers: headersSinCache,
+      },
+      {
+        source: '/settings/:path*',
+        headers: headersSinCache,
+      },
+    ];
+  },
 };
 
 export default configuracion;

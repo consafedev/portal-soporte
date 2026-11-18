@@ -178,12 +178,18 @@ async function iniciarServidorTemporal(
   ]);
 }
 
-/** Ejecuta Vitest de integración contra un clúster temporal o servicio de prueba loopback. */
+/** Ejecuta pruebas o migración compilada contra el clúster temporal loopback. */
 async function ejecutarPruebasIntegracion(): Promise<void> {
   const urlExistente = process.env['TEST_DATABASE_URL'];
+  const argumentos = process.argv.slice(2).filter((argumento) => argumento !== '--');
+  const ejecucionE2e = argumentos[0] === '--e2e';
+  if (ejecucionE2e && urlExistente !== undefined) {
+    throw new Error('E2E requiere que este harness cree un PostgreSQL efímero nuevo.');
+  }
+
   if (urlExistente !== undefined) {
     process.env['TEST_DATABASE_URL'] = validarUrlExternaDePrueba(urlExistente).href;
-    await ejecutarVitest();
+    await ejecutarComandoAislado();
     return;
   }
 
@@ -207,7 +213,7 @@ async function ejecutarPruebasIntegracion(): Promise<void> {
     ]);
     process.env['TEST_DATABASE_URL'] =
       `postgres://${usuarioBasePrueba}@127.0.0.1:${puerto}/${nombreBasePrueba}`;
-    await ejecutarVitest();
+    await ejecutarComandoAislado();
   } finally {
     const sePuedeEliminar = !procesoIniciado || (await detenerServidorTemporal(directorioDatos));
     if (sePuedeEliminar) {
@@ -219,6 +225,40 @@ async function ejecutarPruebasIntegracion(): Promise<void> {
       );
     }
   }
+}
+
+/** Selecciona Vitest o la prueba acotada de CLI sin ampliar destinos de base de datos. */
+async function ejecutarComandoAislado(): Promise<void> {
+  const argumentos = process.argv.slice(2).filter((argumento) => argumento !== '--');
+  if (argumentos[0] === '--e2e') {
+    await ejecutarPruebasE2e(argumentos.slice(1));
+    return;
+  }
+
+  if (argumentos.length === 1 && argumentos[0] === '--migrate-cli') {
+    await ejecutarMigracionCompilada();
+    return;
+  }
+
+  await ejecutarVitest();
+}
+
+/** Migra la base recién creada y ejecuta Chromium real con los mismos datos efímeros. */
+async function ejecutarPruebasE2e(argumentos: string[]): Promise<void> {
+  await ejecutarMigracionCompilada();
+  await ejecutarPlaywright(argumentos);
+}
+
+/** Ejecuta la CLI compilada y protegida en el mismo PostgreSQL efímero del harness. */
+async function ejecutarMigracionCompilada(): Promise<void> {
+  const rutaCli = resolve('apps/api/dist/apps/api/src/db/migrate-cli.js');
+  await ejecutarNode(rutaCli, [], { ...process.env, NODE_ENV: 'test' });
+}
+
+/** Lanza Playwright directamente para no añadir intermediarios de shell. */
+async function ejecutarPlaywright(argumentos: string[]): Promise<void> {
+  const rutaPlaywright = resolve('node_modules/@playwright/test/cli.js');
+  await ejecutarNode(rutaPlaywright, ['test', '--config=playwright.config.ts', ...argumentos]);
 }
 
 /** Lanza el archivo ejecutable de Vitest sin envolver la URL ni los argumentos en shell. */
@@ -234,10 +274,17 @@ async function ejecutarVitest(): Promise<void> {
   ]);
 }
 
-/** Ejecuta Vitest con el runtime Node fijado por el repositorio. */
-async function ejecutarNode(archivo: string, argumentos: string[]): Promise<void> {
+/** Ejecuta Node con variables heredadas o un entorno de prueba acotado. */
+async function ejecutarNode(
+  archivo: string,
+  argumentos: string[],
+  entorno: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
   await new Promise<void>((resolver, rechazar) => {
-    const proceso = spawn(process.execPath, [archivo, ...argumentos], { stdio: 'inherit' });
+    const proceso = spawn(process.execPath, [archivo, ...argumentos], {
+      stdio: 'inherit',
+      env: entorno,
+    });
 
     /** Propaga los errores de lanzamiento de Node.js. */
     function rechazarError(error: Error): void {
@@ -253,7 +300,7 @@ async function ejecutarNode(archivo: string, argumentos: string[]): Promise<void
 
       rechazar(
         new Error(
-          `Vitest terminó con código ${codigo ?? 1}${senal === null ? '' : ` por ${senal}`}.`,
+          `El proceso de prueba terminó con código ${codigo ?? 1}${senal === null ? '' : ` por ${senal}`}.`,
         ),
       );
     }

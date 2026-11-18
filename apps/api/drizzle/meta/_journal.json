@@ -15,6 +15,13 @@
       "when": 1794975026898,
       "tag": "0001_auth_throttle_expiry",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795026966779,
+      "tag": "0002_invitation_lifecycle",
+      "breakpoints": true
     }
   ]
 }
