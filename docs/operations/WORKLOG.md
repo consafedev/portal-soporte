@@ -382,3 +382,7 @@
 - **Artefactos:** servicios/puertos/rutas administrativas, CLI de bootstrap, extensión del repositorio PostgreSQL, pruebas unitarias e integraciones, plan SDD y seguimiento. Sin despliegue ni conexiones fuera de la base aislada.
 - **Próximo paso:** registrar el commit local de Task 5 e iniciar Task 6 (recuperación, activación de invitaciones, verificación de correo, SMTP configurable y protección antiabuso).
 - **Estado:** Task 5 `EN_REVISION` local; PS-003 general `EN_CURSO`.
+
+### [2026-11-18T00:19:22-06:00] PS-003 · Codex · TASK 5 — COMMIT LOCAL
+- Task 5 quedó comprometida en `9e1d746` (`feat(users): PS-003 administrar cuentas y roles`) sobre `codex/ps-003-auth`; HEAD verificado y árbol de trabajo limpio. No se realizó push.
+- Plan Task 5 marcado completo. PS-003 continúa `EN_CURSO`; Task 6 es el siguiente incremento. El riesgo picomatch mantiene revisión 2026-12-10 UTC y vencimiento de la aceptación 2026-12-17 UTC.
