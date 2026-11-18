@@ -6,9 +6,9 @@
 |---|---|---|---|---|---|
 | PS-000 | F0 | Establecer línea base documental v0.2 y decisiones funcionales aprobadas | HECHO (fuera de Git) | ChatGPT | Integrar en repo; validaciones técnicas diferidas a tareas posteriores |
 | PS-001 | F0 | Inventario **read-only** de repo y, si hay acceso explícito, Debian/túneles; metadatos DDL solo si hay autorización expresa, sin secretos | HECHO | Codex · 2026-11-17 · `main` | Revisión del propietario completada; servidores y BD productivas no inspeccionados |
-| PS-002 | F1 | Inicializar monorepo, CI, tipos, lint, estándares JSDoc en español y apps vacías | EN_REVISION | Codex · 2026-11-17 · `main` | Revisión del propietario; audit high GHSA-fc5q-39xc-vjpf en dependencia de desarrollo |
+| PS-002 | F1 | Inicializar monorepo, CI, tipos, lint, estándares JSDoc en español y apps vacías | EN_REVISION | Codex · 2026-11-17 · main | GitHub Actions run 44209671184 falla solo en auditoría completa por GHSA; excepción temporal propuesta, pendiente de aprobación |
 | PS-002.1 | F1 | Estabilización, revisión de seguridad y cierre del bootstrap | HECHO | Codex · 2026-11-17 · main | Aprobación condicionada: riesgo aceptado solo para desarrollo; sigue abierto y no autoriza producción |
-| PS-002.2 | F1 | Cierre documental, publicación controlada y validación de CI | EN_REVISION | Codex · 2026-11-17 · main | Espera autorización explícita del propietario para publicar; CI remota aún no ejecutada |
+| PS-002.2 | F1 | Cierre documental, publicación controlada y validación de CI | EN_REVISION | Codex · 2026-11-17 · main | Publicación verificada; run 44209671184 falla en audit; excepción limitada propuesta, sin aplicar y pendiente de aprobación |
 | PS-003 | F1 | Design system claro/oscuro, sidebar, login y responsive | PENDIENTE | Sin asignar | PS-002 |
 | PS-004 | F1 | Identidad, sessions, roles, administración de usuarios, MFA, perfil | PENDIENTE | Sin asignar | PS-002, DEC-014 |
 | PS-005 | F1 | Clientes, perfiles direct/URL/SSH, secretos cifrados y test solo admin | PENDIENTE | Sin asignar | PS-004, DEC-013/023 |

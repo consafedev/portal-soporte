@@ -44,3 +44,13 @@ Controles aplicados o vigentes:
 - **Mitigaciones requeridas mientras permanezca abierto:** conservar la auditoría completa estricta y visible; mantener permisos mínimos de CI (contents: read) y no suministrar secretos; no construir patrones glob desde entradas no confiables; ejecutar auditoría de producción; no aplicar overrides, excepciones o supresiones sin una aprobación separada y trazable.
 - **Condición para resolver:** una versión corregida publicada y compatible debe reemplazar las instancias afectadas; actualizar el lockfile; confirmar el árbol con pnpm why; obtener PASS de auditoría completa y de producción; repetir format, lint, typecheck, tests, build, skill y secreto. Registrar evidencia y revisión del propietario.
 - **Límite de autorización:** esta aceptación temporal no cambia el resultado FAIL de la auditoría completa y no constituye autorización para producción. No se ha aprobado una excepción de CI.
+
+## Propuesta de excepción temporal para CI — pendiente de aprobación
+
+**Estado:** propuesta solamente; no aplicada ni aprobada. La auditoría completa sigue siendo FAIL por GHSA-fc5q-39xc-vjpf.
+
+Si el propietario la aprueba, registrar una allowlist dedicada con una sola entrada: advisory GHSA-fc5q-39xc-vjpf, paquete picomatch, versiones actualmente fijadas 2.3.2 y 4.0.7, alcance development-only, propietario aprobador, fecha de aprobación, justificación y vencimiento propuesto 2026-12-17. El vencimiento de 30 días es una propuesta para revisión, no una autorización vigente.
+
+La validación debe ejecutar pnpm audit --json y conservar visible su resultado original de fallo. Un validador separado, con cierre seguro ante JSON inválido o campos desconocidos, podría permitir que el job continúe únicamente cuando todos los hallazgos de severidad high o critical sean exactamente este GHSA sobre picomatch y cada instancia esté marcada como dev. Debe fallar si aparece otro advisory, otra severidad high/critical, una instancia de picomatch en producción, una versión no revisada o un error de auditoría. La auditoría de producción debe permanecer estricta.
+
+El check debe identificarse como evaluación de una excepción aprobada, nunca como auditoría completa PASS; su salida debe decir que GHSA permanece abierto y que solo se aceptó temporalmente en desarrollo. Al vencimiento, el check vuelve a fallar hasta que se publique una corrección o exista una nueva aprobación explícita. No cambiar pnpm audit configuration ni silenciar el advisory.
