@@ -13,6 +13,7 @@
     "argon2": "0.45.1",
     "drizzle-orm": "0.45.4",
     "fastify": "catalog:",
+    "nodemailer": "10.6.0",
     "postgres": "4.1.1"
   }
 }

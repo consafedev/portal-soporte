@@ -127,6 +127,37 @@ export const emailChangeRequestSchema = Type.Object(
 /** Tipo de solicitud para cambiar o verificar el correo propio. */
 export type SolicitudCambioCorreo = Static<typeof emailChangeRequestSchema>;
 
+/** Solicitud administrativa para dejar un correo nuevo pendiente de confirmación. */
+export const adminEmailChangeRequestSchema = Type.Object(
+  { newEmail: Type.String({ pattern: PATRON_CORREO, minLength: 3, maxLength: 254 }) },
+  {
+    additionalProperties: false,
+    description: 'Cambio iniciado por ADMIN; el destino se aplica solo tras verificarlo.',
+  },
+);
+
+/** Tipo de la solicitud administrativa de cambio de correo. */
+export type SolicitudCambioCorreoAdmin = Static<typeof adminEmailChangeRequestSchema>;
+
+/** Solicitud de consumo de token de verificación/cambio de correo. */
+export const emailTokenRequestSchema = Type.Object(
+  {
+    token: Type.String({
+      minLength: 43,
+      maxLength: 43,
+      pattern: '^[A-Za-z0-9_-]{43}$',
+      description: 'Token opaco enviado por POST en el cuerpo, nunca en la URL.',
+    }),
+  },
+  {
+    additionalProperties: false,
+    description: 'Token de un solo uso para verificar o cambiar correo.',
+  },
+);
+
+/** Tipo del consumo de token de correo. */
+export type SolicitudTokenCorreo = Static<typeof emailTokenRequestSchema>;
+
 /** Solicitud de inicio de recuperación sin revelar si el correo existe. */
 export const recoveryRequestSchema = Type.Object(
   { email: Type.String({ pattern: PATRON_CORREO, minLength: 3, maxLength: 254 }) },
@@ -232,3 +263,15 @@ export const publicErrorResponseSchema = Type.Object(
 
 /** Tipo de error controlado serializado por la API. */
 export type RespuestaErrorPublico = Static<typeof publicErrorResponseSchema>;
+
+/** Respuesta común de solicitudes de recuperación y entrega de correo. */
+export const recoveryAcceptedResponseSchema = Type.Object(
+  { accepted: Type.Literal(true) },
+  {
+    additionalProperties: false,
+    description: 'Solicitud procesada sin confirmar si la cuenta o el correo existen.',
+  },
+);
+
+/** Tipo de respuesta que no revela cuentas durante recuperación. */
+export type RespuestaRecuperacionAceptada = Static<typeof recoveryAcceptedResponseSchema>;

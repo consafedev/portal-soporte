@@ -3,10 +3,12 @@ import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { EventoAuditoriaAuth } from '../../packages/core/src/auth/ports.js';
 import { ServicioAutenticacionCore } from '../../apps/api/src/auth/auth-service.js';
+import { LimitadorIntentosPostgres } from '../../apps/api/src/auth/attempt-limiter.js';
 import { Argon2PasswordHasher } from '../../apps/api/src/auth/argon2-password-hasher.js';
 import { calcularDigestTokenOpaco } from '../../apps/api/src/auth/token-service.js';
 import { PostgresAuthRepository } from '../../apps/api/src/auth/postgres-auth-repository.js';
 import { ServicioSesion } from '../../apps/api/src/auth/session-service.js';
+import { ServicioRecuperacionAuth } from '../../apps/api/src/auth/recovery-service.js';
 import { cargarConfiguracionAuth } from '../../apps/api/src/config.js';
 import { crearServidorAuth } from '../../apps/api/src/server.js';
 import { crearClienteBaseDatosAuth } from '../../apps/api/src/db/client.js';
@@ -47,6 +49,8 @@ let cookieSesionDePrueba: string | null = null;
 let auditoria: AuditoriaIntegracion | null = null;
 let autenticacionCompartida: ServicioAutenticacionCore | null = null;
 let sesionesCompartidas: ServicioSesion | null = null;
+let limitadorCompartido: LimitadorIntentosPostgres | null = null;
+let recuperacionCompartida: ServicioRecuperacionAuth | null = null;
 
 /** Recupera la base de integración o falla sin intentar localizar otros servicios. */
 function exigirBasePrueba(): NonNullable<typeof database> {
@@ -84,6 +88,24 @@ function exigirServicioSesiones(): ServicioSesion {
   return sesionesCompartidas;
 }
 
+/** Recupera el limitador HMAC vinculado al pool PostgreSQL de la suite. */
+function exigirLimitador(): LimitadorIntentosPostgres {
+  if (limitadorCompartido === null) {
+    throw new Error('El limitador de integración no está inicializado.');
+  }
+
+  return limitadorCompartido;
+}
+
+/** Recupera el caso de uso de recuperación preparado con SMTP falso. */
+function exigirServicioRecuperacion(): ServicioRecuperacionAuth {
+  if (recuperacionCompartida === null) {
+    throw new Error('El servicio de recuperación de integración no está inicializado.');
+  }
+
+  return recuperacionCompartida;
+}
+
 /** Inicializa el usuario sintético, dependencias reales y servidor sin escuchar un puerto. */
 async function prepararRutasAuth(): Promise<void> {
   const hasheador = new Argon2PasswordHasher();
@@ -106,15 +128,29 @@ async function prepararRutasAuth(): Promise<void> {
   const repositorio = new PostgresAuthRepository(exigirBasePrueba());
   const sesionesAuth = new ServicioSesion(repositorio, relojFijo);
   sesionesCompartidas = sesionesAuth;
-  auditoria = new AuditoriaIntegracion();
+  const auditoriaLocal = new AuditoriaIntegracion();
+  auditoria = auditoriaLocal;
   const autenticacion = new ServicioAutenticacionCore(
     repositorio,
     hasheador,
     sesionesAuth,
-    auditoria,
+    auditoriaLocal,
     relojFijo,
   );
   autenticacionCompartida = autenticacion;
+  const limitador = new LimitadorIntentosPostgres(exigirBasePrueba(), Buffer.alloc(32, 53));
+  limitadorCompartido = limitador;
+  const recuperacion = new ServicioRecuperacionAuth({
+    repositorio,
+    hasheador,
+    correo: { async enviar() {} },
+    limitador,
+    auditoria: auditoriaLocal,
+    sesiones: sesionesAuth,
+    reloj: relojFijo,
+    publicAppOrigin: origenPublicoPrueba,
+  });
+  recuperacionCompartida = recuperacion;
   const configuracion = cargarConfiguracionAuth({
     NODE_ENV: 'test',
     PUBLIC_APP_ORIGIN: origenPublicoPrueba,
@@ -124,8 +160,10 @@ async function prepararRutasAuth(): Promise<void> {
     configuracion,
     autenticacion,
     sesiones: sesionesAuth,
-    auditoria,
+    auditoria: auditoriaLocal,
     reloj: relojFijo,
+    limitador,
+    recuperacion,
   });
   /** Ruta exclusiva de la suite para verificar la interpretación de headers de red. */
   aplicacion.get('/__test/client', (solicitud, respuesta) => {
@@ -220,6 +258,8 @@ async function pruebaCookiesProduccion(): Promise<void> {
     sesiones: exigirServicioSesiones(),
     auditoria: auditoria ?? new AuditoriaIntegracion(),
     reloj: relojFijo,
+    limitador: exigirLimitador(),
+    recuperacion: exigirServicioRecuperacion(),
   });
 
   try {

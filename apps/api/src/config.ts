@@ -21,6 +21,22 @@ export interface ConfiguracionAuth {
   readonly trustedProxyCidrs: readonly string[];
 }
 
+/** Configuración de envío SMTP con credenciales opcionales de un relé autorizado. */
+export interface ConfiguracionSmtpAuth {
+  /** Host del servidor SMTP configurado fuera del código. */
+  readonly host: string;
+  /** Puerto TCP SMTP validado. */
+  readonly port: number;
+  /** Selecciona TLS implícito; STARTTLS se exige cuando es false. */
+  readonly secure: boolean;
+  /** Nombre remitente del correo transaccional. */
+  readonly remitente: string;
+  /** Usuario SMTP opcional, siempre emparejado con password. */
+  readonly user?: string;
+  /** Secreto SMTP opcional, nunca incluido en logs o respuestas. */
+  readonly password?: string;
+}
+
 const NOMBRES_COOKIE = {
   production: { sesion: '__Host-portal_session', csrf: '__Host-portal_csrf' },
   development: { sesion: 'portal_dev_session', csrf: 'portal_dev_csrf' },
@@ -59,6 +75,62 @@ export function cargarConfiguracionAuth(
       validarListaProxies(variables['TRUSTED_PROXY_CIDRS'], entorno),
     ),
   };
+}
+
+/** Carga SMTP opcional en local y obligatorio en producción, sin exponer valores sensibles. */
+export function cargarConfiguracionSmtpAuth(
+  variables: NodeJS.ProcessEnv = process.env,
+): ConfiguracionSmtpAuth | null {
+  const entorno = resolverEntorno(variables['NODE_ENV']);
+  const host = variables['SMTP_HOST'];
+  if (host === undefined || host.length === 0) {
+    if (entorno === 'production' || hayConfiguracionSmtpParcial(variables)) {
+      throw new Error(
+        'SMTP_HOST y la configuración de transporte SMTP requerida no están completas.',
+      );
+    }
+
+    return null;
+  }
+
+  const port = Number(variables['SMTP_PORT']);
+  const secure = leerBooleanoEstricto(variables['SMTP_SECURE'], 'SMTP_SECURE');
+  const remitente = variables['SMTP_FROM'] ?? '';
+  const user = variables['SMTP_USER'];
+  const password = variables['SMTP_PASSWORD'];
+  if (
+    !esHostSmtpValido(host) ||
+    !Number.isInteger(port) ||
+    port < 1 ||
+    port > 65_535 ||
+    !esCorreoSmtpValido(remitente) ||
+    (user === undefined || user.length === 0) !== (password === undefined || password.length === 0)
+  ) {
+    throw new Error('La configuración SMTP no tiene un formato seguro y completo.');
+  }
+
+  return {
+    host,
+    port,
+    secure,
+    remitente,
+    ...(user === undefined || user.length === 0 ? {} : { user, password }),
+  };
+}
+
+/** Decodifica la clave HMAC de intentos y exige al menos 256 bits de entropía configurada. */
+export function cargarClaveHmacIntentos(variables: NodeJS.ProcessEnv = process.env): Buffer {
+  const valor = variables['AUTH_THROTTLE_HMAC_KEY'];
+  if (valor === undefined || !/^[A-Za-z0-9_-]{43}$/u.test(valor)) {
+    throw new Error('AUTH_THROTTLE_HMAC_KEY debe ser una clave base64url de 32 bytes.');
+  }
+
+  const clave = Buffer.from(valor, 'base64url');
+  if (clave.length !== 32 || clave.toString('base64url') !== valor) {
+    throw new Error('AUTH_THROTTLE_HMAC_KEY debe codificar exactamente 32 bytes.');
+  }
+
+  return clave;
 }
 
 /**
@@ -135,6 +207,44 @@ function validarListaProxies(valor: string | undefined, entorno: EntornoAuth): s
   }
 
   return proxies.map((entrada) => validarCidrProxy(entrada, entorno));
+}
+
+/** Detecta variables SMTP sueltas para que un error de configuración falle temprano. */
+function hayConfiguracionSmtpParcial(variables: NodeJS.ProcessEnv): boolean {
+  return [
+    variables['SMTP_PORT'],
+    variables['SMTP_SECURE'],
+    variables['SMTP_FROM'],
+    variables['SMTP_USER'],
+    variables['SMTP_PASSWORD'],
+  ].some((valor) => valor !== undefined);
+}
+
+/** Acepta nombres DNS o direcciones IP sin credenciales, puerto, ruta ni espacios. */
+function esHostSmtpValido(host: string): boolean {
+  return (
+    host.length <= 253 &&
+    host.trim() === host &&
+    !/[\s/@\\]/u.test(host) &&
+    (isIP(host) !== 0 || /^[A-Za-z0-9.-]+$/u.test(host))
+  );
+}
+
+/** Rechaza remitentes con sintaxis incompleta o caracteres de inyección de cabeceras. */
+function esCorreoSmtpValido(correo: string): boolean {
+  return /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}$/u.test(correo);
+}
+
+/** Interpreta booleanos de configuración sin truthiness implícita ni variantes ambiguas. */
+function leerBooleanoEstricto(valor: string | undefined, nombre: string): boolean {
+  if (valor === 'true') {
+    return true;
+  }
+  if (valor === 'false') {
+    return false;
+  }
+
+  throw new Error(`${nombre} debe configurarse explícitamente como true o false.`);
 }
 
 /** Acepta solo IP/CIDR válido y, fuera de producción, limita la confianza a loopback. */

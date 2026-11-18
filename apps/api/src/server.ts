@@ -12,6 +12,9 @@ import { registrarRutasUsuariosAdmin } from './routes/admin-user-routes.js';
 import type { ServicioSesion } from './auth/session-service.js';
 import { registrarDecoradorContextoAuth } from './auth/authorization.js';
 import type { ServicioUsuariosAdmin } from './auth/admin-user-service.js';
+import type { LimitadorIntentosAuth } from '../../../packages/core/src/auth/recovery-ports.js';
+import type { ServicioRecuperacionAuth } from './auth/recovery-service.js';
+import { registrarRutasRecuperacion } from './routes/recovery-routes.js';
 
 const CAMPOS_SENSIBLES_LOG = [
   'req.headers.cookie',
@@ -38,6 +41,10 @@ export interface DependenciasServidorAuth {
   readonly auditoria: EscritorAuditoriaAuth;
   /** Fuente UTC de tiempo inyectable para acciones sensibles. */
   readonly reloj: RelojAuth;
+  /** Limitador HMAC persistente que controla login y recuperación por red/cuenta. */
+  readonly limitador: LimitadorIntentosAuth;
+  /** Flujos de activación, recuperación y cambios propios de credenciales/correo. */
+  readonly recuperacion: ServicioRecuperacionAuth;
   /** Servicio opcional de administración registrado solo cuando el runtime lo configura. */
   readonly usuariosAdmin?: ServicioUsuariosAdmin;
 }
@@ -94,6 +101,11 @@ export async function crearServidorAuth(
     respuesta.code(404).send({ code: 'NOT_FOUND', message: 'La ruta solicitada no existe.' }),
   );
   registrarRutasAuth(aplicacion, dependencias);
+  await registrarRutasRecuperacion(aplicacion, {
+    configuracion: dependencias.configuracion,
+    sesiones: dependencias.sesiones,
+    recuperacion: dependencias.recuperacion,
+  });
   if (dependencias.usuariosAdmin !== undefined) {
     await registrarRutasUsuariosAdmin(aplicacion, {
       configuracion: dependencias.configuracion,
@@ -101,6 +113,7 @@ export async function crearServidorAuth(
       usuarios: dependencias.usuariosAdmin,
       auditoria: dependencias.auditoria,
       reloj: dependencias.reloj,
+      recuperacion: dependencias.recuperacion,
     });
   }
   await dependencias.autenticacion.preparar();

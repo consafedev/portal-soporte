@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { cargarConfiguracionAuth } from '../../apps/api/src/config.js';
+import {
+  cargarClaveHmacIntentos,
+  cargarConfiguracionAuth,
+  cargarConfiguracionSmtpAuth,
+} from '../../apps/api/src/config.js';
 
 const entornoBase = {
   PUBLIC_APP_ORIGIN: 'http://127.0.0.1:3000',
@@ -13,6 +17,45 @@ function definirPruebasDeConfiguracionAuth(): void {
   it('usa el nombre de cookie de pruebas solo en loopback', pruebaCookiesPrueba);
   it('valida y conserva proxies CIDR explícitos', pruebaListaProxies);
   it('rechaza orígenes públicos/inseguros o cabeceras proxy ambiguas', pruebaRechazaConfigInsegura);
+  it('exige configuración SMTP segura en producción y permite ausencia local', pruebaSmtp);
+  it('decodifica solo una clave HMAC canónica de 32 bytes', pruebaClaveHmac);
+}
+
+/** Comprueba transporte SMTP TLS y que una configuración parcial no pase inadvertida. */
+function pruebaSmtp(): void {
+  expect(cargarConfiguracionSmtpAuth({ NODE_ENV: 'development' })).toBeNull();
+  expect(() => cargarConfiguracionSmtpAuth({ NODE_ENV: 'production' })).toThrow();
+  expect(() =>
+    cargarConfiguracionSmtpAuth({
+      NODE_ENV: 'development',
+      SMTP_HOST: 'relay.example.test',
+      SMTP_PORT: '587',
+      SMTP_FROM: 'portal@example.test',
+      SMTP_SECURE: 'false',
+      SMTP_USER: 'cuenta-sintetica',
+    }),
+  ).toThrow();
+  expect(
+    cargarConfiguracionSmtpAuth({
+      NODE_ENV: 'development',
+      SMTP_HOST: 'relay.example.test',
+      SMTP_PORT: '587',
+      SMTP_FROM: 'portal@example.test',
+      SMTP_SECURE: 'false',
+      SMTP_USER: 'cuenta-sintetica',
+      SMTP_PASSWORD: 'valor-sintetico-de-prueba',
+    }),
+  ).toMatchObject({ host: 'relay.example.test', port: 587, secure: false });
+}
+
+/** Comprueba que la clave de límite de intentos represente exactamente 256 bits. */
+function pruebaClaveHmac(): void {
+  const claveSintetica = Buffer.alloc(32, 37).toString('base64url');
+
+  expect(cargarClaveHmacIntentos({ AUTH_THROTTLE_HMAC_KEY: claveSintetica })).toHaveLength(32);
+  expect(() =>
+    cargarClaveHmacIntentos({ AUTH_THROTTLE_HMAC_KEY: 'clave-corta-sintetica' }),
+  ).toThrow();
 }
 
 /** Comprueba el par de cookies de desarrollo y los atributos seguros comunes. */

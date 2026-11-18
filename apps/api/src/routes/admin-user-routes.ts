@@ -2,12 +2,15 @@ import { Type } from '@sinclair/typebox';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
   adminCreateUserSchema,
+  adminEmailChangeRequestSchema,
   adminUpdateUserSchema,
   adminUserResponseSchema,
   publicErrorResponseSchema,
+  recoveryAcceptedResponseSchema,
   userIdParamsSchema,
   type SolicitudAltaUsuarioAdmin,
   type SolicitudModificacionUsuarioAdmin,
+  type SolicitudCambioCorreoAdmin,
 } from '../../../../packages/contracts/src/auth.js';
 import type { EscritorAuditoriaAuth, RelojAuth } from '../../../../packages/core/src/auth/ports.js';
 import type { ConfiguracionAuth } from '../config.js';
@@ -22,6 +25,7 @@ import {
   requireRole,
 } from '../auth/authorization.js';
 import type { ServicioSesion } from '../auth/session-service.js';
+import { ErrorCredencialesAuth, ServicioRecuperacionAuth } from '../auth/recovery-service.js';
 
 const respuestaListaUsuariosSchema = Type.Array(adminUserResponseSchema);
 const respuestaRevocacionSchema = Type.Object(
@@ -41,6 +45,8 @@ export interface DependenciasRutasUsuariosAdmin {
   readonly auditoria: EscritorAuditoriaAuth;
   /** Reloj UTC usado por los eventos de auditoría. */
   readonly reloj: RelojAuth;
+  /** Servicio que emite invitaciones, restablecimientos y cambios de correo verificados. */
+  readonly recuperacion: ServicioRecuperacionAuth;
 }
 
 /** Registra listar/crear/editar/revocar con autenticación y rol comprobados en backend. */
@@ -67,6 +73,12 @@ export async function registrarRutasUsuariosAdmin(
         return respuesta.code(error.statusCode).send({
           code: error.code,
           message: obtenerMensajeErrorAdmin(error.code),
+        });
+      }
+      if (error instanceof ErrorCredencialesAuth) {
+        return respuesta.code(error.statusCode).send({
+          code: error.code,
+          message: 'No fue posible procesar la operación de credenciales.',
         });
       }
 
@@ -96,9 +108,16 @@ export async function registrarRutasUsuariosAdmin(
       solicitud: FastifyRequest<{ Body: SolicitudAltaUsuarioAdmin }>,
       respuesta: FastifyReply,
     ) {
-      return respuesta
-        .code(201)
-        .send(await dependencias.usuarios.crear(solicitud.body, exigirActorAdmin(solicitud)));
+      const actor = exigirActorAdmin(solicitud);
+      const usuario = await dependencias.usuarios.crear(solicitud.body, actor);
+      await dependencias.recuperacion.solicitarInvitacion(
+        usuario.id,
+        actor,
+        solicitud.ip,
+        solicitud.id,
+      );
+
+      return respuesta.code(201).send(usuario);
     }
 
     /** Actualiza campos permitidos y conserva el correo hasta verificar el cambio. */
@@ -131,6 +150,52 @@ export async function registrarRutasUsuariosAdmin(
           exigirActorAdmin(solicitud),
         ),
       });
+    }
+
+    /** Emite un enlace de activación o restablecimiento sin asignar la credencial manualmente. */
+    async function restablecerAcceso(
+      solicitud: FastifyRequest<{ Params: { id: string } }>,
+      respuesta: FastifyReply,
+    ) {
+      const resultado = await dependencias.recuperacion.solicitarRestablecimientoAdmin(
+        solicitud.params.id,
+        exigirActorAdmin(solicitud),
+        solicitud.ip,
+        solicitud.id,
+      );
+      if (resultado === 'LIMITADA') {
+        return respuesta.code(429).send({
+          code: 'RATE_LIMITED',
+          message: 'Espera antes de volver a solicitar este proceso.',
+        });
+      }
+
+      return respuesta.code(202).send({ accepted: true });
+    }
+
+    /** Envía un enlace al correo nuevo sin sustituirlo hasta verificar el destino. */
+    async function cambiarCorreoAdmin(
+      solicitud: FastifyRequest<{
+        Params: { id: string };
+        Body: SolicitudCambioCorreoAdmin;
+      }>,
+      respuesta: FastifyReply,
+    ) {
+      const resultado = await dependencias.recuperacion.solicitarCambioCorreoAdmin(
+        solicitud.params.id,
+        solicitud.body.newEmail,
+        exigirActorAdmin(solicitud),
+        solicitud.ip,
+        solicitud.id,
+      );
+      if (resultado === 'LIMITADA') {
+        return respuesta.code(429).send({
+          code: 'RATE_LIMITED',
+          message: 'Espera antes de volver a solicitar este proceso.',
+        });
+      }
+
+      return respuesta.code(202).send({ accepted: true });
     }
 
     rutas.get(
@@ -203,6 +268,46 @@ export async function registrarRutasUsuariosAdmin(
         },
       },
       revocarSesiones,
+    );
+    rutas.post<{ Params: { id: string } }>(
+      '/api/v1/admin/users/:id/reset',
+      {
+        preHandler,
+        schema: {
+          params: userIdParamsSchema,
+          response: {
+            202: recoveryAcceptedResponseSchema,
+            401: publicErrorResponseSchema,
+            403: publicErrorResponseSchema,
+            404: publicErrorResponseSchema,
+            429: publicErrorResponseSchema,
+          },
+        },
+      },
+      restablecerAcceso,
+    );
+    rutas.post<{
+      Params: { id: string };
+      Body: SolicitudCambioCorreoAdmin;
+    }>(
+      '/api/v1/admin/users/:id/email-change',
+      {
+        preHandler,
+        schema: {
+          params: userIdParamsSchema,
+          body: adminEmailChangeRequestSchema,
+          response: {
+            202: recoveryAcceptedResponseSchema,
+            400: publicErrorResponseSchema,
+            401: publicErrorResponseSchema,
+            403: publicErrorResponseSchema,
+            404: publicErrorResponseSchema,
+            409: publicErrorResponseSchema,
+            429: publicErrorResponseSchema,
+          },
+        },
+      },
+      cambiarCorreoAdmin,
     );
   });
 }

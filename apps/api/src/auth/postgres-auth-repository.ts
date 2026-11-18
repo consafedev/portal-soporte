@@ -11,6 +11,12 @@ import type {
 } from '../../../../packages/core/src/auth/ports.js';
 import type { RespuestaUsuarioAdmin } from '../../../../packages/core/src/auth/models.js';
 import type {
+  CambioConsumoTokenAuth,
+  CuentaCredencialesAuth,
+  EntradaTokenRecuperacionAuth,
+  RepositorioCredencialesAuth,
+} from '../../../../packages/core/src/auth/recovery-ports.js';
+import type {
   CambiosUsuarioAdminPersistidos,
   EntradaBootstrapAdminPersistida,
   EntradaUsuarioAdminPersistida,
@@ -31,9 +37,24 @@ const columnasUsuarioAdmin = {
   createdAt: users.createdAt,
 } as const;
 
+const columnasCredenciales = {
+  id: users.id,
+  usernameNormalized: users.usernameNormalized,
+  email: users.email,
+  emailNormalized: users.emailNormalized,
+  emailVerifiedAt: users.emailVerifiedAt,
+  passwordHash: users.passwordHash,
+  role: users.role,
+  status: users.status,
+} as const;
+
 /** Implementa la persistencia de credenciales y sesiones sobre PostgreSQL. */
 export class PostgresAuthRepository
-  implements RepositorioAutenticacion, RepositorioUsuariosAdmin, EscritorAuditoriaAuth
+  implements
+    RepositorioAutenticacion,
+    RepositorioUsuariosAdmin,
+    RepositorioCredencialesAuth,
+    EscritorAuditoriaAuth
 {
   /** Construye el repositorio con la conexión limitada del núcleo de autenticación. */
   public constructor(private readonly database: BaseDatosAuth) {}
@@ -167,6 +188,157 @@ export class PostgresAuthRepository
   /** Lista usuarios administrativos limitando columnas a las permitidas por el contrato. */
   public listarUsuarios(): Promise<readonly RespuestaUsuarioAdmin[]> {
     return this.database.select(columnasUsuarioAdmin).from(users).orderBy(users.usernameNormalized);
+  }
+
+  /** Busca una cuenta por correo canónico sin filtrar su estado al servicio de dominio. */
+  public async buscarCuentaPorCorreo(
+    emailNormalizado: string,
+  ): Promise<CuentaCredencialesAuth | null> {
+    const [cuenta] = await this.database
+      .select(columnasCredenciales)
+      .from(users)
+      .where(eq(users.emailNormalized, emailNormalizado))
+      .limit(1);
+
+    return cuenta ?? null;
+  }
+
+  /** Busca campos mínimos de recuperación por UUID sin seleccionar datos de auditoría. */
+  public async buscarCuentaPorId(userId: string): Promise<CuentaCredencialesAuth | null> {
+    const [cuenta] = await this.database
+      .select(columnasCredenciales)
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+
+    return cuenta ?? null;
+  }
+
+  /** Reemplaza tokens previos del propósito, guarda digest y evento en una transacción. */
+  public async crearToken(
+    entrada: EntradaTokenRecuperacionAuth,
+    evento: EventoAuditoriaAuth,
+  ): Promise<void> {
+    await this.database.transaction(async (transaccion) => {
+      await transaccion
+        .update(recoveryTokens)
+        .set({ usedAt: entrada.createdAt })
+        .where(
+          and(
+            eq(recoveryTokens.userId, entrada.userId),
+            eq(recoveryTokens.purpose, entrada.purpose),
+            isNull(recoveryTokens.usedAt),
+          ),
+        );
+      await transaccion.insert(recoveryTokens).values(entrada);
+      await transaccion.insert(auditEvents).values(crearFilaAuditoria(evento));
+    });
+  }
+
+  /** Consume un solo token de propósito exacto y confirma usuario, sesiones y auditoría. */
+  public async consumirToken(
+    tokenHash: string,
+    cambio: CambioConsumoTokenAuth,
+    ahora: Date,
+    evento: EventoAuditoriaAuth,
+  ): Promise<boolean> {
+    try {
+      return await this.database.transaction(
+        async (transaccion) => {
+          await bloquearInvarianteAdministradores(transaccion);
+          const [token] = await transaccion
+            .select({
+              id: recoveryTokens.id,
+              userId: recoveryTokens.userId,
+              targetEmail: recoveryTokens.targetEmail,
+            })
+            .from(recoveryTokens)
+            .where(
+              and(
+                eq(recoveryTokens.tokenHash, tokenHash),
+                eq(recoveryTokens.purpose, cambio.purpose),
+                isNull(recoveryTokens.usedAt),
+                gt(recoveryTokens.expiresAt, ahora),
+              ),
+            )
+            .for('update')
+            .limit(1);
+          if (token === undefined) {
+            return false;
+          }
+
+          const [cuenta] = await transaccion
+            .select(columnasCredenciales)
+            .from(users)
+            .where(eq(users.id, token.userId))
+            .for('update')
+            .limit(1);
+          if (cuenta === undefined || !puedeConsumirToken(cuenta, token.targetEmail, cambio)) {
+            return false;
+          }
+
+          if (cambio.purpose === 'ACTIVATION' && cuenta.role === 'ADMIN') {
+            await contarAdministradoresActivos(transaccion);
+          }
+
+          await aplicarCambioToken(transaccion, cuenta, token.targetEmail, cambio, ahora);
+          await transaccion
+            .update(recoveryTokens)
+            .set({ usedAt: ahora })
+            .where(and(eq(recoveryTokens.userId, cuenta.id), isNull(recoveryTokens.usedAt)));
+          if (cambio.purpose === 'PASSWORD_RECOVERY') {
+            await transaccion
+              .update(sessions)
+              .set({ revokedAt: ahora })
+              .where(and(eq(sessions.userId, cuenta.id), isNull(sessions.revokedAt)));
+          }
+          await transaccion
+            .insert(auditEvents)
+            .values(crearFilaAuditoria({ ...evento, targetUserId: cuenta.id }));
+
+          return true;
+        },
+        { isolationLevel: 'read committed' },
+      );
+    } catch (error) {
+      traducirErrorUnicidad(error);
+    }
+  }
+
+  /** Cambia hash, invalida sesiones/tokens y audita sin permitir una ventana parcial. */
+  public async cambiarContrasena(
+    userId: string,
+    passwordHash: string,
+    ahora: Date,
+    evento: EventoAuditoriaAuth,
+  ): Promise<boolean> {
+    return this.database.transaction(async (transaccion) => {
+      const [cuenta] = await transaccion
+        .select({ id: users.id, status: users.status })
+        .from(users)
+        .where(eq(users.id, userId))
+        .for('update')
+        .limit(1);
+      if (cuenta === undefined || cuenta.status !== 'ACTIVE') {
+        return false;
+      }
+
+      await transaccion
+        .update(users)
+        .set({ passwordHash, updatedAt: ahora })
+        .where(eq(users.id, userId));
+      await transaccion
+        .update(sessions)
+        .set({ revokedAt: ahora })
+        .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)));
+      await transaccion
+        .update(recoveryTokens)
+        .set({ usedAt: ahora })
+        .where(and(eq(recoveryTokens.userId, userId), isNull(recoveryTokens.usedAt)));
+      await transaccion.insert(auditEvents).values(crearFilaAuditoria(evento));
+
+      return true;
+    });
   }
 
   /** Inserta una invitación y audita la operación dentro de READ COMMITTED. */
@@ -354,6 +526,81 @@ async function bloquearInvarianteAdministradores(
   if (fila === undefined) {
     throw new ErrorRepositorioUsuariosAdmin('AUTH_INVARIANT_UNAVAILABLE');
   }
+}
+
+/** Confirma que el estado actual de la cuenta admite el propósito de token solicitado. */
+function puedeConsumirToken(
+  cuenta: CuentaCredencialesAuth,
+  targetEmail: string | null,
+  cambio: CambioConsumoTokenAuth,
+): boolean {
+  if (cambio.purpose === 'ACTIVATION') {
+    return (
+      targetEmail === null && cuenta.status === 'PENDING_ACTIVATION' && cuenta.passwordHash === null
+    );
+  }
+  if (cambio.purpose === 'PASSWORD_RECOVERY') {
+    return (
+      targetEmail === null &&
+      cuenta.status === 'ACTIVE' &&
+      cuenta.emailVerifiedAt !== null &&
+      cuenta.passwordHash !== null
+    );
+  }
+  if (cambio.purpose === 'EMAIL_CHANGE') {
+    return targetEmail !== null && cuenta.status === 'ACTIVE';
+  }
+
+  return targetEmail === null && cuenta.status === 'ACTIVE' && cuenta.emailVerifiedAt === null;
+}
+
+/** Aplica el cambio autorizado por token mientras la fila de usuario está bloqueada. */
+async function aplicarCambioToken(
+  transaccion: Parameters<Parameters<BaseDatosAuth['transaction']>[0]>[0],
+  cuenta: CuentaCredencialesAuth,
+  targetEmail: string | null,
+  cambio: CambioConsumoTokenAuth,
+  ahora: Date,
+): Promise<void> {
+  if (cambio.purpose === 'ACTIVATION') {
+    await transaccion
+      .update(users)
+      .set({
+        passwordHash: cambio.passwordHash,
+        status: 'ACTIVE',
+        emailVerifiedAt: ahora,
+        updatedAt: ahora,
+      })
+      .where(eq(users.id, cuenta.id));
+    return;
+  }
+  if (cambio.purpose === 'PASSWORD_RECOVERY') {
+    await transaccion
+      .update(users)
+      .set({ passwordHash: cambio.passwordHash, updatedAt: ahora })
+      .where(eq(users.id, cuenta.id));
+    return;
+  }
+  if (cambio.purpose === 'EMAIL_CHANGE') {
+    if (targetEmail === null) {
+      throw new Error('El token de cambio de correo no tiene destino persistido.');
+    }
+    await transaccion
+      .update(users)
+      .set({
+        email: targetEmail,
+        emailNormalized: targetEmail,
+        emailVerifiedAt: ahora,
+        updatedAt: ahora,
+      })
+      .where(eq(users.id, cuenta.id));
+    return;
+  }
+
+  await transaccion
+    .update(users)
+    .set({ emailVerifiedAt: ahora, updatedAt: ahora })
+    .where(eq(users.id, cuenta.id));
 }
 
 /** Cuenta ADMIN activos en una sentencia posterior al bloqueo singleton. */

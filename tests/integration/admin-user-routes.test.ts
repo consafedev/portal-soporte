@@ -4,14 +4,16 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ServicioAutenticacionCore } from '../../apps/api/src/auth/auth-service.js';
 import { Argon2PasswordHasher } from '../../apps/api/src/auth/argon2-password-hasher.js';
 import { ServicioUsuariosAdmin } from '../../apps/api/src/auth/admin-user-service.js';
+import { LimitadorIntentosPostgres } from '../../apps/api/src/auth/attempt-limiter.js';
 import { ErrorRepositorioUsuariosAdmin } from '../../packages/core/src/auth/admin-ports.js';
 import { PostgresAuthRepository } from '../../apps/api/src/auth/postgres-auth-repository.js';
 import { ServicioSesion } from '../../apps/api/src/auth/session-service.js';
+import { ServicioRecuperacionAuth } from '../../apps/api/src/auth/recovery-service.js';
 import { cargarConfiguracionAuth } from '../../apps/api/src/config.js';
 import { crearServidorAuth } from '../../apps/api/src/server.js';
 import { crearClienteBaseDatosAuth } from '../../apps/api/src/db/client.js';
-import { auditEvents, sessions, users } from '../../apps/api/src/db/schema.js';
-import type { RelojAuth } from '../../packages/core/src/auth/ports.js';
+import { auditEvents, recoveryTokens, sessions, users } from '../../apps/api/src/db/schema.js';
+import type { MensajeCorreoAuth, RelojAuth } from '../../packages/core/src/auth/ports.js';
 
 const urlBase = process.env['TEST_DATABASE_URL'];
 const database =
@@ -41,6 +43,7 @@ let servicioAdmin: ServicioUsuariosAdmin | null = null;
 let cookieAdmin: string | null = null;
 let cookieSupport: string | null = null;
 let idNuevoUsuario: string | null = null;
+const mensajesAdmin: MensajeCorreoAuth[] = [];
 
 /** Recupera el único PostgreSQL efímero de la suite o falla de forma explícita. */
 function exigirBasePrueba(): NonNullable<typeof database> {
@@ -94,6 +97,17 @@ function leerCookie(
   }
 
   return valor;
+}
+
+/** Extrae el token de prueba únicamente del fragmento del mensaje SMTP falso. */
+function extraerTokenCorreo(mensaje: MensajeCorreoAuth): string {
+  const parametros = new URLSearchParams(new URL(mensaje.enlace).hash.slice(1));
+  const token = parametros.get('token');
+  if (token === null) {
+    throw new Error('El mensaje sintético no contiene el enlace esperado.');
+  }
+
+  return token;
 }
 
 /** Obtiene token CSRF y cookie homónima con una respuesta no cacheable. */
@@ -162,6 +176,22 @@ async function prepararAdministracion(): Promise<void> {
     reloj,
   );
   const usuariosAdmin = new ServicioUsuariosAdmin(repositorio, reloj);
+  const limitador = new LimitadorIntentosPostgres(exigirBasePrueba(), Buffer.alloc(32, 29));
+  const recuperacion = new ServicioRecuperacionAuth({
+    repositorio,
+    hasheador,
+    correo: {
+      /** Conserva mensajes falsos solo en memoria para inspeccionar propósito/destino. */
+      async enviar(mensaje) {
+        mensajesAdmin.push(mensaje);
+      },
+    },
+    limitador,
+    auditoria: repositorio,
+    sesiones: sesionesAuth,
+    reloj,
+    publicAppOrigin: origen,
+  });
   servicioAdmin = usuariosAdmin;
   aplicacion = await crearServidorAuth({
     configuracion: cargarConfiguracionAuth({
@@ -173,6 +203,8 @@ async function prepararAdministracion(): Promise<void> {
     sesiones: sesionesAuth,
     auditoria: repositorio,
     reloj,
+    limitador,
+    recuperacion,
     usuariosAdmin,
   });
   cookieAdmin = await iniciarSesion(usuarioAdmin);
@@ -246,6 +278,15 @@ function definirPruebasAdmin(): void {
         method: 'POST' as const,
         url: `/api/v1/admin/users/${idSupport}/sessions/revoke`,
       },
+      {
+        method: 'POST' as const,
+        url: `/api/v1/admin/users/${idSupport}/reset`,
+      },
+      {
+        method: 'POST' as const,
+        url: `/api/v1/admin/users/${idSupport}/email-change`,
+        payload: { newEmail: `deny_${sufijo}@example.test` },
+      },
     ];
 
     for (const operacion of operaciones) {
@@ -313,6 +354,83 @@ function definirPruebasAdmin(): void {
     expect(respuesta.body).not.toContain('password');
     expect(fila).toHaveLength(1);
     expect(fila[0]?.passwordHash).toBeNull();
+  });
+
+  it('permite a ADMIN enviar reset sin devolver ni almacenar el token en claro', async () => {
+    const cookie = cookieAdmin;
+    if (cookie === null) {
+      throw new Error('La prueba requiere la sesión ADMIN preparada.');
+    }
+    const mensajesPrevios = mensajesAdmin.length;
+    const respuesta = await exigirAplicacion().inject({
+      method: 'POST',
+      url: `/api/v1/admin/users/${idSupport}/reset`,
+      headers: await headersDeEscritura(cookie),
+    });
+    const mensaje = mensajesAdmin
+      .slice(mensajesPrevios)
+      .find((elemento) => elemento.tipo === 'RECUPERACION');
+    if (mensaje === undefined) {
+      throw new Error('El SMTP falso no recibió el restablecimiento sintético.');
+    }
+    const token = extraerTokenCorreo(mensaje);
+    const filas = await exigirBasePrueba()
+      .select({ tokenHash: recoveryTokens.tokenHash, purpose: recoveryTokens.purpose })
+      .from(recoveryTokens)
+      .where(eq(recoveryTokens.userId, idSupport));
+
+    expect(respuesta.statusCode).toBe(202);
+    expect(respuesta.json()).toEqual({ accepted: true });
+    expect(respuesta.body).not.toContain(token);
+    expect(filas).toContainEqual({
+      tokenHash: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      purpose: 'PASSWORD_RECOVERY',
+    });
+    expect(filas.some((fila) => fila.tokenHash === token)).toBe(false);
+  });
+
+  it('permite a ADMIN cambiar correo solo mediante el enlace de verificación', async () => {
+    const cookie = cookieAdmin;
+    const correoNuevo = `correo_nuevo_${sufijo}@example.test`;
+    if (cookie === null) {
+      throw new Error('La prueba requiere la sesión ADMIN preparada.');
+    }
+    const mensajesPrevios = mensajesAdmin.length;
+    const respuesta = await exigirAplicacion().inject({
+      method: 'POST',
+      url: `/api/v1/admin/users/${idSupport}/email-change`,
+      headers: await headersDeEscritura(cookie),
+      payload: { newEmail: correoNuevo },
+    });
+    const mensaje = mensajesAdmin
+      .slice(mensajesPrevios)
+      .find((elemento) => elemento.tipo === 'CAMBIO_CORREO');
+    if (mensaje === undefined) {
+      throw new Error('El SMTP falso no recibió la verificación sintética de correo.');
+    }
+    const token = extraerTokenCorreo(mensaje);
+    const filas = await exigirBasePrueba()
+      .select({
+        tokenHash: recoveryTokens.tokenHash,
+        purpose: recoveryTokens.purpose,
+        targetEmail: recoveryTokens.targetEmail,
+      })
+      .from(recoveryTokens)
+      .where(eq(recoveryTokens.userId, idSupport));
+    const cuenta = await exigirBasePrueba()
+      .select({ email: users.email })
+      .from(users)
+      .where(eq(users.id, idSupport));
+
+    expect(respuesta.statusCode).toBe(202);
+    expect(respuesta.body).not.toContain(token);
+    expect(filas).toContainEqual({
+      tokenHash: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      purpose: 'EMAIL_CHANGE',
+      targetEmail: correoNuevo,
+    });
+    expect(filas.some((fila) => fila.tokenHash === token)).toBe(false);
+    expect(cuenta[0]?.email).toBe(`${usuarioSupport}@example.test`);
   });
 
   it('lista únicamente DTOs administrativos sin hashes ni secretos', async () => {

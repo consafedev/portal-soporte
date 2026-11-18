@@ -15,6 +15,8 @@ import type {
   ServicioAutenticacion,
 } from '../../../../packages/core/src/auth/ports.js';
 import type { ConfiguracionAuth } from '../config.js';
+import type { LimitadorIntentosAuth } from '../../../../packages/core/src/auth/recovery-ports.js';
+import { normalizarUsuario } from '../../../../packages/core/src/auth/policies.js';
 import { crearTokenOpaco } from '../auth/token-service.js';
 import { ServicioSesion } from '../auth/session-service.js';
 
@@ -45,9 +47,11 @@ export function registrarRutasAuth(
     readonly sesiones: ServicioSesion;
     readonly auditoria: EscritorAuditoriaAuth;
     readonly reloj: RelojAuth;
+    /** Limitador que almacena digests HMAC de username/IP y controla fuerza bruta. */
+    readonly limitador: LimitadorIntentosAuth;
   },
 ): void {
-  const { configuracion, autenticacion, sesiones, auditoria, reloj } = dependencias;
+  const { configuracion, autenticacion, sesiones, auditoria, reloj, limitador } = dependencias;
 
   /** Emite token CSRF en cookie HttpOnly y lo devuelve sin cachear la respuesta. */
   aplicacion.get(
@@ -76,10 +80,34 @@ export function registrarRutasAuth(
         response: {
           200: respuestaLoginSchema,
           401: publicErrorResponseSchema,
+          429: publicErrorResponseSchema,
         },
       },
     },
     async (solicitud, respuesta) => {
+      const usernameNormalizado = normalizarUsuario(solicitud.body.username);
+      const permitido = await limitador.registrarIntento(
+        'LOGIN',
+        usernameNormalizado,
+        solicitud.ip,
+        reloj.ahora(),
+      );
+      if (!permitido) {
+        await auditoria.registrar({
+          actorUserId: null,
+          action: 'AUTH_ATTEMPT_LIMITED',
+          targetUserId: null,
+          outcome: 'DENIED',
+          metadata: { requestId: solicitud.id, scope: 'LOGIN' },
+          createdAt: reloj.ahora(),
+        });
+
+        return respuesta.code(429).send({
+          code: 'RATE_LIMITED',
+          message: 'El usuario o la contraseña no son válidos.',
+        });
+      }
+
       const sesionAnterior = solicitud.cookies[configuracion.cookieSesionNombre];
       if (sesionAnterior !== undefined) {
         await sesiones.revocar(sesionAnterior);
@@ -97,6 +125,8 @@ export function registrarRutasAuth(
           message: 'El usuario o la contraseña no son válidos.',
         });
       }
+
+      await limitador.reiniciarIntentos('LOGIN', usernameNormalizado, solicitud.ip);
 
       respuesta.setCookie(configuracion.cookieSesionNombre, resultado.tokenSesion, {
         httpOnly: true,
