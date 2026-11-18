@@ -246,6 +246,9 @@ importers:
 
   .:
     devDependencies:
+      '@sinclair/typebox':
+        specifier: 0.34.52
+        version: 0.34.52
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
@@ -299,7 +302,11 @@ importers:
 
   packages/connectors: {}
 
-  packages/contracts: {}
+  packages/contracts:
+    dependencies:
+      '@sinclair/typebox':
+        specifier: 0.34.52
+        version: 0.34.52
 
   packages/core: {}
 
@@ -885,6 +892,9 @@ packages:
   '@secretlint/walker@14.0.1':
     resolution: {integrity: sha512-kcsVP8oxHxhba1IYTRCt4esHFsXTbXtXI6uwD5Oe3/ALtpD1h0a8rdVV7g0bLH5F8ZLeU4HH2H/W5KQzkygoMg==}
     engines: {node: '>=22.0.0'}
+
+  '@sinclair/typebox@0.34.52':
+    resolution: {integrity: sha512-XiMQh7qqVlxZzcVD+kkGMNGMzcTrDMLWI7S4x7z1MkCkbDPrekpZXEUK0eZqZFMuHQg2a2DZOcDIh9o5v3Gonw==}
 
   '@swc/helpers@0.5.23':
     resolution: {integrity: sha512-5lSsMOTXURePglDfvuAQUqkGek9Hg2kksOYay2m0+XR++b2NWYL/4sWyuvVBIs8oKnJaxkdi9whaL/sqN13afw==}
@@ -3184,6 +3194,8 @@ snapshots:
   '@secretlint/walker@14.0.1':
     dependencies:
       picomatch: 4.0.7
+
+  '@sinclair/typebox@0.34.52': {}
 
   '@swc/helpers@0.5.23':
     dependencies:

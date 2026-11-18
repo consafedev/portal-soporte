@@ -47,7 +47,8 @@
 - Create: `packages/core/src/auth/models.ts`
 - Create: `packages/core/src/auth/policies.ts`
 - Modify: `packages/core/src/index.ts`
-- Test: `tests/unit/auth-policies.test.ts`
+- Test: `tests/auth-policies.test.ts`
+- Test: `tests/auth-contracts.test.ts`
 
 **Interfaces:**
 - Produces `RolUsuario`, `EstadoUsuario`, `SolicitudLogin`, `SolicitudCambioContrasena`, `RespuestaUsuarioPublico`, `RespuestaUsuarioAdmin`, and TypeBox schemas for every request/response used by Tasks 3–7.

@@ -28,6 +28,7 @@
     "check:dependencies:ci": "corepack pnpm@12.21.0 exec node scripts/check-dependency-audit.mjs"
   },
   "devDependencies": {
+    "@sinclair/typebox": "0.34.52",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
