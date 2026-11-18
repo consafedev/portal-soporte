@@ -1,0 +1,3 @@
+ALTER TABLE "auth_throttle_windows" ADD COLUMN "expires_at" timestamp with time zone NOT NULL;--> statement-breakpoint
+CREATE INDEX "auth_throttle_expires_at_idx" ON "auth_throttle_windows" USING btree ("expires_at");--> statement-breakpoint
+ALTER TABLE "auth_throttle_windows" ADD CONSTRAINT "auth_throttle_expiration_check" CHECK ("auth_throttle_windows"."expires_at" > '1970-01-01T00:00:00Z'::timestamptz);

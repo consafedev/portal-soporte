@@ -55,11 +55,11 @@
 - Produces `normalizarUsuario(valor: string): string`, `normalizarCorreo(valor: string): string`, `contarPuntosCodigo(texto: string): number`, and `validarNuevaContrasena(valor: string): ResultadoValidacionContrasena`.
 - Username normalization accepts only ASCII letters, digits, `.`, `_`, `-`, 3–64 characters, trims and lowercases. Email trims and lowercases. Password validation counts Unicode code points, requires 15–128, and does not trim or truncate.
 
-- [ ] **Step 1: Write failing unit tests** for the username/email rules, Unicode code-point length, preserved whitespace, password boundaries, role/status values, and strict rejection of unknown request properties.
-- [ ] **Step 2: Run `corepack pnpm@12.21.0 exec vitest run tests/unit/auth-policies.test.ts`; Expected:** FAIL because the policies/contracts do not exist.
-- [ ] **Step 3: Implement the contracts and pure policies** with stable Spanish validation errors and TSDoc on every exported declaration.
-- [ ] **Step 4: Re-run the focused test and `corepack pnpm@12.21.0 test`; Expected:** the focused cases and existing repository tests pass.
-- [ ] **Step 5: Commit** as `feat(auth): PS-003 agregar contratos y políticas de identidad` with this task's WORKLOG entry.
+- [x] **Step 1: Write failing unit tests** for the username/email rules, Unicode code-point length, preserved whitespace, password boundaries, role/status values, and strict rejection of unknown request properties.
+- [x] **Step 2: Run `corepack pnpm@12.21.0 exec vitest run tests/auth-policies.test.ts tests/auth-contracts.test.ts`; Expected:** FAIL because the policies/contracts do not exist.
+- [x] **Step 3: Implement the contracts and pure policies** with stable Spanish validation errors and TSDoc on every exported declaration.
+- [x] **Step 4: Re-run the focused test and `corepack pnpm@12.21.0 test`; Expected:** the focused cases and existing repository tests pass.
+- [x] **Step 5: Commit** as `feat(auth): PS-003 agregar contratos y políticas de identidad` with this task's WORKLOG entry.
 
 ### Task 2: PostgreSQL schema, migrations, and isolated test foundations
 
@@ -67,26 +67,30 @@
 - Create: `apps/api/src/db/schema.ts`
 - Create: `apps/api/src/db/client.ts`
 - Create: `apps/api/src/db/migrate.ts`
-- Create: `apps/api/drizzle/0001_auth_core.sql`
+- Create: `apps/api/drizzle/0000_auth_core.sql`, `apps/api/drizzle/0001_auth_throttle_expiry.sql`
 - Create: `apps/api/drizzle/meta/_journal.json`
+- Create: `apps/api/drizzle/meta/0000_snapshot.json`
 - Create: `drizzle.config.ts`
 - Create: `vitest.integration.config.ts`
 - Create: `scripts/with-test-postgres.ts`
 - Modify: root and API `package.json`, `pnpm-lock.yaml`, `.github/workflows/ci.yml`
 - Create: `tests/integration/auth-migrations.test.ts`
 - Create: `tests/unit/auth-schema-pglite.test.ts`
+- Create: `tests/unit/auth-db-client.test.ts`, `tests/support/auth-migration-fixture.ts`
+- Modify: `scripts/check-dependency-audit.mjs`, its unit tests and `docs/operations/DEPENDENCY_SECURITY.md` to preserve the approved picomatch exception with current pnpm summary semantics.
+- Modify: `.prettierignore` and `tsconfig.tests.json` so generated SQL is managed by Drizzle and all tests/helpers are strict-typechecked.
 
 **Interfaces:**
 - Produces Drizzle tables `users`, `sessions`, `recoveryTokens`, `authThrottleWindows`, `auditEvents`, and `authInvariants`.
-- `authInvariants` has one seeded `id=1` row. `users` includes nullable `emailVerifiedAt`; unique normalized username/email, valid enum/check constraints, foreign keys, token-hash uniqueness, expiry indexes, and audit indexes are versioned in migration 0001.
+- `authInvariants` has one seeded `id=1` row. `users` includes nullable `emailVerifiedAt`; unique normalized username/email, valid enum/check constraints, foreign keys, token-hash uniqueness, expiry indexes, and audit indexes are versioned in migrations 0000–0001.
 - Produces a bounded PostgreSQL pool factory that reads DB settings from environment and rejects non-local/test database settings in test mode.
 - PGlite tests cover schema/query simulation only; they do not assert row-lock, race, or PostgreSQL server behavior. `scripts/with-test-postgres.ts` creates a disposable local cluster and `portal_ps003_test` database, runs the selected integration/E2E command, then shuts down and removes only its own temporary directory.
 
-- [ ] **Step 1: Write failing PGlite schema tests and real PostgreSQL migration tests** for constraints, nullable pending passwords, uniqueness, one seeded invariant row, clean application from an empty cluster, and migration journal behavior.
-- [ ] **Step 2: Run the focused tests; Expected:** fail because the schema, migration, and DB setup are absent.
-- [ ] **Step 3: Add Drizzle/PostgreSQL/PGlite dependencies and implement the schema/migration/client.** Use parametrized ORM queries and a test harness that points only to an ephemeral localhost PostgreSQL cluster/database.
-- [ ] **Step 4: Run PGlite tests and PostgreSQL integration tests; Expected:** schema checks pass on PGlite and migration/constraint checks pass on the real server.
-- [ ] **Step 5: Commit** as `feat(auth-db): PS-003 crear esquema de identidad` with migration evidence in WORKLOG.
+- [x] **Step 1: Write failing PGlite schema tests and real PostgreSQL migration tests** for constraints, nullable pending passwords, uniqueness, one seeded invariant row, clean application from an empty cluster, and migration journal behavior.
+- [x] **Step 2: Run the focused tests; Expected:** fail because the schema, migration, and DB setup are absent.
+- [x] **Step 3: Add Drizzle/PostgreSQL/PGlite dependencies and implement the schema/migration/client.** Use parametrized ORM queries and a test harness that points only to an ephemeral localhost PostgreSQL cluster/database.
+- [x] **Step 4: Run PGlite tests and PostgreSQL integration tests; Expected:** schema checks pass on PGlite and migration/constraint checks pass on the real server.
+- [x] **Step 5: Commit** as `feat(auth-db): PS-003 crear esquema de identidad` with migration evidence in WORKLOG.
 
 ### Task 3: Password hashing, tokens, sessions, and application ports
 

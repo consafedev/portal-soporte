@@ -3,6 +3,9 @@ packages:
   - packages/*
   - modules/*
 
+allowBuilds:
+  esbuild: true
+
 catalog:
   '@types/node': 24.19.2
   '@types/react': 19.3.0

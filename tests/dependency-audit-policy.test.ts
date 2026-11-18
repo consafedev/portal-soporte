@@ -125,7 +125,7 @@ const informeVulnerable: InformeDeAuditoria = {
     },
   },
   metadata: {
-    vulnerabilities: { info: 0, low: 0, moderate: 0, high: 1, critical: 0 },
+    vulnerabilities: { info: 0, low: 0, moderate: 1, high: 1, critical: 0 },
     dependencies: 104,
     devDependencies: 377,
     optionalDependencies: 106,
@@ -212,6 +212,74 @@ async function rechazaOtraAlertaAlta(): Promise<void> {
 
 test('rechaza cualquier otra alerta alta o crítica', rechazaOtraAlertaAlta);
 
+/** Rechaza un resumen cuyo total no coincide con las instancias descritas. */
+async function rechazaResumenInconsistente(): Promise<void> {
+  const informe = structuredClone(informeVulnerable);
+  informe.metadata.vulnerabilities.moderate = 0;
+
+  const resultado = evaluateAuditReport(informe, 1, politicaAprobada, fechaDentroDeVigencia);
+
+  expect(resultado.permitted).toBe(false);
+  expect(resultado.message).toContain('total de vulnerabilidades');
+}
+
+test('rechaza un resumen incongruente con las instancias', rechazaResumenInconsistente);
+
+/** Rechaza cambios de distribución aun cuando el total de instancias coincida. */
+async function rechazaDistribucionDeSeveridadInesperada(): Promise<void> {
+  const informe = structuredClone(informeVulnerable);
+  informe.metadata.vulnerabilities.moderate = 0;
+  informe.metadata.vulnerabilities.high = 2;
+
+  const resultado = evaluateAuditReport(informe, 1, politicaAprobada, fechaDentroDeVigencia);
+
+  expect(resultado.permitted).toBe(false);
+  expect(resultado.message).toContain('resumen por severidad');
+}
+
+test(
+  'rechaza cambios de severidad en el resumen de la excepción',
+  rechazaDistribucionDeSeveridadInesperada,
+);
+
+/** Rechaza cualquier advisory moderado adicional bajo la excepción temporal. */
+async function rechazaAlertaModeradaAdicional(): Promise<void> {
+  const informe = structuredClone(informeVulnerable);
+  const advisoryBase = obtenerAdvisory(informe, '1247710');
+  informe.advisories['998'] = {
+    ...advisoryBase,
+    id: 998,
+    title: 'Alerta moderada ajena a la excepción',
+    module_name: 'otro-paquete',
+    severity: 'moderate',
+    vulnerable_versions: '<1.0.0',
+    patched_versions: '1.0.0',
+    patched_versions_unpublished: false,
+    github_advisory_id: 'GHSA-moderada',
+    url: 'https://github.com/advisories/GHSA-moderada',
+    findings: [
+      {
+        version: '0.9.0',
+        paths: ['.>otro-paquete'],
+        dev: true,
+        optional: false,
+        bundled: false,
+      },
+    ],
+  };
+  informe.metadata.vulnerabilities.moderate = 2;
+
+  const resultado = evaluateAuditReport(informe, 1, politicaAprobada, fechaDentroDeVigencia);
+
+  expect(resultado.permitted).toBe(false);
+  expect(resultado.message).toContain('otra alerta');
+}
+
+test(
+  'rechaza alertas moderadas adicionales aunque no sean bloqueantes',
+  rechazaAlertaModeradaAdicional,
+);
+
 /**
  * Rechaza versiones de picomatch que no estén incluidas en la aprobación temporal.
  *
@@ -294,6 +362,9 @@ test(
 async function aceptaUnAuditLimpio(): Promise<void> {
   const informe = structuredClone(informeVulnerable);
   informe.advisories = {};
+  informe.metadata.vulnerabilities.info = 0;
+  informe.metadata.vulnerabilities.low = 0;
+  informe.metadata.vulnerabilities.moderate = 0;
   informe.metadata.vulnerabilities.high = 0;
   informe.metadata.vulnerabilities.critical = 0;
 

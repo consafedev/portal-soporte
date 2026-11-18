@@ -7,6 +7,7 @@ const GHSA_APROBADO = 'GHSA-fc5q-39xc-vjpf';
 const CVE_APROBADO = 'CVE-2026-112366';
 const PAQUETE_APROBADO = 'picomatch';
 const VERSIONES_APROBADAS = ['2.3.2', '4.0.7'];
+const RESUMEN_APROBADO = { info: 0, low: 0, moderate: 1, high: 1, critical: 0 };
 const FECHA_APROBACION = '2026-11-17';
 const FECHA_VENCIMIENTO = '2026-12-17';
 const URL_ADVISORY = `https://github.com/advisories/${GHSA_APROBADO}`;
@@ -141,6 +142,7 @@ function validarInforme(report) {
   }
 
   const conteos = { info: 0, low: 0, moderate: 0, high: 0, critical: 0 };
+  let totalHallazgos = 0;
 
   for (const [claveId, advisory] of Object.entries(report.advisories)) {
     if (!/^\d+$/.test(claveId) || !tieneClavesExactas(advisory, CLAVES_ADVISORY)) {
@@ -166,6 +168,7 @@ function validarInforme(report) {
     }
 
     for (const finding of advisory.findings) {
+      totalHallazgos += 1;
       if (
         !tieneClavesExactas(finding, CLAVES_HALLAZGO) ||
         typeof finding.version !== 'string' ||
@@ -192,13 +195,15 @@ function validarInforme(report) {
     conteos[advisory.severity] += 1;
   }
 
-  for (const severidad of CLAVES_SEVERIDAD) {
-    if (conteos[severidad] !== vulnerabilidades[severidad]) {
-      return { error: `el resumen no coincide con advisories para severidad ${severidad}` };
-    }
+  const totalVulnerabilidades = CLAVES_SEVERIDAD.reduce(
+    (total, severidad) => total + vulnerabilidades[severidad],
+    0,
+  );
+  if (totalHallazgos !== totalVulnerabilidades) {
+    return { error: 'el total de vulnerabilidades no coincide con las instancias reportadas' };
   }
 
-  return { conteos };
+  return { conteos, totalHallazgos };
 }
 
 /**
@@ -281,6 +286,13 @@ export function evaluateAuditReport(report, auditExitCode, allowlist, currentDat
   }
 
   if (severidadesBloqueantes.length === 0) {
+    if (
+      report.metadata.vulnerabilities.high !== 0 ||
+      report.metadata.vulnerabilities.critical !== 0
+    ) {
+      return denegar('el resumen contiene hallazgos high/critical sin advisory correspondiente');
+    }
+
     if (auditExitCode !== 0) {
       return denegar('código de salida distinto de cero sin hallazgos high/critical explicables');
     }
@@ -357,6 +369,18 @@ export function evaluateAuditReport(report, auditExitCode, allowlist, currentDat
 
   if (advisory.findings.length !== 2) {
     return denegar('las instancias no coinciden con el alcance revisado');
+  }
+
+  if (Object.keys(report.advisories).length !== 1 || validacion.totalHallazgos !== 2) {
+    return denegar('existe otra alerta o instancia fuera de la única excepción aprobada');
+  }
+
+  for (const severidad of CLAVES_SEVERIDAD) {
+    if (report.metadata.vulnerabilities[severidad] !== RESUMEN_APROBADO[severidad]) {
+      return denegar(
+        'el resumen por severidad de las versiones aprobadas cambió y requiere revisión',
+      );
+    }
   }
 
   if (validacion.conteos.high !== 1 || validacion.conteos.critical !== 0) {

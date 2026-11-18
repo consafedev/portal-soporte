@@ -7,6 +7,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "fastify": "catalog:"
+    "drizzle-orm": "0.45.4",
+    "fastify": "catalog:",
+    "postgres": "4.1.1"
   }
 }

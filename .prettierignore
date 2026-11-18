@@ -10,3 +10,4 @@ coverage/
 pnpm-lock.yaml
 docs/
 .agents/skills/
+apps/api/drizzle/**/*.sql
