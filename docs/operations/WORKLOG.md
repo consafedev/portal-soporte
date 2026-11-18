@@ -228,3 +228,20 @@
 - Verificación de fuentes públicas el 2026-11-17 (hora local): el [advisory GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf) continúa sin versión parcheada indicada; las [releases del upstream picomatch](https://github.com/micromatch/picomatch/releases) siguen listando `4.0.7` como la más reciente.
 - El riesgo permanece abierto, aceptado solo para dependencias dev; revisión 2026-12-10 UTC y vencimiento 2026-12-17 UTC. No se cambian allowlist, lockfile, auditorías ni alcance de autorización.
 - PS-002, PS-002.1 y PS-002.2 permanecen `HECHO` por aprobación administrativa; no hubo push, despliegue ni acceso productivo.
+
+### [2026-11-17T20:12:06-06:00] PS-003 · Codex · PROPUESTA DE DISEÑO PARA REVISIÓN
+- **Confirmación del propietario:** elegir sesiones opacas en PostgreSQL, Argon2id y adaptador SMTP configurable para preparar el diseño; el documento completo requiere aprobación explícita antes de implementar.
+- **Artefacto:** `docs/superpowers/specs/2026-11-17-ps-003-autenticacion-diseno.md`, propuesta de arquitectura, flujos, contratos de API, modelo de datos, límites de seguridad, criterios UI y riesgos.
+- **Builder check independiente:** P0 aclara que autorización de tarea y aprobación de documento son puertas distintas; P1 encontró ambigüedad sobre alias/canonización de username/email. Decisión técnica propuesta y registrada: login solo con username normalizado, email solo para recuperación; el username no admite `@`, por lo que sus unicidades quedan separadas.
+- **Seguridad consultada:** OWASP Password Storage recomienda Argon2id con al menos 19 MiB, t=2 y p=1; NIST SP 800-63B fija mínimo de 15 caracteres para contraseña de factor único, admite Unicode/espacios y desaconseja reglas de composición. Se registran enlaces de fuente en el diseño; parámetros propuestos deben medirse antes de producción.
+- **UI/UX:** `.agents/skills/apple-design/SKILL.md` leída. El diseño propone tipografía de sistema, jerarquía, contraste AA, foco visible, tema del sistema, reflujo responsive y movimiento reducido. No hay implementación ni captura; validación visual/accesible `NO EJECUTADO` hasta construir UI.
+- **Verificación:** lectura propia y revisión independiente del diseño; `git diff --check` y formato del documento se verificarán antes del commit local. Tests/lint/typecheck/build `NO EJECUTADOS` porque no hay cambios de aplicación.
+- **Límites:** no se modificó código ni se instalaron dependencias; no hay conexión SMTP, servidores, túneles, bases de clientes/productivas, push, deploy ni PS-004.
+- **Próximo paso:** entregar el diseño al propietario; después de su aprobación preparar el plan de implementación y continuar por incrementos.
+- **Estado:** `EN_CURSO`, diseño pendiente de aprobación.
+
+### [2026-11-17T20:13:53-06:00] PS-003 · Codex · VALIDACIÓN DEL DOCUMENTO DE DISEÑO
+- **Contexto Git:** `main` en base `6306f3437610f8b0e2afd8a2f63f2ca88eea4885`; sin cambios de aplicación.
+- `git diff --cached --check` → PASS; `prettier --check` para el diseño, tablero y bitácora → PASS; `secretlint "**/*"` → PASS, sin hallazgos.
+- **Revisión de contenido:** el builder check P0 quedó aclarado (tarea autorizada; diseño aún no aprobado). El P1 quedó resuelto en el documento con una decisión técnica visible y revisable: login por username normalizado y correo solo para recuperación.
+- **Estado:** diseño local preparado para revisión del propietario. No se ejecutaron tests, lint, typecheck ni build de aplicación por ausencia de cambios de código.
