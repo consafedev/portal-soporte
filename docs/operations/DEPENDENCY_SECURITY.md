@@ -1,6 +1,6 @@
 # Hallazgo de seguridad: picomatch en herramientas de desarrollo
 
-**Revisión:** 2026-11-17 · **Estado:** riesgo abierto, no aceptado ni resuelto · **Alcance:** lockfile pnpm de la línea base v0.2.
+**Revisión:** 2026-11-17 · **Estado:** riesgo abierto, aceptación temporal condicionada solo para desarrollo; no resuelto · **Alcance:** lockfile pnpm de la línea base v0.2.
 
 ## Advisory y comportamiento
 
@@ -34,4 +34,13 @@ Controles aplicados o vigentes:
 - Conservar `permissions: contents: read` en CI y no pasar secretos a ese job.
 - Actualizar el lockfile solo cuando haya una versión corregida publicada; después repetir `pnpm why`, auditoría completa y de producción, pruebas y build.
 
-**Riesgo residual:** hasta que aparezca una versión corregida publicada o el propietario acepte formalmente otra mitigación, el gate de auditoría completa permanece fallido y existe riesgo acotado de denegación de servicio sobre herramientas de desarrollo/CI. No declarar el advisory resuelto, no considerar verde el gate completo ni usar esta línea base como aprobación de producción.
+**Riesgo residual:** el propietario aceptó el 2026-11-17 este riesgo de forma temporal y condicionada, exclusivamente para herramientas y CI de desarrollo. El advisory permanece abierto, la auditoría completa continúa fallando y la aceptación no autoriza automáticamente ningún despliegue productivo. Resolver al publicarse una versión corregida compatible, actualizar el lockfile y volver a pasar la auditoría completa, la auditoría de producción y las verificaciones de calidad pertinentes.
+
+## Aceptación temporal condicionada
+
+- **Aprobación y fecha:** propietario del proyecto, 2026-11-17, registrada explícitamente en la autorización de PS-002.2.
+- **Responsable de aceptación del riesgo:** propietario del proyecto. **Responsable del seguimiento y la remediación técnica:** equipo de ingeniería del portal; Codex registra y verifica la actualización.
+- **Ámbito aceptado:** exclusivamente dependencias de desarrollo utilizadas en estaciones locales y CI de validación de desarrollo. No incluye runtime de producción, artefactos desplegados, ni jobs con secretos o permisos de escritura.
+- **Mitigaciones requeridas mientras permanezca abierto:** conservar la auditoría completa estricta y visible; mantener permisos mínimos de CI (contents: read) y no suministrar secretos; no construir patrones glob desde entradas no confiables; ejecutar auditoría de producción; no aplicar overrides, excepciones o supresiones sin una aprobación separada y trazable.
+- **Condición para resolver:** una versión corregida publicada y compatible debe reemplazar las instancias afectadas; actualizar el lockfile; confirmar el árbol con pnpm why; obtener PASS de auditoría completa y de producción; repetir format, lint, typecheck, tests, build, skill y secreto. Registrar evidencia y revisión del propietario.
+- **Límite de autorización:** esta aceptación temporal no cambia el resultado FAIL de la auditoría completa y no constituye autorización para producción. No se ha aprobado una excepción de CI.
