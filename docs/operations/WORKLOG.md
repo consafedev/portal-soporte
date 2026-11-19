@@ -860,3 +860,13 @@
 - **Cambios de esta iteración:** solo sincronización de PS-003/PS-003.1/PS-003.2 con el head publicado, resultado CI y estado real del PR; no cambió código de aplicación ni esquema.
 - **Próximo paso:** solicitar revisión independiente y aprobación del propietario para fusionar PR #1; no realizar merge automático.
 - **Estado:** PS-003.2 EN_REVISION; PS-003 EN_REVISION; DEPLOY-001 BLOQUEADO hasta revisión/fusión.
+
+### [2026-11-19T16:00:55-06:00] DEPLOY-001 · PREVUELO SSH SIN CAMBIOS REMOTOS
+- **Rama/commit:** `codex/ps-003-auth`; head anterior `75d2b74b537427fad5699fe62eea36e41530a7e6`; PR #1 sigue abierto. GitHub Actions run `44622825003` sobre ese head finalizó `success` en todos los pasos.
+- **Objetivo:** iniciar el inventario read-only del host autorizado antes de la preparación interna; sin instalar, configurar ni escribir remotamente.
+- **Conectividad:** `ssh -o StrictHostKeyChecking=yes -o BatchMode=yes daniel@10.18.170.44 hostname` alcanzó el servidor conocido, pero terminó `Permission denied (publickey,password)` porque este proceso no dispone de clave y no puede presentar un prompt visible. Los intentos de abrir PowerShell/Windows Terminal no fueron visibles mediante el control de escritorio. El usuario confirma acceso interactivo en otra sesión; eso no se pudo reutilizar aquí.
+- **No interferencia verificada después del intento:** `Test-NetConnection 127.0.0.1 -Port 15432` devolvió `True`; `Get-NetTCPConnection` identificó el listener SSH del forward `127.0.0.1:15432` hacia PostgreSQL. No se ejecutaron comandos remotos ni escrituras, y no se tocó `cloudflared`, DNS, firewall, PostgreSQL ni `systemd`.
+- **Incidente local de sesiones:** la limpieza del intento SSH usó un filtro de command line demasiado amplio y terminó dos sesiones SSH preexistentes (PIDs observados `4876` y `18920`, con `pwsh` padres `16436` y `2588`) junto con el proceso de prueba propio (`21728`, PowerShell padre `19684`). La comprobación posterior confirmó que el túnel local `15432` permaneció activo. No hay evidencia de cambios remotos; se desconoce si las sesiones anteriores tenían otro propósito. No reiniciar procesos cuya función no esté identificada.
+- **Inventario remoto:** distribución, Debian, Node 24, PostgreSQL, systemd, puertos `18840/18841`, recursos y backups quedan NO VERIFICADOS por falta de shell autenticada en este contexto.
+- **Próximo paso:** el PR #1 está en revisión/espera de aprobación de merge. Para DEPLOY-001 se necesita una terminal SSH realmente interactiva/utilizable o una identidad autorizada ya instalada; no volver a cerrar procesos SSH por coincidencia de texto.
+- **Estado:** PS-003.2 EN_REVISION; PS-003 EN_REVISION; DEPLOY-001 BLOQUEADO. Ningún despliegue ni cambio remoto.
