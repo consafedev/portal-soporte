@@ -699,6 +699,7 @@
 - El siguiente commit agrupa documentación, tablero y bitácora con un borrador de PR local; revisión del propietario pendiente.
 - Estado: PS-003.2 `EN_REVISION`.
 
+
 ### [2026-11-19T13:25:50-06:00] PS-003.2 · CONFIRMACIÓN DE COMMITS Y LÍMITE DE CI REMOTO
 - **Commits locales:** `c3de5a3` — `fix(auth): PS-003 alinear esquema y pruebas remotas`; `612a0f6` — `docs(operations): PS-003.2 registrar revisión y despliegue aislado`. El segundo incluye tablero, bitácora, estrategia de despliegue y borrador de PR. No hay push ni PR remoto.
 - **CI GitHub:** consulta de solo lectura de PRs y workflow runs intentada mediante la conexión GitHub disponible; ambas consultas respondieron `USER_NOT_LOGGED_IN` (`connector ... is not connected`). Por tanto PR existente/Actions no se pudieron confirmar en GitHub. No se abrió ni modificó un PR.
@@ -711,3 +712,14 @@
 - El runner de GitHub Actions usa Node `24.22.3`, pero no se pudo consultar su estado porque la conexión GitHub respondió `USER_NOT_LOGGED_IN` y no se publicó la rama.
 - No se instala ni cambia Node local/global en esta iteración. Registrar la verificación del runtime exacto como pendiente del PR/CI.
 - Estado: PS-003.2 `EN_REVISION`.
+
+### [2026-11-19T13:37:07-06:00] PS-003.2 · INICIO DE PUBLICACIÓN AUTORIZADA
+- **Agente/tarea:** Codex · PS-003.2, continuidad de PS-003.
+- **Rama/base:** `codex/ps-003-auth`, HEAD `32d24f8eea71e32eaecb539179bbac3fada0135f` al inicio. Árbol observado limpio antes de este registro. Remoto configurado como `https://github.com/consafedev/portal-soporte.git`; se verificará en preflight antes de publicar.
+- **Autorización:** el propietario autoriza `git push -u origin codex/ps-003-auth`, crear Pull Request hacia `main`, ejecutar/revisar GitHub Actions y corregir fallos de CI. Prohíbe `--force`, reescritura de historia y merge. No autoriza cambios a DNS, Cloudflare Tunnel, servicios systemd, PostgreSQL ni servidor.
+- **Objetivo:** verificar remoto, rama/HEAD/limpieza, secretos y archivos de credenciales; actualizar `origin/main` mediante fetch read-only y revisar divergencias; publicar sin force; crear PR con pruebas, arquitectura, migraciones y riesgos; esperar CI y dejar PR sin fusionar.
+- **Archivos previstos:** actualización append-only de este WORKLOG y estado PS-003.2 de `TASK_BOARD.md`; correcciones adicionales solo si CI detecta defectos, dentro del alcance PS-003.
+- **Comprobaciones:** `git remote get-url`, `git status`, historial de preparación, `.env.infra-001.local` ignorado, listado de rutas sensibles sin contenidos, `secretlint`, diff checks, `git fetch origin main`, verificación de ancestría, `git push -u` sin force; PR y Actions por API/CLI autorizada.
+- **Riesgos/límites:** conexión GitHub anteriormente no estaba enlazada; confirmar autenticación antes de cualquier push. La ejecución local usó Node 24.13.0 frente al pin CI 24.22.3. No merge aunque Actions pase; no modificar infraestructura ni publicar el portal.
+- **Próximo paso:** completar preflight local/read-only y detenerse si remoto, base o historia tienen cambios inesperados, o si la auditoría encuentra secretos.
+- **Estado:** PS-003.2 `EN_CURSO`; PS-003 `EN_REVISION`.
