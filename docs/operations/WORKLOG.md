@@ -698,3 +698,10 @@
 - El commit solo se creó en la rama local `codex/ps-003-auth`. No hubo push, Pull Request remoto, merge, GitHub Actions, despliegue ni modificación de infraestructura.
 - El siguiente commit agrupa documentación, tablero y bitácora con un borrador de PR local; revisión del propietario pendiente.
 - Estado: PS-003.2 `EN_REVISION`.
+
+### [2026-11-19T13:25:50-06:00] PS-003.2 · CONFIRMACIÓN DE COMMITS Y LÍMITE DE CI REMOTO
+- **Commits locales:** `c3de5a3` — `fix(auth): PS-003 alinear esquema y pruebas remotas`; `612a0f6` — `docs(operations): PS-003.2 registrar revisión y despliegue aislado`. El segundo incluye tablero, bitácora, estrategia de despliegue y borrador de PR. No hay push ni PR remoto.
+- **CI GitHub:** consulta de solo lectura de PRs y workflow runs intentada mediante la conexión GitHub disponible; ambas consultas respondieron `USER_NOT_LOGGED_IN` (`connector ... is not connected`). Por tanto PR existente/Actions no se pudieron confirmar en GitHub. No se abrió ni modificó un PR.
+- **Estado Git observado:** rama local `codex/ps-003-auth`, HEAD `612a0f6` al momento de la consulta; árbol de trabajo limpio antes de este addendum. El commit de este addendum se registrará en la historia Git local.
+- **Límite:** la solicitud de PS-003.2 exige autorización expresa antes de publicar la rama o fusionar. Esperar autorización y conexión GitHub; no realizar esas acciones automáticamente.
+- **Estado:** PS-003, PS-003.1, PS-003.2, INFRA-001 y DEPLOY-001 `EN_REVISION`.
