@@ -12,7 +12,10 @@ import type { BaseDatosAuth } from './client.js';
  * @throws Error si falta un archivo o falla una transacción de migración.
  */
 export async function migrarBaseAuth(database: BaseDatosAuth): Promise<void> {
-  await migrate(database, { migrationsFolder: resolverCarpetaMigraciones() });
+  await migrate(database, {
+    migrationsFolder: resolverCarpetaMigraciones(),
+    migrationsSchema: 'portal',
+  });
 }
 
 /**

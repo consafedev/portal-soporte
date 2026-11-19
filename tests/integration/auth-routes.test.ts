@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ServicioAutenticacionCore } from '../../apps/api/src/auth/auth-service.js';
 import { LimitadorIntentosPostgres } from '../../apps/api/src/auth/attempt-limiter.js';
@@ -11,14 +11,20 @@ import { ServicioRecuperacionAuth } from '../../apps/api/src/auth/recovery-servi
 import { cargarConfiguracionAuth } from '../../apps/api/src/config.js';
 import { crearServidorAuth } from '../../apps/api/src/server.js';
 import { crearClienteBaseDatosAuth } from '../../apps/api/src/db/client.js';
-import { auditEvents, sessions, users } from '../../apps/api/src/db/schema.js';
+import { auditEvents, authThrottleWindows, sessions, users } from '../../apps/api/src/db/schema.js';
 import type { RelojAuth } from '../../packages/core/src/auth/ports.js';
+import {
+  crearClienteMigradorPruebas,
+  crearIdentificadoresSolicitudPrueba,
+} from '../support/test-database-clients.js';
 
 const baseUrl = process.env['TEST_DATABASE_URL'];
 const database =
   baseUrl === undefined
     ? null
     : crearClienteBaseDatosAuth({ DATABASE_URL: baseUrl, NODE_ENV: 'test' });
+const databaseMigrador = crearClienteMigradorPruebas();
+const identificadoresSolicitud = crearIdentificadoresSolicitudPrueba();
 const idUsuario = randomUUID();
 const sufijo = idUsuario.slice(0, 8);
 const contrasenaSintetica = 'Clave de prueba Unicode ñ 123';
@@ -47,6 +53,15 @@ function exigirBasePrueba(): NonNullable<typeof database> {
   }
 
   return database;
+}
+
+/** Recupera el migrador para leer auditoría y preparar DDL sintético aislado. */
+function exigirBaseMigrador(): NonNullable<typeof databaseMigrador> {
+  if (databaseMigrador === null) {
+    throw new Error('La operación requiere el rol migrador de PostgreSQL de prueba.');
+  }
+
+  return databaseMigrador;
 }
 
 /** Recupera la aplicación Fastify que se inicializó para esta suite. */
@@ -150,6 +165,7 @@ async function prepararRutasAuth(): Promise<void> {
     reloj: relojFijo,
     limitador,
     recuperacion,
+    generarIdSolicitud: identificadoresSolicitud.generar,
   });
   /** Ruta exclusiva de la suite para verificar la interpretación de headers de red. */
   aplicacion.get('/__test/client', (solicitud, respuesta) => {
@@ -164,7 +180,23 @@ async function prepararRutasAuth(): Promise<void> {
 /** Cierra Fastify y el pool exclusivo de esta suite. */
 async function cerrarRutasAuth(): Promise<void> {
   await aplicacion?.close();
-  await database?.delete(users).where(eq(users.id, idUsuario));
+  await databaseMigrador
+    ?.delete(auditEvents)
+    .where(
+      sql`${auditEvents.metadata}->>'requestId' LIKE ${`${identificadoresSolicitud.prefijo}-%`}`,
+    );
+  await databaseMigrador?.delete(auditEvents).where(eq(auditEvents.actorUserId, idUsuario));
+  await databaseMigrador?.delete(auditEvents).where(eq(auditEvents.targetUserId, idUsuario));
+  await databaseMigrador
+    ?.delete(authThrottleWindows)
+    .where(
+      and(
+        eq(authThrottleWindows.windowStartedAt, instantePrueba),
+        inArray(authThrottleWindows.scope, ['LOGIN_ACCOUNT', 'LOGIN_NETWORK']),
+      ),
+    );
+  await databaseMigrador?.delete(users).where(eq(users.id, idUsuario));
+  await databaseMigrador?.$client.end({ timeout: 5 });
   await database?.$client.end({ timeout: 5 });
 }
 
@@ -446,7 +478,7 @@ async function pruebaLogoutRevocaSesion(): Promise<void> {
     url: '/api/v1/auth/me',
     headers: { cookie: cookieSesion },
   });
-  const [eventoLogin] = await exigirBasePrueba()
+  const [eventoLogin] = await exigirBaseMigrador()
     .select({ metadata: auditEvents.metadata })
     .from(auditEvents)
     .where(
@@ -471,7 +503,7 @@ async function pruebaLogoutRevocaSesion(): Promise<void> {
     ),
   ).toBe(true);
   expect(respuestaMe.statusCode).toBe(401);
-  const [eventoLogout] = await exigirBasePrueba()
+  const [eventoLogout] = await exigirBaseMigrador()
     .select({ metadata: auditEvents.metadata })
     .from(auditEvents)
     .where(
@@ -490,9 +522,10 @@ async function pruebaLogoutRevocaSesion(): Promise<void> {
 /** Fuerza un fallo de auditoría en el clúster efímero y comprueba el rollback de la sesión. */
 async function pruebaRollbackLogout(): Promise<void> {
   const base = exigirBasePrueba();
+  const migrador = exigirBaseMigrador();
   const sesion = await exigirServicioSesiones().crear(idUsuario);
   const csrf = await obtenerCsrf();
-  await base.execute(
+  await migrador.execute(
     sql`ALTER TABLE audit_events ADD CONSTRAINT prueba_rechazo_logout CHECK (action <> 'AUTH_LOGOUT') NOT VALID`,
   );
   try {
@@ -509,7 +542,7 @@ async function pruebaRollbackLogout(): Promise<void> {
     expect(respuesta.statusCode).toBe(500);
     expect(respuesta.headers['set-cookie']).toBeUndefined();
   } finally {
-    await base.execute(sql`ALTER TABLE audit_events DROP CONSTRAINT prueba_rechazo_logout`);
+    await migrador.execute(sql`ALTER TABLE audit_events DROP CONSTRAINT prueba_rechazo_logout`);
   }
 }
 
@@ -517,8 +550,12 @@ async function pruebaRollbackLogout(): Promise<void> {
 async function pruebaLogoutAnonimo(): Promise<void> {
   const csrf = await obtenerCsrf();
   const base = exigirBasePrueba();
+  const migrador = exigirBaseMigrador();
   const condicion = and(eq(auditEvents.action, 'AUTH_LOGOUT'), isNull(auditEvents.actorUserId));
-  const anteriores = await base.select({ id: auditEvents.id }).from(auditEvents).where(condicion);
+  const anteriores = await migrador
+    .select({ id: auditEvents.id })
+    .from(auditEvents)
+    .where(condicion);
   const servicio = exigirServicioSesiones();
   const revocada = await servicio.crear(idUsuario);
   await servicio.revocar(revocada.token);
@@ -542,7 +579,7 @@ async function pruebaLogoutAnonimo(): Promise<void> {
     });
     expect(respuesta.statusCode).toBe(204);
   }
-  const posteriores = await base
+  const posteriores = await migrador
     .select({
       id: auditEvents.id,
       metadata: auditEvents.metadata,

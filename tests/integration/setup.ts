@@ -1,61 +1,147 @@
 import postgres from 'postgres';
+import {
+  cargarConfiguracionBasePrueba,
+  cargarConfiguracionMigracionPrueba,
+  exigirArnesPostgresVerificado,
+} from '../../apps/api/src/runtime-config.js';
 import { crearClienteBaseDatosAuth } from '../../apps/api/src/db/client.js';
+import {
+  validarMismaInstanciaBasePrueba,
+  verificarEstadoEsquemaBasePrueba,
+  verificarIdentidadBasePrueba,
+} from '../../apps/api/src/db/test-database-preflight.js';
 import { migrarBaseAuth } from '../../apps/api/src/db/migrate.js';
 
-/** Prepara migraciones una sola vez y solo sobre la base PostgreSQL loopback reservada. */
+/** Prepara solo una base vacía local o la forma exacta aislada ya migrada. */
 export async function setup(): Promise<void> {
-  const baseUrl = process.env['TEST_DATABASE_URL'];
-  if (baseUrl === undefined) {
-    throw new Error('La suite de integración requiere TEST_DATABASE_URL.');
-  }
-
-  const url = new URL(baseUrl);
-  const hostsLoopback = ['localhost', '127.0.0.1', '[::1]', '::1'].includes(
-    url.hostname.toLowerCase(),
-  );
-  if (
-    !['postgres:', 'postgresql:'].includes(url.protocol) ||
-    !hostsLoopback ||
-    url.username !== 'ps003_test' ||
-    url.password.length !== 0 ||
-    url.pathname !== '/portal_ps003_test' ||
-    url.search.length !== 0 ||
-    url.hash.length !== 0
-  ) {
-    throw new Error('La configuración global solo admite la base sintética en loopback.');
-  }
-
-  const sqlDeSeguridad = postgres(url.href, { max: 1 });
-  const cliente = crearClienteBaseDatosAuth({ DATABASE_URL: url.href, NODE_ENV: 'test' });
+  const variables = { ...process.env, NODE_ENV: 'test' };
+  exigirArnesPostgresVerificado(variables);
+  const configuracion = cargarConfiguracionBasePrueba(variables);
+  const sqlIdentidad = postgres(configuracion.TEST_DATABASE_URL, {
+    max: 1,
+    idle_timeout: 5,
+    connect_timeout: 5,
+    queue_timeout: 5,
+    query_timeout: 5,
+    connection: {
+      application_name: 'portal-ps003-integration-setup',
+      default_transaction_read_only: true,
+      statement_timeout: 5_000,
+      lock_timeout: 2_000,
+      idle_in_transaction_session_timeout: 5_000,
+    },
+  });
 
   try {
-    await verificarDestinoVacio(sqlDeSeguridad);
-    await migrarBaseAuth(cliente);
+    await validarConexionAplicacion(
+      sqlIdentidad,
+      configuracion.TEST_DATABASE_URL,
+      configuracion.modo,
+    );
+    if (configuracion.modo === 'ssh-tunnel') {
+      const identidadAplicacion = await verificarIdentidadBasePrueba(
+        configuracion.TEST_DATABASE_URL,
+        'portal_test_app',
+      );
+      const identidadMigrador = await verificarIdentidadBasePrueba(
+        configuracion.TEST_MIGRATOR_DATABASE_URL,
+        'portal_test_migrator',
+      );
+      validarMismaInstanciaBasePrueba(identidadAplicacion, identidadMigrador);
+    }
+
+    const estadoInicial = await verificarEstadoEsquemaBasePrueba(
+      configuracion.TEST_MIGRATOR_DATABASE_URL,
+    );
+    if (configuracion.modo === 'local-ephemeral' && estadoInicial !== 'vacio') {
+      throw new Error('La suite local requiere una base efímera nueva sin objetos.');
+    }
+    if (configuracion.modo === 'local-ephemeral' || estadoInicial === 'vacio') {
+      await ejecutarMigracionesPrueba(variables);
+    }
+    exigirMigracionesLimpias(
+      await verificarEstadoEsquemaBasePrueba(configuracion.TEST_MIGRATOR_DATABASE_URL),
+    );
+    if (configuracion.modo === 'ssh-tunnel') {
+      const identidadAplicacion = await verificarIdentidadBasePrueba(
+        configuracion.TEST_DATABASE_URL,
+        'portal_test_app',
+      );
+      const identidadMigrador = await verificarIdentidadBasePrueba(
+        configuracion.TEST_MIGRATOR_DATABASE_URL,
+        'portal_test_migrator',
+      );
+      validarMismaInstanciaBasePrueba(identidadAplicacion, identidadMigrador);
+    }
   } finally {
-    await cliente.$client.end({ timeout: 5 });
-    await sqlDeSeguridad.end({ timeout: 5 });
+    await sqlIdentidad.end({ timeout: 5 });
   }
 }
 
-/** Verifica la identidad del servidor y rechaza tablas o esquemas previos sin borrarlos. */
-async function verificarDestinoVacio(sql: ReturnType<typeof postgres>): Promise<void> {
-  const [identidad] = await sql<{ nombre: string; loopback: boolean | null }[]>`
+/** Verifica el nombre y el rol de aplicación sin registrar el DSN. */
+async function validarConexionAplicacion(
+  sql: ReturnType<typeof postgres>,
+  url: string,
+  modo: 'local-ephemeral' | 'ssh-tunnel',
+): Promise<void> {
+  const destino = new URL(url);
+  const [identidad] = await sql<
+    { nombreBase: string; rol: string; direccion: string | null; puerto: number }[]
+  >`
     SELECT
-      current_database() AS nombre,
-      (inet_server_addr() <<= '127.0.0.0/8'::inet OR inet_server_addr() <<= '::1/128'::inet) AS loopback
+      current_database() AS "nombreBase",
+      current_user AS rol,
+      host(inet_server_addr()) AS direccion,
+      inet_server_port() AS puerto
   `;
-  if (identidad?.nombre !== 'portal_ps003_test' || identidad.loopback !== true) {
-    throw new Error(
-      'La integración requiere portal_ps003_test en un servidor PostgreSQL de loopback.',
-    );
-  }
+  const esperado =
+    modo === 'ssh-tunnel'
+      ? {
+          base: 'portal_soporte_test',
+          rol: 'portal_test_app',
+          direccion: '127.0.0.1',
+          puerto: 5432,
+        }
+      : {
+          base: 'portal_ps003_test',
+          rol: 'ps003_test',
+          direccion: null,
+          puerto: Number(destino.port || '5432'),
+        };
 
-  const [estado] = await sql<{ tablas: number; esquemaMigraciones: boolean }[]>`
-    SELECT
-      (SELECT count(*)::int FROM information_schema.tables WHERE table_schema = 'public') AS tablas,
-      EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = 'drizzle') AS "esquemaMigraciones"
-  `;
-  if (estado?.tablas !== 0 || estado.esquemaMigraciones) {
-    throw new Error('La suite no modificará una base que ya tenga tablas o migraciones.');
+  if (
+    identidad?.nombreBase !== esperado.base ||
+    identidad.rol !== esperado.rol ||
+    (modo === 'ssh-tunnel' && identidad.direccion !== esperado.direccion) ||
+    (modo === 'local-ephemeral' &&
+      (identidad.direccion === null ||
+        !(identidad.direccion.startsWith('127.') || identidad.direccion === '::1'))) ||
+    identidad.puerto !== esperado.puerto
+  ) {
+    throw new Error('La integración alcanzó una base o un rol distinto al configurado.');
+  }
+}
+
+/** Ejecuta Drizzle con el rol migrador separado y cierra su pool limitado. */
+async function ejecutarMigracionesPrueba(variables: NodeJS.ProcessEnv): Promise<void> {
+  const destino = cargarConfiguracionMigracionPrueba(variables);
+  const database = crearClienteBaseDatosAuth({
+    ...variables,
+    NODE_ENV: 'test',
+    TEST_DATABASE_ROLE: 'portal_test_migrator',
+    DATABASE_URL: destino.DATABASE_URL,
+  });
+
+  try {
+    await migrarBaseAuth(database);
+  } finally {
+    await database.$client.end({ timeout: 5 });
+  }
+}
+
+/** Rechaza que una suite empiece si quedaron cuentas, sesiones o auditoría previas. */
+function exigirMigracionesLimpias(estado: 'vacio' | 'migrado'): void {
+  if (estado !== 'migrado') {
+    throw new Error('La preparación de integración no dejó las migraciones esperadas.');
   }
 }

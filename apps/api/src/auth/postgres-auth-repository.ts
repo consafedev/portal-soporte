@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { and, eq, gt, inArray, isNull, ne, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import type {
   CuentaAutenticacion,
   EscritorAuditoriaAuth,
@@ -51,6 +52,8 @@ const columnasCredenciales = {
   role: users.role,
   status: users.status,
 } as const;
+
+const usuarioBloqueado = alias(users, 'usuario_bloqueado');
 
 /** Implementa la persistencia de credenciales y sesiones sobre PostgreSQL. */
 export class PostgresAuthRepository
@@ -374,16 +377,25 @@ export class PostgresAuthRepository
           await bloquearInvarianteAdministradores(transaccion);
           // Emisión, consumo y cambio de contraseña bloquean primero la cuenta y después sus tokens.
           const [cuenta] = await transaccion
-            .select(columnasCredenciales)
-            .from(users)
-            .innerJoin(recoveryTokens, eq(recoveryTokens.userId, users.id))
+            .select({
+              id: usuarioBloqueado.id,
+              usernameNormalized: usuarioBloqueado.usernameNormalized,
+              email: usuarioBloqueado.email,
+              emailNormalized: usuarioBloqueado.emailNormalized,
+              emailVerifiedAt: usuarioBloqueado.emailVerifiedAt,
+              passwordHash: usuarioBloqueado.passwordHash,
+              role: usuarioBloqueado.role,
+              status: usuarioBloqueado.status,
+            })
+            .from(usuarioBloqueado)
+            .innerJoin(recoveryTokens, eq(recoveryTokens.userId, usuarioBloqueado.id))
             .where(
               and(
                 eq(recoveryTokens.tokenHash, tokenHash),
                 eq(recoveryTokens.purpose, cambio.purpose),
               ),
             )
-            .for('no key update', { of: users })
+            .for('no key update', { of: usuarioBloqueado })
             .limit(1);
           if (cuenta === undefined) return false;
           const [token] = await transaccion
@@ -692,11 +704,15 @@ async function revocarParaLogout(
   ahora: Date,
 ): Promise<Pick<RespuestaUsuarioPublico, 'id' | 'role'> | null> {
   const [cuenta] = await transaccion
-    .select({ id: users.id, role: users.role, status: users.status })
-    .from(users)
-    .innerJoin(sessions, eq(users.id, sessions.userId))
+    .select({
+      id: usuarioBloqueado.id,
+      role: usuarioBloqueado.role,
+      status: usuarioBloqueado.status,
+    })
+    .from(usuarioBloqueado)
+    .innerJoin(sessions, eq(usuarioBloqueado.id, sessions.userId))
     .where(and(eq(sessions.tokenHash, tokenHash), isNull(sessions.revokedAt)))
-    .for('no key update', { of: users });
+    .for('no key update', { of: usuarioBloqueado });
   if (cuenta === undefined) return null;
   const [sesion] = await transaccion
     .update(sessions)

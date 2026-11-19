@@ -19,6 +19,7 @@ import {
   requireAuthenticatedSession,
   registrarDecoradorContextoAuth,
 } from '../auth/authorization.js';
+import { extraerDiagnosticoBaseDatosSeguro } from '../logging/safe-database-error.js';
 import { ErrorCredencialesAuth, ServicioRecuperacionAuth } from '../auth/recovery-service.js';
 import type { ServicioSesion } from '../auth/session-service.js';
 
@@ -287,7 +288,11 @@ function manejarErrorAuth(error: unknown, solicitud: FastifyRequest, respuesta: 
   }
 
   solicitud.log.error(
-    { requestId: solicitud.id, code: 'AUTH_CREDENTIAL_OPERATION_FAILED' },
+    {
+      requestId: solicitud.id,
+      code: 'AUTH_CREDENTIAL_OPERATION_FAILED',
+      ...extraerDiagnosticoBaseDatosSeguro(error),
+    },
     'Fallo controlado de una operación de credenciales.',
   );
 

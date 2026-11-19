@@ -16,7 +16,9 @@ async function ejecutarMigracionesPrueba(): Promise<void> {
   try {
     const configuracion = cargarConfiguracionMigracionPrueba(process.env);
     database = crearClienteBaseDatosAuth({
+      ...process.env,
       NODE_ENV: configuracion.NODE_ENV,
+      TEST_DATABASE_ROLE: 'portal_test_migrator',
       DATABASE_URL: configuracion.DATABASE_URL,
     });
     await migrarBaseAuth(database);

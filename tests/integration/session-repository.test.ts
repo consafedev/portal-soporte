@@ -6,12 +6,14 @@ import { ServicioSesion } from '../../apps/api/src/auth/session-service.js';
 import { crearClienteBaseDatosAuth } from '../../apps/api/src/db/client.js';
 import { auditEvents, recoveryTokens, sessions, users } from '../../apps/api/src/db/schema.js';
 import type { RelojAuth } from '../../packages/core/src/auth/ports.js';
+import { crearClienteMigradorPruebas } from '../support/test-database-clients.js';
 
 const baseUrl = process.env['TEST_DATABASE_URL'];
 const database =
   baseUrl === undefined
     ? null
     : crearClienteBaseDatosAuth({ DATABASE_URL: baseUrl, NODE_ENV: 'test' });
+const databaseMigrador = crearClienteMigradorPruebas();
 const repositorio = database === null ? null : new PostgresAuthRepository(database);
 
 /** Reloj fijo para comprobar expiraciones de sesión sin depender del host. */
@@ -39,6 +41,15 @@ function exigirBaseDatos(): NonNullable<typeof database> {
   }
 
   return database;
+}
+
+/** Recupera el migrador para consultar eventos sin ampliar permisos de aplicación. */
+function exigirBaseMigrador(): NonNullable<typeof databaseMigrador> {
+  if (databaseMigrador === null) {
+    throw new Error('La consulta requiere el rol migrador de PostgreSQL de prueba.');
+  }
+
+  return databaseMigrador;
 }
 
 /** Recupera el repositorio PostgreSQL de la suite o falla con un error controlado. */
@@ -73,11 +84,17 @@ async function crearUsuarioIntegracion(): Promise<string> {
 
 /** Elimina únicamente la cuenta sintética creada por el caso actual. */
 async function borrarUsuarioIntegracion(userId: string): Promise<void> {
-  await exigirBaseDatos().delete(users).where(eq(users.id, userId));
+  if (databaseMigrador === null) {
+    throw new Error('La limpieza requiere el rol migrador de PostgreSQL de prueba.');
+  }
+  await databaseMigrador.delete(auditEvents).where(eq(auditEvents.actorUserId, userId));
+  await databaseMigrador.delete(auditEvents).where(eq(auditEvents.targetUserId, userId));
+  await databaseMigrador.delete(users).where(eq(users.id, userId));
 }
 
 /** Cierra el pool de la suite al terminar los casos PostgreSQL. */
 async function cerrarBaseIntegracion(): Promise<void> {
+  await databaseMigrador?.$client.end({ timeout: 5 });
   await database?.$client.end({ timeout: 5 });
 }
 
@@ -197,7 +214,6 @@ function definirPruebasDeRepositorioSesion(): void {
     }
   });
   it('revierte hash, sesiones y auditoría si falla la inserción de la sesión rotada', async () => {
-    const base = exigirBaseDatos();
     const repositorio = exigirRepositorio();
     const userId = await crearUsuarioIntegracion();
     try {
@@ -216,7 +232,7 @@ function definirPruebasDeRepositorioSesion(): void {
       );
       expect((await repositorio.buscarPorHash(sesion.tokenHash))?.sesion.revokedAt).toBeNull();
       expect(
-        await base
+        await exigirBaseMigrador()
           .select({ id: auditEvents.id })
           .from(auditEvents)
           .where(eq(auditEvents.targetUserId, userId)),

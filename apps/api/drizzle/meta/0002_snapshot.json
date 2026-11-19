@@ -4,9 +4,9 @@
   "version": "7",
   "dialect": "postgresql",
   "tables": {
-    "public.audit_events": {
+    "portal.audit_events": {
       "name": "audit_events",
-      "schema": "",
+      "schema": "portal",
       "columns": {
         "id": {
           "name": "id",
@@ -143,9 +143,9 @@
       },
       "isRLSEnabled": false
     },
-    "public.auth_invariants": {
+    "portal.auth_invariants": {
       "name": "auth_invariants",
-      "schema": "",
+      "schema": "portal",
       "columns": {
         "id": {
           "name": "id",
@@ -174,9 +174,9 @@
       },
       "isRLSEnabled": false
     },
-    "public.auth_throttle_windows": {
+    "portal.auth_throttle_windows": {
       "name": "auth_throttle_windows",
-      "schema": "",
+      "schema": "portal",
       "columns": {
         "key_hash": {
           "name": "key_hash",
@@ -260,9 +260,9 @@
       },
       "isRLSEnabled": false
     },
-    "public.recovery_tokens": {
+    "portal.recovery_tokens": {
       "name": "recovery_tokens",
-      "schema": "",
+      "schema": "portal",
       "columns": {
         "id": {
           "name": "id",
@@ -382,9 +382,9 @@
       },
       "isRLSEnabled": false
     },
-    "public.sessions": {
+    "portal.sessions": {
       "name": "sessions",
-      "schema": "",
+      "schema": "portal",
       "columns": {
         "id": {
           "name": "id",
@@ -507,9 +507,9 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.users": {
+    "portal.users": {
       "name": "users",
-      "schema": "",
+      "schema": "portal",
       "columns": {
         "id": {
           "name": "id",

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, eq, inArray, or } from 'drizzle-orm';
+import { and, eq, inArray, or, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ServicioAutenticacionCore } from '../../apps/api/src/auth/auth-service.js';
 import { Argon2PasswordHasher } from '../../apps/api/src/auth/argon2-password-hasher.js';
@@ -12,14 +12,26 @@ import { ServicioRecuperacionAuth } from '../../apps/api/src/auth/recovery-servi
 import { cargarConfiguracionAuth } from '../../apps/api/src/config.js';
 import { crearServidorAuth } from '../../apps/api/src/server.js';
 import { crearClienteBaseDatosAuth } from '../../apps/api/src/db/client.js';
-import { auditEvents, recoveryTokens, sessions, users } from '../../apps/api/src/db/schema.js';
+import {
+  auditEvents,
+  authThrottleWindows,
+  recoveryTokens,
+  sessions,
+  users,
+} from '../../apps/api/src/db/schema.js';
 import type { MensajeCorreoAuth, RelojAuth } from '../../packages/core/src/auth/ports.js';
+import {
+  crearClienteMigradorPruebas,
+  crearIdentificadoresSolicitudPrueba,
+} from '../support/test-database-clients.js';
 
 const urlBase = process.env['TEST_DATABASE_URL'];
 const database =
   urlBase === undefined
     ? null
     : crearClienteBaseDatosAuth({ DATABASE_URL: urlBase, NODE_ENV: 'test' });
+const databaseMigrador = crearClienteMigradorPruebas();
+const identificadoresSolicitud = crearIdentificadoresSolicitudPrueba();
 const idAdmin = randomUUID();
 const idSupport = randomUUID();
 const sufijo = randomUUID().slice(0, 8);
@@ -58,6 +70,15 @@ function exigirBasePrueba(): NonNullable<typeof database> {
   }
 
   return database;
+}
+
+/** Recupera el migrador exclusivo para consultar auditoría o preparar DDL de fixtures. */
+function exigirBaseMigrador(): NonNullable<typeof databaseMigrador> {
+  if (databaseMigrador === null) {
+    throw new Error('La operación requiere el rol migrador de PostgreSQL de prueba.');
+  }
+
+  return databaseMigrador;
 }
 
 /** Inserta un usuario activo sintético con hash Argon2id para autenticar flujos HTTP. */
@@ -216,6 +237,7 @@ async function prepararAdministracion(): Promise<void> {
     limitador,
     recuperacion,
     usuariosAdmin,
+    generarIdSolicitud: identificadoresSolicitud.generar,
   });
   cookieAdmin = await iniciarSesion(usuarioAdmin);
   cookieSupport = await iniciarSesion(usuarioSupport);
@@ -226,7 +248,16 @@ async function cerrarAdministracion(): Promise<void> {
   await aplicacion?.close();
   const usuariosTemporales: string[] = [idAdmin, idSupport];
   usuariosTemporales.push(...idsUsuariosCreados);
-  await exigirBasePrueba()
+  const migrador = databaseMigrador;
+  if (migrador === null) {
+    throw new Error('La limpieza requiere el rol migrador de PostgreSQL de prueba.');
+  }
+  await migrador
+    .delete(auditEvents)
+    .where(
+      sql`${auditEvents.metadata}->>'requestId' LIKE ${`${identificadoresSolicitud.prefijo}-%`}`,
+    );
+  await migrador
     .delete(auditEvents)
     .where(
       or(
@@ -234,7 +265,16 @@ async function cerrarAdministracion(): Promise<void> {
         inArray(auditEvents.targetUserId, usuariosTemporales),
       ),
     );
-  await exigirBasePrueba().delete(users).where(inArray(users.id, usuariosTemporales));
+  await migrador.delete(users).where(inArray(users.id, usuariosTemporales));
+  await migrador
+    .delete(authThrottleWindows)
+    .where(
+      and(
+        eq(authThrottleWindows.windowStartedAt, ahora),
+        inArray(authThrottleWindows.scope, ['RECOVERY_ACCOUNT', 'RECOVERY_NETWORK']),
+      ),
+    );
+  await migrador.$client.end({ timeout: 5 });
   await exigirBasePrueba().$client.end({ timeout: 5 });
 }
 
@@ -282,7 +322,7 @@ function definirPruebasAdmin(): void {
       url: '/api/v1/admin/users',
       headers: { cookie },
     });
-    const eventos = await exigirBasePrueba()
+    const eventos = await exigirBaseMigrador()
       .select({ action: auditEvents.action, outcome: auditEvents.outcome })
       .from(auditEvents)
       .where(eq(auditEvents.actorUserId, idSupport));
@@ -683,13 +723,14 @@ function definirPruebasAdmin(): void {
       .select({ displayName: users.displayName })
       .from(users)
       .where(eq(users.id, idSupport));
-    const eventosAntes = await base
+    const migrador = exigirBaseMigrador();
+    const eventosAntes = await migrador
       .select({ id: auditEvents.id })
       .from(auditEvents)
       .where(
         and(eq(auditEvents.action, 'ADMIN_USER_UPDATED'), eq(auditEvents.targetUserId, idSupport)),
       );
-    await base.$client.unsafe(`
+    await migrador.$client.unsafe(`
       CREATE OR REPLACE FUNCTION ps003_test_rechazar_auditoria_admin()
       RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN
@@ -722,7 +763,7 @@ function definirPruebasAdmin(): void {
         ),
       ).rejects.toThrow();
       const cuenta = await base.select().from(users).where(eq(users.id, idSupport));
-      const eventos = await base
+      const eventos = await migrador
         .select({ id: auditEvents.id })
         .from(auditEvents)
         .where(
@@ -735,7 +776,7 @@ function definirPruebasAdmin(): void {
       expect(cuenta[0]?.displayName).toBe(cuentaAntes[0]?.displayName);
       expect(eventos).toHaveLength(eventosAntes.length);
     } finally {
-      await base.$client.unsafe(`
+      await migrador.$client.unsafe(`
         DROP TRIGGER IF EXISTS ps003_test_rechazar_auditoria_admin ON audit_events;
         DROP FUNCTION IF EXISTS ps003_test_rechazar_auditoria_admin();
       `);

@@ -1,6 +1,10 @@
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type { ConnectionOptions as OpcionesTls } from 'node:tls';
 import postgres, { type Sql } from 'postgres';
+import {
+  cargarConfiguracionConexionPrueba,
+  exigirArnesPostgresVerificado,
+} from '../runtime-config.js';
 import * as esquema from './schema.js';
 
 /** Tipo de la base autenticada y del cliente PostgreSQL que controla su ciclo de vida. */
@@ -8,20 +12,42 @@ export type BaseDatosAuth = PostgresJsDatabase<typeof esquema> & { $client: Sql 
 
 /** Construye una base del portal con pool limitado y validación del destino de prueba. */
 export function crearClienteBaseDatosAuth(entorno: NodeJS.ProcessEnv = process.env): BaseDatosAuth {
-  const urlBaseDatos = entorno['DATABASE_URL'];
-  const modo = entorno['NODE_ENV'] ?? 'development';
+  const configuracion = { ...process.env, ...entorno };
+  const urlBaseDatos = configuracion['DATABASE_URL'];
+  const modo = configuracion['NODE_ENV'] ?? 'development';
+
+  if (modo === 'test') {
+    exigirArnesPostgresVerificado(configuracion);
+  }
 
   if (urlBaseDatos === undefined || urlBaseDatos.length === 0) {
     throw new Error('DATABASE_URL es obligatorio para la persistencia de autenticación.');
   }
 
-  const url = validarUrlBaseDatos(urlBaseDatos, modo);
-  const tls = resolverConfiguracionTlsBaseDatos(modo, url.hostname, entorno['DATABASE_SSL_CA']);
+  const url = validarUrlBaseDatos(urlBaseDatos, modo, configuracion);
+  const enPruebas = modo === 'test';
+  const tls = resolverConfiguracionTlsBaseDatos(
+    modo,
+    url.hostname,
+    configuracion['DATABASE_SSL_CA'],
+  );
   const cliente = postgres(url.href, {
-    max: 10,
-    idle_timeout: 20,
+    max: enPruebas ? 3 : 10,
+    idle_timeout: enPruebas ? 5 : 20,
     connect_timeout: 5,
-    max_lifetime: 1_800,
+    queue_timeout: enPruebas ? 5 : 0,
+    query_timeout: enPruebas ? 20 : 0,
+    max_lifetime: enPruebas ? 300 : 1_800,
+    connection: {
+      search_path: 'portal',
+      ...(enPruebas
+        ? {
+            statement_timeout: 15_000,
+            lock_timeout: 5_000,
+            idle_in_transaction_session_timeout: 10_000,
+          }
+        : {}),
+    },
     ssl: tls,
   });
 
@@ -61,7 +87,7 @@ export function resolverConfiguracionTlsBaseDatos(
 }
 
 /** Valida el protocolo y, durante pruebas, rechaza destinos fuera de la base local efímera. */
-function validarUrlBaseDatos(valor: string, modo: string): URL {
+function validarUrlBaseDatos(valor: string, modo: string, entorno: NodeJS.ProcessEnv): URL {
   let url: URL;
 
   try {
@@ -85,6 +111,27 @@ function validarUrlBaseDatos(valor: string, modo: string): URL {
   }
 
   if (modo === 'test') {
+    if (entorno['TEST_DATABASE_MODE'] === 'ssh-tunnel') {
+      const rolEsperado = entorno['TEST_DATABASE_ROLE'] ?? 'portal_test_app';
+      if (rolEsperado !== 'portal_test_app' && rolEsperado !== 'portal_test_migrator') {
+        throw new Error('TEST_DATABASE_ROLE debe ser un rol de prueba permitido.');
+      }
+
+      const destinoPrueba = cargarConfiguracionConexionPrueba(entorno, rolEsperado);
+      if (url.href !== destinoPrueba.DATABASE_URL) {
+        throw new Error('DATABASE_URL no coincide con el rol permitido de la base de pruebas.');
+      }
+
+      return url;
+    }
+
+    if (
+      entorno['TEST_DATABASE_MODE'] !== undefined &&
+      entorno['TEST_DATABASE_MODE'] !== 'local-ephemeral'
+    ) {
+      throw new Error('NODE_ENV=test requiere un modo de base de pruebas reconocido.');
+    }
+
     const baseLocalPermitida =
       url.pathname === '/portal_ps003_test' &&
       esLoopback(url.hostname) &&

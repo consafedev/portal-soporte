@@ -8,12 +8,63 @@ export interface ConfiguracionEscuchaApi {
   readonly port: number;
 }
 
-/** Variables permitidas para aplicar migraciones contra el PostgreSQL efímero de pruebas. */
-export interface ConfiguracionMigracionPrueba {
-  /** Fija el cliente PostgreSQL al modo estricto de pruebas. */
-  readonly NODE_ENV: 'test';
-  /** URL sin contraseña de la base local desechable autorizada. */
+/** Modo explícito permitido para la base de datos de pruebas. */
+export type ModoBasePrueba = 'local-ephemeral' | 'ssh-tunnel';
+
+/** Roles explícitos para la base de pruebas aislada. */
+export type RolConexionBasePrueba = 'portal_test_app' | 'portal_test_migrator';
+
+/** DSN de aplicación y migración validados para una base PostgreSQL de pruebas. */
+export interface ConfiguracionBasePrueba {
+  /** Modo de ejecución que limita los destinos autorizados. */
+  readonly modo: ModoBasePrueba;
+  /** DSN del rol de prueba usado por integración y E2E. */
+  readonly TEST_DATABASE_URL: string;
+  /** DSN del rol limitado que aplica migraciones y prueba DDL. */
+  readonly TEST_MIGRATOR_DATABASE_URL: string;
+}
+
+/** Una sola conexión validada para evitar exponer el DSN de otro rol. */
+export interface ConfiguracionConexionBasePrueba {
+  /** Modo de ejecución que limita los destinos autorizados. */
+  readonly modo: ModoBasePrueba;
+  /** DSN del único rol que debe recibir el proceso actual. */
   readonly DATABASE_URL: string;
+}
+
+/** Variables permitidas para migrar únicamente la base aislada de pruebas. */
+export interface ConfiguracionMigracionPrueba {
+  /** Fija el cliente PostgreSQL al entorno estricto de pruebas. */
+  readonly NODE_ENV: 'test';
+  /** DSN del rol migrador en la base de pruebas aislada. */
+  readonly DATABASE_URL: string;
+}
+
+/** Bloquea conexiones a PostgreSQL de pruebas fuera del runner que valida su aislamiento. */
+export function exigirArnesPostgresVerificado(variables: NodeJS.ProcessEnv): void {
+  const modo = variables['TEST_DATABASE_MODE'];
+  if (
+    variables['PORTAL_TEST_HARNESS_VERIFIED'] !== '1' ||
+    (modo !== 'local-ephemeral' && modo !== 'ssh-tunnel')
+  ) {
+    throw new Error('La conexión PostgreSQL de pruebas requiere el harness aislado verificado.');
+  }
+}
+
+/** Impide que una URL manual se confunda con el clúster local creado por el runner. */
+export function validarModoEntradaHarnessPrueba(variables: NodeJS.ProcessEnv): void {
+  const modo = variables['TEST_DATABASE_MODE'];
+  const url = variables['TEST_DATABASE_URL'];
+
+  if (modo !== undefined && modo !== 'local-ephemeral' && modo !== 'ssh-tunnel') {
+    throw new Error('TEST_DATABASE_MODE debe ser local-ephemeral o ssh-tunnel.');
+  }
+  if (url !== undefined && modo !== 'ssh-tunnel') {
+    throw new Error('Una URL externa de pruebas requiere el modo SSH remoto explícito.');
+  }
+  if (modo === 'ssh-tunnel' && (url === undefined || url.length === 0)) {
+    throw new Error('El modo remoto requiere TEST_DATABASE_URL antes de iniciar cualquier prueba.');
+  }
 }
 
 /**
@@ -47,31 +98,101 @@ export function cargarConfiguracionEscuchaApi(
 }
 
 /**
- * Cierra el destino de la CLI de migración a una base sintética y loopback.
+ * Valida la base de pruebas local efímera o remota por túnel SSH.
  *
- * @param variables - Entorno que debe contener `NODE_ENV=test` y TEST_DATABASE_URL.
- * @returns Variables acotadas para crear un cliente PostgreSQL de pruebas.
- * @throws Error si el destino no es la base portal_ps003_test local sin contraseña.
+ * @param variables - Entorno de pruebas con DSN de aplicación y, en modo remoto, migrador.
+ * @returns Modo y DSN ya validados para acceso de aplicación y migración.
+ * @throws Error si el entorno o cualquiera de los destinos no coincide con el allowlist.
  */
+export function cargarConfiguracionBasePrueba(
+  variables: NodeJS.ProcessEnv,
+): ConfiguracionBasePrueba {
+  const conexionAplicacion = cargarConfiguracionConexionPrueba(variables, 'portal_test_app');
+  const conexionMigrador = cargarConfiguracionConexionPrueba(variables, 'portal_test_migrator');
+
+  if (conexionAplicacion.modo !== conexionMigrador.modo) {
+    throw new Error('La configuración remota de pruebas no cumple el contrato aislado.');
+  }
+
+  return {
+    modo: conexionAplicacion.modo,
+    TEST_DATABASE_URL: conexionAplicacion.DATABASE_URL,
+    TEST_MIGRATOR_DATABASE_URL: conexionMigrador.DATABASE_URL,
+  };
+}
+
+/** Valida y devuelve solo el DSN del rol requerido por el proceso actual. */
+export function cargarConfiguracionConexionPrueba(
+  variables: NodeJS.ProcessEnv,
+  rolEsperado: RolConexionBasePrueba,
+): ConfiguracionConexionBasePrueba {
+  if (variables['NODE_ENV'] !== 'test') {
+    throw new Error('La base de pruebas solo admite NODE_ENV=test.');
+  }
+
+  const modo = variables['TEST_DATABASE_MODE'] ?? 'local-ephemeral';
+  if (modo === 'local-ephemeral') {
+    const valor =
+      rolEsperado === 'portal_test_app'
+        ? variables['TEST_DATABASE_URL']
+        : (variables['TEST_MIGRATOR_DATABASE_URL'] ?? variables['TEST_DATABASE_URL']);
+    const destino = validarUrlBaseLocalPrueba(valor);
+    const urlApp = variables['TEST_DATABASE_URL'];
+    const urlMigrador = variables['TEST_MIGRATOR_DATABASE_URL'];
+    if (
+      urlApp !== undefined &&
+      urlMigrador !== undefined &&
+      validarUrlBaseLocalPrueba(urlApp).href !== validarUrlBaseLocalPrueba(urlMigrador).href
+    ) {
+      throw new Error('TEST_MIGRATOR_DATABASE_URL debe coincidir con la base local efímera.');
+    }
+
+    return { modo, DATABASE_URL: destino.href };
+  }
+
+  if (
+    modo !== 'ssh-tunnel' ||
+    variables['TEST_DATABASE_ALLOW_MUTATIONS'] !== 'portal_soporte_test'
+  ) {
+    throw new Error('La configuración remota de pruebas no cumple el contrato aislado.');
+  }
+
+  const variableDsn =
+    rolEsperado === 'portal_test_app' ? 'TEST_DATABASE_URL' : 'TEST_MIGRATOR_DATABASE_URL';
+  const destino = validarUrlRemotaPrueba(variables[variableDsn], rolEsperado);
+  return { modo, DATABASE_URL: destino.href };
+}
+
+/** Limita la CLI de migración al DSN migrador validado en el entorno de pruebas. */
 export function cargarConfiguracionMigracionPrueba(
   variables: NodeJS.ProcessEnv,
 ): ConfiguracionMigracionPrueba {
   if (variables['NODE_ENV'] !== 'test') {
     throw new Error('La CLI de migración solo admite NODE_ENV=test.');
   }
-  const valor = variables['TEST_DATABASE_URL'];
+
+  exigirArnesPostgresVerificado(variables);
+
+  const configuracion = cargarConfiguracionConexionPrueba(variables, 'portal_test_migrator');
+  return { NODE_ENV: 'test', DATABASE_URL: configuracion.DATABASE_URL };
+}
+
+/** Valida la URL local sintética conservada para clústeres efímeros. */
+function validarUrlBaseLocalPrueba(valor: string | undefined): URL {
+  const mensaje = 'TEST_DATABASE_URL debe señalar únicamente a portal_ps003_test en loopback.';
   if (valor === undefined) {
-    throw new Error('TEST_DATABASE_URL debe señalar únicamente a portal_ps003_test en loopback.');
+    throw new Error(mensaje);
   }
 
   let destino: URL;
   try {
     destino = new URL(valor);
   } catch {
-    throw new Error('TEST_DATABASE_URL debe señalar únicamente a portal_ps003_test en loopback.');
+    throw new Error(mensaje);
   }
+
   if (
-    (destino.protocol !== 'postgres:' && destino.protocol !== 'postgresql:') ||
+    !['postgres:', 'postgresql:'].includes(destino.protocol) ||
     destino.pathname !== '/portal_ps003_test' ||
     !esLoopback(destino.hostname) ||
     destino.username !== 'ps003_test' ||
@@ -81,10 +202,44 @@ export function cargarConfiguracionMigracionPrueba(
     destino.href.endsWith('?') ||
     destino.href.endsWith('#')
   ) {
-    throw new Error('TEST_DATABASE_URL debe señalar únicamente a portal_ps003_test en loopback.');
+    throw new Error(mensaje);
   }
 
-  return { NODE_ENV: 'test', DATABASE_URL: destino.href };
+  return destino;
+}
+
+/** Valida un DSN remoto únicamente dentro del forward de prueba aprobado. */
+function validarUrlRemotaPrueba(
+  valor: string | undefined,
+  rolEsperado: 'portal_test_app' | 'portal_test_migrator',
+): URL {
+  if (valor === undefined) {
+    throw new Error('La configuración remota de pruebas no cumple el contrato aislado.');
+  }
+
+  let destino: URL;
+  try {
+    destino = new URL(valor);
+  } catch {
+    throw new Error('La configuración remota de pruebas no cumple el contrato aislado.');
+  }
+
+  if (
+    !['postgres:', 'postgresql:'].includes(destino.protocol) ||
+    destino.hostname !== '127.0.0.1' ||
+    destino.port !== '15432' ||
+    destino.pathname !== '/portal_soporte_test' ||
+    destino.username !== rolEsperado ||
+    destino.password.length === 0 ||
+    destino.search.length > 0 ||
+    destino.hash.length > 0 ||
+    destino.href.endsWith('?') ||
+    destino.href.endsWith('#')
+  ) {
+    throw new Error('La configuración remota de pruebas no cumple el contrato aislado.');
+  }
+
+  return destino;
 }
 
 /**

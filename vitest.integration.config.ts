@@ -5,6 +5,7 @@ export default defineConfig({
   test: {
     include: ['tests/integration/**/*.test.ts'],
     fileParallelism: false,
+    maxWorkers: 1,
     globalSetup: ['./tests/integration/setup.ts'],
     testTimeout: 30_000,
     hookTimeout: 30_000,

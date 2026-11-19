@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { randomUUID } from 'node:crypto';
 import type { RelojAuth } from '../../../packages/core/src/auth/ports.js';
 import {
   cargarClaveHmacIntentos,
@@ -72,6 +73,7 @@ export async function crearRuntimeAuth(
       publicAppOrigin: configuracion.publicAppOrigin,
     });
     const usuariosAdmin = new ServicioUsuariosAdmin(repositorio, reloj);
+    const generarIdSolicitud = crearGeneradorIdSolicitudPrueba(variables);
     const servidor = await crearServidorAuth({
       configuracion,
       autenticacion,
@@ -81,6 +83,7 @@ export async function crearRuntimeAuth(
       limitador,
       recuperacion,
       usuariosAdmin,
+      ...(generarIdSolicitud === undefined ? {} : { generarIdSolicitud }),
     });
 
     return crearRuntime(servidor, database);
@@ -88,6 +91,26 @@ export async function crearRuntimeAuth(
     await database.$client.end({ timeout: 5 }).catch(() => undefined);
     throw error;
   }
+}
+
+/**
+ * Crea IDs de solicitud prefijados solo para el arnés de pruebas E2E aislado.
+ * @param variables Configuración del proceso que compone el runtime de autenticación.
+ * @returns Generador sintético o undefined para ejecuciones distintas de E2E.
+ * @throws Error cuando un prefijo no pertenece al arnés de pruebas aprobado.
+ * @effects Solo produce identificadores UUID no secretos y no consulta servicios externos.
+ */
+function crearGeneradorIdSolicitudPrueba(variables: NodeJS.ProcessEnv): (() => string) | undefined {
+  const prefijo = variables['PORTAL_TEST_REQUEST_ID_PREFIX'];
+  if (prefijo === undefined) return undefined;
+  if (
+    variables['NODE_ENV'] !== 'test' ||
+    variables['PORTAL_TEST_HARNESS_VERIFIED'] !== '1' ||
+    !/^ps003-test-[0-9a-f]{32}-$/u.test(prefijo)
+  ) {
+    throw new Error('El prefijo de solicitud solo se admite desde el arnés aislado de pruebas.');
+  }
+  return () => `${prefijo}${randomUUID()}`;
 }
 
 /**

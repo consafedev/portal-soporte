@@ -1,4 +1,4 @@
-CREATE TABLE "audit_events" (
+CREATE TABLE "portal"."audit_events" (
 	"id" uuid PRIMARY KEY NOT NULL,
 	"actor_user_id" uuid,
 	"target_user_id" uuid,
@@ -9,15 +9,15 @@ CREATE TABLE "audit_events" (
 	CONSTRAINT "audit_events_outcome_check" CHECK ("audit_events"."outcome" IN ('SUCCESS', 'FAILURE', 'DENIED'))
 );
 --> statement-breakpoint
-CREATE TABLE "auth_invariants" (
+CREATE TABLE "portal"."auth_invariants" (
 	"id" smallint PRIMARY KEY NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "auth_invariants_singleton_check" CHECK ("auth_invariants"."id" = 1)
 );
 --> statement-breakpoint
-INSERT INTO "auth_invariants" ("id") VALUES (1);
+INSERT INTO "portal"."auth_invariants" ("id") VALUES (1);
 --> statement-breakpoint
-CREATE TABLE "auth_throttle_windows" (
+CREATE TABLE "portal"."auth_throttle_windows" (
 	"key_hash" varchar(64) PRIMARY KEY NOT NULL,
 	"scope" text NOT NULL,
 	"window_started_at" timestamp with time zone NOT NULL,
@@ -28,7 +28,7 @@ CREATE TABLE "auth_throttle_windows" (
 	CONSTRAINT "auth_throttle_attempt_count_check" CHECK ("auth_throttle_windows"."attempt_count" >= 0)
 );
 --> statement-breakpoint
-CREATE TABLE "recovery_tokens" (
+CREATE TABLE "portal"."recovery_tokens" (
 	"id" uuid PRIMARY KEY NOT NULL,
 	"user_id" uuid NOT NULL,
 	"token_hash" varchar(64) NOT NULL,
@@ -43,7 +43,7 @@ CREATE TABLE "recovery_tokens" (
 	CONSTRAINT "recovery_tokens_expiration_check" CHECK ("recovery_tokens"."expires_at" > '1970-01-01T00:00:00Z'::timestamptz)
 );
 --> statement-breakpoint
-CREATE TABLE "sessions" (
+CREATE TABLE "portal"."sessions" (
 	"id" uuid PRIMARY KEY NOT NULL,
 	"user_id" uuid NOT NULL,
 	"token_hash" varchar(64) NOT NULL,
@@ -55,7 +55,7 @@ CREATE TABLE "sessions" (
 	CONSTRAINT "sessions_token_hash_unique" UNIQUE("token_hash")
 );
 --> statement-breakpoint
-CREATE TABLE "users" (
+CREATE TABLE "portal"."users" (
 	"id" uuid PRIMARY KEY NOT NULL,
 	"username" varchar(64) NOT NULL,
 	"username_normalized" varchar(64) NOT NULL,
@@ -73,17 +73,17 @@ CREATE TABLE "users" (
 	CONSTRAINT "users_credential_state_check" CHECK (("users"."status" = 'PENDING_ACTIVATION' AND "users"."password_hash" IS NULL) OR ("users"."status" IN ('ACTIVE', 'DISABLED') AND "users"."password_hash" IS NOT NULL))
 );
 --> statement-breakpoint
-ALTER TABLE "audit_events" ADD CONSTRAINT "audit_events_actor_user_id_users_id_fk" FOREIGN KEY ("actor_user_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "audit_events" ADD CONSTRAINT "audit_events_target_user_id_users_id_fk" FOREIGN KEY ("target_user_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "recovery_tokens" ADD CONSTRAINT "recovery_tokens_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "sessions" ADD CONSTRAINT "sessions_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX "audit_events_actor_created_idx" ON "audit_events" USING btree ("actor_user_id","created_at");--> statement-breakpoint
-CREATE INDEX "audit_events_target_created_idx" ON "audit_events" USING btree ("target_user_id","created_at");--> statement-breakpoint
-CREATE INDEX "audit_events_created_at_idx" ON "audit_events" USING btree ("created_at");--> statement-breakpoint
-CREATE INDEX "recovery_tokens_expires_at_idx" ON "recovery_tokens" USING btree ("expires_at");--> statement-breakpoint
-CREATE INDEX "recovery_tokens_user_id_idx" ON "recovery_tokens" USING btree ("user_id");--> statement-breakpoint
-CREATE INDEX "sessions_absolute_expires_at_idx" ON "sessions" USING btree ("absolute_expires_at");--> statement-breakpoint
-CREATE INDEX "sessions_idle_expires_at_idx" ON "sessions" USING btree ("idle_expires_at");--> statement-breakpoint
-CREATE INDEX "sessions_user_id_idx" ON "sessions" USING btree ("user_id");--> statement-breakpoint
-CREATE UNIQUE INDEX "users_email_normalized_unique" ON "users" USING btree ("email_normalized");--> statement-breakpoint
-CREATE UNIQUE INDEX "users_username_normalized_unique" ON "users" USING btree ("username_normalized");
+ALTER TABLE "portal"."audit_events" ADD CONSTRAINT "audit_events_actor_user_id_users_id_fk" FOREIGN KEY ("actor_user_id") REFERENCES "portal"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "portal"."audit_events" ADD CONSTRAINT "audit_events_target_user_id_users_id_fk" FOREIGN KEY ("target_user_id") REFERENCES "portal"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "portal"."recovery_tokens" ADD CONSTRAINT "recovery_tokens_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "portal"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "portal"."sessions" ADD CONSTRAINT "sessions_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "portal"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "audit_events_actor_created_idx" ON "portal"."audit_events" USING btree ("actor_user_id","created_at");--> statement-breakpoint
+CREATE INDEX "audit_events_target_created_idx" ON "portal"."audit_events" USING btree ("target_user_id","created_at");--> statement-breakpoint
+CREATE INDEX "audit_events_created_at_idx" ON "portal"."audit_events" USING btree ("created_at");--> statement-breakpoint
+CREATE INDEX "recovery_tokens_expires_at_idx" ON "portal"."recovery_tokens" USING btree ("expires_at");--> statement-breakpoint
+CREATE INDEX "recovery_tokens_user_id_idx" ON "portal"."recovery_tokens" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX "sessions_absolute_expires_at_idx" ON "portal"."sessions" USING btree ("absolute_expires_at");--> statement-breakpoint
+CREATE INDEX "sessions_idle_expires_at_idx" ON "portal"."sessions" USING btree ("idle_expires_at");--> statement-breakpoint
+CREATE INDEX "sessions_user_id_idx" ON "portal"."sessions" USING btree ("user_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "users_email_normalized_unique" ON "portal"."users" USING btree ("email_normalized");--> statement-breakpoint
+CREATE UNIQUE INDEX "users_username_normalized_unique" ON "portal"."users" USING btree ("username_normalized");

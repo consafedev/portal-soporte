@@ -11,6 +11,7 @@ import { PostgresAuthRepository } from '../../apps/api/src/auth/postgres-auth-re
 import { ServicioSesion } from '../../apps/api/src/auth/session-service.js';
 import { crearClienteBaseDatosAuth } from '../../apps/api/src/db/client.js';
 import { auditEvents, users, sessions } from '../../apps/api/src/db/schema.js';
+import { crearClienteMigradorPruebas } from '../support/test-database-clients.js';
 import type { RelojAuth } from '../../packages/core/src/auth/ports.js';
 
 const urlBase = process.env['TEST_DATABASE_URL'];
@@ -18,6 +19,7 @@ const database =
   urlBase === undefined
     ? null
     : crearClienteBaseDatosAuth({ DATABASE_URL: urlBase, NODE_ENV: 'test' });
+const databaseMigrador = crearClienteMigradorPruebas();
 const idsAdministradores = [randomUUID(), randomUUID()] as const;
 let idsBootstrapCreados: string[] = [];
 const sufijo = randomUUID().slice(0, 8);
@@ -79,16 +81,25 @@ async function prepararAdministradores(): Promise<void> {
 /** Elimina solo los usuarios sintéticos que la suite de concurrencia creó. */
 async function limpiarAdministradores(): Promise<void> {
   const idsTemporales = [...idsAdministradores, ...idsBootstrapCreados];
-  await exigirBasePrueba()
+  const migrador = exigirBaseMigrador();
+  await migrador
     .delete(auditEvents)
     .where(
       and(inArray(auditEvents.actorUserId, idsTemporales), eq(auditEvents.outcome, 'SUCCESS')),
     );
-  await exigirBasePrueba()
-    .delete(auditEvents)
-    .where(inArray(auditEvents.targetUserId, idsTemporales));
-  await exigirBasePrueba().delete(users).where(inArray(users.id, idsTemporales));
+  await migrador.delete(auditEvents).where(inArray(auditEvents.targetUserId, idsTemporales));
+  await migrador.delete(users).where(inArray(users.id, idsTemporales));
+  await databaseMigrador?.$client.end({ timeout: 5 });
   await exigirBasePrueba().$client.end({ timeout: 5 });
+}
+
+/** Recupera el cliente migrador reservado para preparar y limpiar fixtures sintéticos. */
+function exigirBaseMigrador(): NonNullable<typeof databaseMigrador> {
+  if (databaseMigrador === null) {
+    throw new Error('La limpieza requiere el rol migrador de PostgreSQL de prueba.');
+  }
+
+  return databaseMigrador;
 }
 
 /** Ejecuta carreras reales entre transacciones independientes de PostgreSQL. */
@@ -180,7 +191,16 @@ function definirPruebasDeInvariantes(): void {
         ),
       ).rejects.toMatchObject({ code: 'AUTH_REQUIRED' });
     } finally {
-      await base.delete(users).where(eq(users.usernameNormalized, alta.username));
+      const [usuarioTemporal] = await base
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.usernameNormalized, alta.username));
+      if (usuarioTemporal !== undefined) {
+        const migrador = exigirBaseMigrador();
+        await migrador.delete(auditEvents).where(eq(auditEvents.actorUserId, usuarioTemporal.id));
+        await migrador.delete(auditEvents).where(eq(auditEvents.targetUserId, usuarioTemporal.id));
+        await migrador.delete(users).where(eq(users.id, usuarioTemporal.id));
+      }
     }
   });
   it('revalida la sesión exacta tras serializar dos cambios de rol concurrentes', async () => {
@@ -267,7 +287,14 @@ function definirPruebasDeInvariantes(): void {
 
   it('permite como máximo un bootstrap entre dos solicitudes concurrentes', async () => {
     const base = exigirBasePrueba();
-    await base.delete(users).where(inArray(users.id, [...idsAdministradores]));
+    const migrador = exigirBaseMigrador();
+    await migrador
+      .delete(auditEvents)
+      .where(inArray(auditEvents.actorUserId, [...idsAdministradores]));
+    await migrador
+      .delete(auditEvents)
+      .where(inArray(auditEvents.targetUserId, [...idsAdministradores]));
+    await migrador.delete(users).where(inArray(users.id, [...idsAdministradores]));
     const repositorio = new PostgresAuthRepository(base);
     const resultados = await Promise.allSettled(
       [0, 1].map((indice) =>

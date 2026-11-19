@@ -1,9 +1,15 @@
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
+  cargarConfiguracionBasePrueba,
+  cargarConfiguracionConexionPrueba,
   cargarConfiguracionEscuchaApi,
   cargarConfiguracionMigracionPrueba,
+  exigirArnesPostgresVerificado,
+  validarModoEntradaHarnessPrueba,
 } from '../../apps/api/src/runtime-config.js';
+
+const permisoMutacionesRemotas = 'portal_soporte_test';
 
 /** Devuelve variables sintéticas para ejercer configuración local sin abrir sockets. */
 function crearEntornoEscucha(ajustes: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
@@ -27,6 +33,40 @@ function crearUrlBasePrueba(
   url.search = consulta;
 
   return url.href;
+}
+
+/** Construye DSN remoto sintético para validar rol, puerto y base sin conectar. */
+function crearUrlRemotaPrueba(
+  usuario: 'portal_test_app' | 'portal_test_migrator' = 'portal_test_app',
+  puerto = '15432',
+  host = '127.0.0.1',
+  base = 'portal_soporte_test',
+  contrasena = randomBytes(32).toString('base64url'),
+  consulta = '',
+  fragmento = '',
+): string {
+  const url = new URL(`postgres://${host}/`);
+  url.port = puerto;
+  url.pathname = `/${base}`;
+  url.username = usuario;
+  url.password = contrasena;
+  url.search = consulta;
+  url.hash = fragmento;
+
+  return url.href;
+}
+
+/** Construye el modo remoto explícito con las dos credenciales sintéticas. */
+function crearEntornoRemotoPrueba(ajustes: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  return {
+    NODE_ENV: 'test',
+    TEST_DATABASE_MODE: 'ssh-tunnel',
+    PORTAL_TEST_HARNESS_VERIFIED: '1',
+    TEST_DATABASE_ALLOW_MUTATIONS: permisoMutacionesRemotas,
+    TEST_DATABASE_URL: crearUrlRemotaPrueba('portal_test_app'),
+    TEST_MIGRATOR_DATABASE_URL: crearUrlRemotaPrueba('portal_test_migrator'),
+    ...ajustes,
+  };
 }
 
 describe('cargarConfiguracionEscuchaApi', () => {
@@ -68,6 +108,8 @@ describe('cargarConfiguracionMigracionPrueba', () => {
     expect(
       cargarConfiguracionMigracionPrueba({
         NODE_ENV: 'test',
+        TEST_DATABASE_MODE: 'local-ephemeral',
+        PORTAL_TEST_HARNESS_VERIFIED: '1',
         TEST_DATABASE_URL: crearUrlBasePrueba('127.0.0.1'),
       }),
     ).toEqual({
@@ -99,7 +141,12 @@ describe('cargarConfiguracionMigracionPrueba', () => {
 
     for (const url of destinos) {
       expect(() =>
-        cargarConfiguracionMigracionPrueba({ NODE_ENV: 'test', TEST_DATABASE_URL: url }),
+        cargarConfiguracionMigracionPrueba({
+          NODE_ENV: 'test',
+          TEST_DATABASE_MODE: 'local-ephemeral',
+          PORTAL_TEST_HARNESS_VERIFIED: '1',
+          TEST_DATABASE_URL: url,
+        }),
       ).toThrow('TEST_DATABASE_URL debe señalar únicamente a portal_ps003_test en loopback.');
     }
   });
@@ -111,5 +158,195 @@ describe('cargarConfiguracionMigracionPrueba', () => {
         TEST_DATABASE_URL: crearUrlBasePrueba('127.0.0.1'),
       }),
     ).toThrow('La CLI de migración solo admite NODE_ENV=test.');
+  });
+});
+
+describe('exigirArnesPostgresVerificado', () => {
+  it('rechaza conexiones de prueba que no provienen del harness', () => {
+    expect(() => exigirArnesPostgresVerificado({ TEST_DATABASE_MODE: 'ssh-tunnel' })).toThrow(
+      'La conexión PostgreSQL de pruebas requiere el harness aislado verificado.',
+    );
+  });
+
+  it.each(['local-ephemeral', 'ssh-tunnel'] as const)('acepta el modo verificado %s', (modo) => {
+    expect(() =>
+      exigirArnesPostgresVerificado({
+        TEST_DATABASE_MODE: modo,
+        PORTAL_TEST_HARNESS_VERIFIED: '1',
+      }),
+    ).not.toThrow();
+  });
+});
+
+describe('validarModoEntradaHarnessPrueba', () => {
+  it('acepta modo local solo cuando el runner creará un clúster', () => {
+    expect(() => validarModoEntradaHarnessPrueba({})).not.toThrow();
+    expect(() =>
+      validarModoEntradaHarnessPrueba({ TEST_DATABASE_MODE: 'local-ephemeral' }),
+    ).not.toThrow();
+  });
+
+  it('rechaza URLs locales manuales para prevenir conexiones persistentes accidentales', () => {
+    expect(() =>
+      validarModoEntradaHarnessPrueba({
+        TEST_DATABASE_MODE: 'local-ephemeral',
+        TEST_DATABASE_URL: 'postgres://ps003_test@127.0.0.1/portal_ps003_test',
+      }),
+    ).toThrow('Una URL externa de pruebas requiere el modo SSH remoto explícito.');
+  });
+
+  it('exige una URL cuando se selecciona explícitamente el modo remoto', () => {
+    expect(() => validarModoEntradaHarnessPrueba({ TEST_DATABASE_MODE: 'ssh-tunnel' })).toThrow(
+      'El modo remoto requiere TEST_DATABASE_URL antes de iniciar cualquier prueba.',
+    );
+  });
+
+  it('rechaza modos de prueba desconocidos antes de iniciar PostgreSQL', () => {
+    expect(() => validarModoEntradaHarnessPrueba({ TEST_DATABASE_MODE: 'persistent' })).toThrow(
+      'TEST_DATABASE_MODE debe ser local-ephemeral o ssh-tunnel.',
+    );
+  });
+});
+
+describe('cargarConfiguracionBasePrueba', () => {
+  it('acepta portal_test_app como el rol de ejecución remota aprobado', () => {
+    const urlAplicacion = new URL(crearUrlRemotaPrueba('portal_test_app'));
+    urlAplicacion.username = 'portal_test_app';
+    const entorno = crearEntornoRemotoPrueba({ TEST_DATABASE_URL: urlAplicacion.href });
+
+    expect(cargarConfiguracionBasePrueba(entorno).TEST_DATABASE_URL).toBe(urlAplicacion.href);
+  });
+
+  it('acepta el destino remoto únicamente con ambos roles y opt-in exacto', () => {
+    const entorno = crearEntornoRemotoPrueba();
+    const configuracion = cargarConfiguracionBasePrueba(entorno);
+
+    expect(configuracion).toEqual({
+      modo: 'ssh-tunnel',
+      TEST_DATABASE_URL: entorno['TEST_DATABASE_URL'],
+      TEST_MIGRATOR_DATABASE_URL: entorno['TEST_MIGRATOR_DATABASE_URL'],
+    });
+    expect(cargarConfiguracionMigracionPrueba(entorno)).toEqual({
+      NODE_ENV: 'test',
+      DATABASE_URL: entorno['TEST_MIGRATOR_DATABASE_URL'],
+    });
+  });
+
+  it.each([
+    ['modo ausente', { TEST_DATABASE_MODE: undefined }],
+    [
+      'base distinta',
+      {
+        TEST_DATABASE_URL: crearUrlRemotaPrueba(
+          'portal_test_app',
+          '15432',
+          '127.0.0.1',
+          'portal_soporte',
+        ),
+      },
+    ],
+    [
+      'rol de aplicación distinto',
+      { TEST_DATABASE_URL: crearUrlRemotaPrueba('portal_test_migrator') },
+    ],
+    [
+      'host distinto',
+      { TEST_DATABASE_URL: crearUrlRemotaPrueba('portal_test_app', '15432', '10.18.170.44') },
+    ],
+    ['puerto distinto', { TEST_DATABASE_URL: crearUrlRemotaPrueba('portal_test_app', '5432') }],
+    [
+      'password ausente',
+      {
+        TEST_DATABASE_URL: crearUrlRemotaPrueba(
+          'portal_test_app',
+          '15432',
+          '127.0.0.1',
+          'portal_soporte_test',
+          '',
+        ),
+      },
+    ],
+    [
+      'query string',
+      {
+        TEST_DATABASE_URL: crearUrlRemotaPrueba(
+          'portal_test_app',
+          '15432',
+          '127.0.0.1',
+          'portal_soporte_test',
+          randomBytes(32).toString('base64url'),
+          '?sslmode=disable',
+        ),
+      },
+    ],
+    [
+      'fragmento',
+      {
+        TEST_DATABASE_URL: crearUrlRemotaPrueba(
+          'portal_test_app',
+          '15432',
+          '127.0.0.1',
+          'portal_soporte_test',
+          randomBytes(32).toString('base64url'),
+          '',
+          '#secreto',
+        ),
+      },
+    ],
+    [
+      'rol de migración distinto',
+      { TEST_MIGRATOR_DATABASE_URL: crearUrlRemotaPrueba('portal_test_app') },
+    ],
+    ['opt-in de escritura distinto', { TEST_DATABASE_ALLOW_MUTATIONS: 'portal_soporte' }],
+  ])('rechaza el destino remoto con %s', (_caso, ajustes) => {
+    expect(() => cargarConfiguracionBasePrueba(crearEntornoRemotoPrueba(ajustes))).toThrow();
+  });
+
+  it('no incluye credenciales ni DSN en los errores de validación', () => {
+    const secretoSintetico = randomBytes(32).toString('base64url');
+    const entorno = crearEntornoRemotoPrueba({
+      TEST_DATABASE_URL: crearUrlRemotaPrueba(
+        'portal_test_app',
+        '15432',
+        '127.0.0.1',
+        'portal_soporte_test',
+        secretoSintetico,
+      ),
+      TEST_DATABASE_ALLOW_MUTATIONS: 'no',
+    });
+
+    let mensaje = '';
+    try {
+      cargarConfiguracionBasePrueba(entorno);
+    } catch (error) {
+      mensaje = error instanceof Error ? error.message : String(error);
+    }
+
+    expect(mensaje).not.toContain(secretoSintetico);
+    expect(mensaje).not.toContain('postgres://');
+  });
+});
+
+describe('cargarConfiguracionConexionPrueba', () => {
+  it('valida el DSN de aplicación sin requerir ni cargar el DSN migrador', () => {
+    const entorno = crearEntornoRemotoPrueba();
+    const urlApp = entorno['TEST_DATABASE_URL'];
+    delete entorno['TEST_MIGRATOR_DATABASE_URL'];
+
+    expect(cargarConfiguracionConexionPrueba(entorno, 'portal_test_app')).toEqual({
+      modo: 'ssh-tunnel',
+      DATABASE_URL: urlApp,
+    });
+  });
+
+  it('resuelve solo el DSN migrador cuando el runtime lo solicita explícitamente', () => {
+    const entorno = crearEntornoRemotoPrueba();
+    const urlMigrador = entorno['TEST_MIGRATOR_DATABASE_URL'];
+    delete entorno['TEST_DATABASE_URL'];
+
+    expect(cargarConfiguracionConexionPrueba(entorno, 'portal_test_migrator')).toEqual({
+      modo: 'ssh-tunnel',
+      DATABASE_URL: urlMigrador,
+    });
   });
 });

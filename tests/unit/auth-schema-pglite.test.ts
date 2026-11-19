@@ -1,5 +1,9 @@
 import { PGlite } from '@electric-sql/pglite';
 import { getTableName } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/pglite';
+import { migrate } from 'drizzle-orm/pglite/migrator';
+import { getTableConfig } from 'drizzle-orm/pg-core';
+import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   authInvariants,
@@ -9,13 +13,13 @@ import {
   sessions,
   users,
 } from '../../apps/api/src/db/schema.js';
-import { leerMigracionAuth } from '../support/auth-migration-fixture.js';
-
 const database = new PGlite();
 
 /** Prepara en PGlite el esquema versionado para simulaciones compatibles. */
 async function prepararBaseSimulada(): Promise<void> {
-  await database.exec(await leerMigracionAuth());
+  const migraciones = fileURLToPath(new URL('../../apps/api/drizzle/', import.meta.url));
+  await migrate(drizzle(database), { migrationsFolder: migraciones, migrationsSchema: 'portal' });
+  await database.exec('SET search_path TO portal');
 }
 
 /** Cierra PGlite después de las simulaciones del esquema. */
@@ -26,10 +30,15 @@ async function cerrarBaseSimulada(): Promise<void> {
 /** Agrupa comprobaciones de estructura y restricciones simulables en PGlite. */
 function definirPruebasDeEsquemaPGlite(): void {
   it(
+    'mapea todas las tablas de autenticación al esquema aislado portal',
+    pruebaEsquemaPortalDrizzle,
+  );
+  it(
     'expone todas las tablas de identidad definidas en el esquema Drizzle',
     pruebaTablasDeIdentidad,
   );
   it('siembra una sola fila centinela para invariantes de autenticación', pruebaFilaCentinelaUnica);
+  it('mantiene tablas y ledger de autenticación dentro de portal', pruebaLedgerDentroDePortal);
   it(
     'permite cuenta pendiente sin hash y rechaza cuenta activa sin hash',
     pruebaHashPendienteYActivo,
@@ -37,6 +46,48 @@ function definirPruebasDeEsquemaPGlite(): void {
   it('impide duplicar nombres de usuario normalizados', pruebaUsernameUnico);
   it('impide duplicar correos normalizados', pruebaCorreoUnico);
   it('impide repetir hashes de tokens opacos', pruebaHashDeTokenUnico);
+}
+
+/** Comprueba que las consultas ORM queden cualificadas bajo el esquema propio del portal. */
+function pruebaEsquemaPortalDrizzle(): void {
+  const tablas = [
+    users,
+    sessions,
+    recoveryTokens,
+    authThrottleWindows,
+    auditEvents,
+    authInvariants,
+  ];
+
+  expect(tablas.map((tabla) => getTableConfig(tabla).schema)).toEqual([
+    'portal',
+    'portal',
+    'portal',
+    'portal',
+    'portal',
+    'portal',
+  ]);
+}
+
+/** Comprueba que el migrador Drizzle guarde sus versiones en el esquema aislado portal. */
+async function pruebaLedgerDentroDePortal(): Promise<void> {
+  const versiones = await database.query<{ cantidad: number }>(
+    'SELECT count(*)::int AS cantidad FROM portal.__drizzle_migrations',
+  );
+  const ledgerPublico = await database.query<{ existe: boolean }>(
+    "SELECT to_regclass('public.__drizzle_migrations') IS NOT NULL AS existe",
+  );
+  const tablasAuthPublicas = await database.query<{ cantidad: number }>(
+    "SELECT count(*)::int AS cantidad FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('audit_events', 'auth_invariants', 'auth_throttle_windows', 'recovery_tokens', 'sessions', 'users')",
+  );
+  const secuenciasLedger = await database.query<{ sequence_name: string }>(
+    "SELECT sequence_name FROM information_schema.sequences WHERE sequence_schema = 'portal'",
+  );
+
+  expect(versiones.rows).toEqual([{ cantidad: 4 }]);
+  expect(ledgerPublico.rows).toEqual([{ existe: false }]);
+  expect(tablasAuthPublicas.rows).toEqual([{ cantidad: 0 }]);
+  expect(secuenciasLedger.rows).toEqual([{ sequence_name: '__drizzle_migrations_id_seq' }]);
 }
 
 /** Comprueba la presencia de las seis entidades persistentes del diseño. */
@@ -50,7 +101,7 @@ async function pruebaTablasDeIdentidad(): Promise<void> {
     getTableName(authInvariants),
   ];
   const filas = await database.query<{ table_name: string }>(
-    "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'",
+    "SELECT table_name FROM information_schema.tables WHERE table_schema = 'portal' AND table_name <> '__drizzle_migrations'",
   );
 
   expect(filas.rows.map((fila) => fila.table_name).sort()).toEqual(nombresEsperados.sort());

@@ -15,6 +15,7 @@ import type { ServicioUsuariosAdmin } from './auth/admin-user-service.js';
 import type { LimitadorIntentosAuth } from '../../../packages/core/src/auth/recovery-ports.js';
 import type { ServicioRecuperacionAuth } from './auth/recovery-service.js';
 import { registrarRutasRecuperacion } from './routes/recovery-routes.js';
+import { extraerDiagnosticoBaseDatosSeguro } from './logging/safe-database-error.js';
 
 const CAMPOS_SENSIBLES_LOG = [
   'req.headers.cookie',
@@ -47,6 +48,8 @@ export interface DependenciasServidorAuth {
   readonly recuperacion: ServicioRecuperacionAuth;
   /** Servicio opcional de administración registrado solo cuando el runtime lo configura. */
   readonly usuariosAdmin?: ServicioUsuariosAdmin;
+  /** Generador opcional de IDs de solicitud para aislar trazas sintéticas de integración. */
+  readonly generarIdSolicitud?: () => string;
 }
 
 /**
@@ -65,6 +68,9 @@ export async function crearServidorAuth(
     logController: new LogController({ disableRequestLogging: true }),
     routerOptions: { maxParamLength: 128 },
     trustProxy: [...dependencias.configuracion.trustedProxyCidrs],
+    ...(dependencias.generarIdSolicitud === undefined
+      ? {}
+      : { genReqId: dependencias.generarIdSolicitud }),
     logger: {
       level: 'info',
       redact: { paths: CAMPOS_SENSIBLES_LOG, censor: '[REDACTADO]' },
@@ -88,7 +94,11 @@ export async function crearServidorAuth(
     }
 
     solicitud.log.error(
-      { requestId: solicitud.id, code: 'UNHANDLED_AUTH_ERROR' },
+      {
+        requestId: solicitud.id,
+        code: 'UNHANDLED_AUTH_ERROR',
+        ...extraerDiagnosticoBaseDatosSeguro(error),
+      },
       'Fallo controlado de solicitud de autenticación.',
     );
 

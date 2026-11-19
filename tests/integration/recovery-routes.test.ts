@@ -1,5 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto';
-import { eq, inArray } from 'drizzle-orm';
+import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
+import { eq, inArray, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Argon2PasswordHasher } from '../../apps/api/src/auth/argon2-password-hasher.js';
 import { LimitadorIntentosPostgres } from '../../apps/api/src/auth/attempt-limiter.js';
@@ -22,12 +22,22 @@ import type {
   RelojAuth,
   ServicioCorreoAuth,
 } from '../../packages/core/src/auth/ports.js';
+import type {
+  LimitadorIntentosAuth,
+  TipoIntentoAuth,
+} from '../../packages/core/src/auth/recovery-ports.js';
+import {
+  crearClienteMigradorPruebas,
+  crearIdentificadoresSolicitudPrueba,
+} from '../support/test-database-clients.js';
 
 const urlBase = process.env['TEST_DATABASE_URL'];
 const database =
   urlBase === undefined
     ? null
     : crearClienteBaseDatosAuth({ DATABASE_URL: urlBase, NODE_ENV: 'test' });
+const databaseMigrador = crearClienteMigradorPruebas();
+const identificadoresSolicitud = crearIdentificadoresSolicitudPrueba();
 const idSupportRecovery = randomUUID();
 const idSupportPassword = randomUUID();
 const idSupportEmail = randomUUID();
@@ -39,6 +49,8 @@ const contrasenaRecuperada = 'Nueva contraseña de recuperación ñ 456';
 const origen = 'http://127.0.0.1:3000';
 const ahora = new Date();
 const mensajes: MensajeCorreoAuth[] = [];
+const claveHmacLimitesSuite = randomBytes(32);
+const hashesLimitesSuite = new Set<string>();
 const correoPrueba: ServicioCorreoAuth = {
   /** Conserva solo mensajes sintéticos en memoria para verificar el flujo de entrega. */
   async enviar(mensaje) {
@@ -66,6 +78,15 @@ function exigirBasePrueba(): NonNullable<typeof database> {
   }
 
   return database;
+}
+
+/** Recupera el migrador para consultar auditoría sin ampliar el rol de aplicación. */
+function exigirBaseMigrador(): NonNullable<typeof databaseMigrador> {
+  if (databaseMigrador === null) {
+    throw new Error('La consulta requiere el rol migrador de PostgreSQL de prueba.');
+  }
+
+  return databaseMigrador;
 }
 
 /** Recupera la aplicación Fastify configurada con adaptadores falsos y DB temporal. */
@@ -109,6 +130,45 @@ async function insertarCuentaActiva(
       role,
       status: 'ACTIVE',
     });
+}
+
+/** Crea el limitador real y conserva solo los hashes de clave generados por esta suite. */
+function crearLimitadorIntentosDeSuite(): LimitadorIntentosAuth {
+  const limitador = new LimitadorIntentosPostgres(exigirBasePrueba(), claveHmacLimitesSuite);
+
+  /** Deriva los dos scopes que el limitador persistirá para un intento. */
+  function registrarClavesPropias(
+    tipo: TipoIntentoAuth,
+    identificador: string,
+    direccionIp: string,
+  ): void {
+    const alcances =
+      tipo === 'LOGIN'
+        ? { cuenta: 'LOGIN_ACCOUNT', red: 'LOGIN_NETWORK' }
+        : { cuenta: 'RECOVERY_ACCOUNT', red: 'RECOVERY_NETWORK' };
+    for (const [alcance, valor] of [
+      [alcances.cuenta, identificador],
+      [alcances.red, ''],
+    ] as const) {
+      const material = `${alcance}\0${valor.length}:${valor}\0${direccionIp.length}:${direccionIp}`;
+      hashesLimitesSuite.add(
+        createHmac('sha256', claveHmacLimitesSuite).update(material, 'utf8').digest('hex'),
+      );
+    }
+  }
+
+  return {
+    /** Registra el intento real y calcula antes las únicas claves que puede crear. */
+    async registrarIntento(tipo, identificador, direccionIp, ahora) {
+      registrarClavesPropias(tipo, identificador, direccionIp);
+      return limitador.registrarIntento(tipo, identificador, direccionIp, ahora);
+    },
+    /** Registra las claves propias antes de descontar reservas de autenticación exitosa. */
+    async descontarReservaExitosa(tipo, identificador, direccionIp) {
+      registrarClavesPropias(tipo, identificador, direccionIp);
+      await limitador.descontarReservaExitosa(tipo, identificador, direccionIp);
+    },
+  };
 }
 
 /** Prepara todas las cuentas sintéticas y conecta servicios al PostgreSQL efímero. */
@@ -158,7 +218,7 @@ async function prepararFlujosRecuperacion(): Promise<void> {
   const repositorioActual = new PostgresAuthRepository(base);
   const sesionesAuth = new ServicioSesion(repositorioActual, reloj);
   const auditoria = repositorioActual;
-  const limitador = new LimitadorIntentosPostgres(base, Buffer.alloc(32, 67));
+  const limitador = crearLimitadorIntentosDeSuite();
   const servicioCredenciales = new ServicioRecuperacionAuth({
     repositorio: repositorioActual,
     hasheador,
@@ -190,6 +250,7 @@ async function prepararFlujosRecuperacion(): Promise<void> {
     limitador,
     recuperacion: servicioCredenciales,
     usuariosAdmin: new ServicioUsuariosAdmin(repositorioActual, reloj),
+    generarIdSolicitud: identificadoresSolicitud.generar,
   });
   cookieSupportPassword = await iniciarSesion(`support_password_${sufijo}`);
   cookieSupportEmail = await iniciarSesion(`support_email_${sufijo}`);
@@ -200,10 +261,24 @@ async function prepararFlujosRecuperacion(): Promise<void> {
 async function cerrarFlujosRecuperacion(): Promise<void> {
   await aplicacion?.close();
   const ids = [idSupportRecovery, idSupportPassword, idSupportEmail, idAdminBootstrap, idPending];
-  await exigirBasePrueba().delete(auditEvents).where(inArray(auditEvents.actorUserId, ids));
-  await exigirBasePrueba().delete(auditEvents).where(inArray(auditEvents.targetUserId, ids));
-  await exigirBasePrueba().delete(users).where(inArray(users.id, ids));
-  await exigirBasePrueba().delete(authThrottleWindows);
+  const migrador = databaseMigrador;
+  if (migrador === null) {
+    throw new Error('La limpieza requiere el rol migrador de PostgreSQL de prueba.');
+  }
+  await migrador
+    .delete(auditEvents)
+    .where(
+      sql`${auditEvents.metadata}->>'requestId' LIKE ${`${identificadoresSolicitud.prefijo}-%`}`,
+    );
+  await migrador.delete(auditEvents).where(inArray(auditEvents.actorUserId, ids));
+  await migrador.delete(auditEvents).where(inArray(auditEvents.targetUserId, ids));
+  await migrador.delete(users).where(inArray(users.id, ids));
+  if (hashesLimitesSuite.size > 0) {
+    await migrador
+      .delete(authThrottleWindows)
+      .where(inArray(authThrottleWindows.keyHash, [...hashesLimitesSuite]));
+  }
+  await migrador.$client.end({ timeout: 5 });
   await exigirBasePrueba().$client.end({ timeout: 5 });
 }
 
@@ -528,7 +603,7 @@ function definirPruebasRecuperacion(): void {
       resultados.push(respuesta.statusCode);
     }
     const ventanas = await exigirBasePrueba().select().from(authThrottleWindows);
-    const eventos = await exigirBasePrueba()
+    const eventos = await exigirBaseMigrador()
       .select({
         action: auditEvents.action,
         outcome: auditEvents.outcome,

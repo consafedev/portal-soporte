@@ -4,7 +4,7 @@ import {
   index,
   integer,
   jsonb,
-  pgTable,
+  pgSchema,
   smallint,
   text,
   timestamp,
@@ -14,6 +14,8 @@ import {
 } from 'drizzle-orm/pg-core';
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import type { EstadoUsuario, RolUsuario } from '../../../../packages/core/src/auth/models.js';
+
+const esquemaPortal = pgSchema('portal');
 
 type ColumnasUsuarioRestricciones = {
   emailNormalized: AnyPgColumn;
@@ -172,7 +174,7 @@ function referenciarObjetivoDeAuditoria(): AnyPgColumn {
 }
 
 /** Persiste cuentas individuales y solo los hashes de credenciales. */
-export const users = pgTable(
+export const users = esquemaPortal.table(
   'users',
   {
     id: uuid('id').primaryKey(),
@@ -192,7 +194,7 @@ export const users = pgTable(
 );
 
 /** Persiste sesiones opacas con expiración inactiva y absoluta comprobables. */
-export const sessions = pgTable(
+export const sessions = esquemaPortal.table(
   'sessions',
   {
     id: uuid('id').primaryKey(),
@@ -215,7 +217,7 @@ export const sessions = pgTable(
 );
 
 /** Persiste hashes de tokens de activación, recuperación y cambio de correo. */
-export const recoveryTokens = pgTable(
+export const recoveryTokens = esquemaPortal.table(
   'recovery_tokens',
   {
     id: uuid('id').primaryKey(),
@@ -235,7 +237,7 @@ export const recoveryTokens = pgTable(
 );
 
 /** Persiste contadores y bloqueos usando únicamente identificadores HMAC. */
-export const authThrottleWindows = pgTable(
+export const authThrottleWindows = esquemaPortal.table(
   'auth_throttle_windows',
   {
     keyHash: varchar('key_hash', { length: 64 }).primaryKey(),
@@ -250,7 +252,7 @@ export const authThrottleWindows = pgTable(
 );
 
 /** Registra acciones sensibles con metadatos previamente limitados y saneados. */
-export const auditEvents = pgTable(
+export const auditEvents = esquemaPortal.table(
   'audit_events',
   {
     id: uuid('id').primaryKey(),
@@ -272,7 +274,7 @@ export const auditEvents = pgTable(
 );
 
 /** Ofrece una fila centinela bloqueable para invariantes transaccionales. */
-export const authInvariants = pgTable(
+export const authInvariants = esquemaPortal.table(
   'auth_invariants',
   {
     id: smallint('id').primaryKey(),
