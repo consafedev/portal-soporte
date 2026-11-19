@@ -1,6 +1,6 @@
 # Registro del Pull Request #1 — PS-003
 
-**Estado:** abierto para revisión, no fusionado. Rama `codex/ps-003-auth`, head revisado `75d2b74b537427fad5699fe62eea36e41530a7e6`. [Pull Request #1](https://github.com/consafedev/portal-soporte/pull/1). No se ha autorizado el merge.
+**Estado:** abierto para revisión, no fusionado. Rama `codex/ps-003-auth`, head revisado `2581f10301aa47d042b225a78ea6744226a485ac`. [Pull Request #1](https://github.com/consafedev/portal-soporte/pull/1). No se ha autorizado el merge.
 
 ## Título
 
@@ -39,7 +39,7 @@
 - El runtime global del servidor es Node 20.20.0 y el proyecto requiere Node 24.22.3; no se cambió el runtime global.
 - Picomatch queda en seguimiento: revisión 2026-12-10 UTC y vencimiento de aceptación temporal 2026-12-17 UTC.
 - Efectos visuales y pruebas visuales/accesibilidad: NO EJECUTADOS; UI/UX no cambió.
-- GitHub Actions run de código `44620840776` sobre `5c15ddc` y revalidaciones documentales `44622103331` (`8438c5b`) y `44622825003` (`75d2b74`): PASS en todos los pasos, incluidas unitarias, integración PostgreSQL aislado, CLI de migración, build, typecheck, E2E, secretlint y gates de auditoría. El run anterior `44618550814` detectó un permiso denegado del socket Unix del clúster temporal; se corrigió configurando `unix_socket_directories` en su carpeta privada y el nuevo run pasó. El gate de dependencias de desarrollo conserva el alcance/umbral aprobado; no declara resuelto el riesgo residual de `esbuild`/picomatch.
+- GitHub Actions run de código `44620840776` sobre `5c15ddc` y revalidaciones documentales `44622103331`, `44622825003` y `44624788339` (head `2581f10`): PASS en todos los pasos, incluidas unitarias, integración PostgreSQL aislado, CLI de migración, build, typecheck, E2E, secretlint y gates de auditoría. El run anterior `44618550814` detectó un permiso denegado del socket Unix del clúster temporal; se corrigió configurando `unix_socket_directories` en su carpeta privada y el nuevo run pasó. El gate de dependencias de desarrollo conserva el alcance/umbral aprobado; no declara resuelto el riesgo residual de `esbuild`/picomatch.
 
 ## Publicación y reversión
 

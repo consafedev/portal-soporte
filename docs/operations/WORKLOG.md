@@ -870,3 +870,10 @@
 - **Inventario remoto:** distribución, Debian, Node 24, PostgreSQL, systemd, puertos `18840/18841`, recursos y backups quedan NO VERIFICADOS por falta de shell autenticada en este contexto.
 - **Próximo paso:** el PR #1 está en revisión/espera de aprobación de merge. Para DEPLOY-001 se necesita una terminal SSH realmente interactiva/utilizable o una identidad autorizada ya instalada; no volver a cerrar procesos SSH por coincidencia de texto.
 - **Estado:** PS-003.2 EN_REVISION; PS-003 EN_REVISION; DEPLOY-001 BLOQUEADO. Ningún despliegue ni cambio remoto.
+
+### [2026-11-19T16:06:24-06:00] PS-003.2 · ACTIONS VERDE EN HEAD PUBLICADO
+- **Rama/commit:** `codex/ps-003-auth` · `2581f10301aa47d042b225a78ea6744226a485ac`; PR #1 abierto. `origin/main` no cambió respecto a `41217b5` en la última comparación.
+- **GitHub Actions:** run `44624788339` completó `success` sobre el head `2581f10`; job `Calidad y seguridad básica` completado. Las tres últimas ejecuciones en heads documentales (`8438c5b`, `75d2b74`, `2581f10`) y la ejecución del fix de código (`5c15ddc`) pasaron. Ningún merge realizado.
+- **Diff final y controles:** cambios posteriores a `5c15ddc` son documentales. `format:check`, `check:secrets` y `git diff --check` PASS tras el último registro. PR sin revisión/comentarios independientes al consultar GitHub.
+- **Próximo paso:** presentar PR #1 para revisión y pedir autorización expresa del propietario para merge. DEPLOY-001 continúa BLOQUEADO por shell SSH no reutilizable; `127.0.0.1:15432` se verificó activo, pero la distribución/Node/systemd/puertos 18840/18841/backups no están revalidados.
+- **Estado:** PS-003.2 EN_REVISION; PS-003 EN_REVISION; DEPLOY-001 BLOQUEADO.
