@@ -29,7 +29,7 @@
 
 ## Configuración externa
 
-- `DATABASE_URL`: PostgreSQL del portal con una cuenta de mínimos privilegios. Las conexiones remotas usan TLS con `rejectUnauthorized: true`; `DATABASE_SSL_CA` permite proporcionar una CA privada en PEM. Solo PostgreSQL loopback de pruebas/desarrollo puede usar TLS desactivado. El DSN no admite parámetros `ssl*` que contradigan la política del servidor. No incluirlo en logs, capturas o documentación compartida.
+- `DATABASE_URL`: conexión de ejecución del API con el rol `portal_app`, limitado a DML de las tablas de autenticación dentro de `portal`; el cliente fija `search_path=portal` y el ORM cualifica las entidades. Las migraciones futuras deben usar por separado el rol `portal_migrator`; ese secreto no debe entrar al API. La CLI disponible sigue limitada a pruebas aisladas y no constituye un runner de migraciones persistentes. Las conexiones remotas usan TLS con `rejectUnauthorized: true`; `DATABASE_SSL_CA` permite proporcionar una CA privada en PEM. Solo PostgreSQL loopback de pruebas/desarrollo puede usar TLS desactivado. El DSN no admite parámetros `ssl*` que contradigan la política del servidor. No incluirlo en logs, capturas o documentación compartida.
 - `PUBLIC_APP_ORIGIN` y `API_INTERNAL_ORIGIN`: origen público canónico y destino privado del proxy, respectivamente.
 - `API_LISTEN_HOST` y `API_LISTEN_PORT`: listener loopback/privado; por defecto `127.0.0.1:4100`.
 - `WEB_LISTEN_HOST`, `PORT`: listener privado de Next.js; host loopback por defecto, puerto 3000.
@@ -46,8 +46,12 @@
 ## Migraciones y arranque
 
 - Las migraciones SQL versionadas viven en `apps/api/drizzle/` y se aplican explícitamente. El arranque de Fastify no migra automáticamente.
-- `db:migrate:test` exige `NODE_ENV=test` y `TEST_DATABASE_URL` sin contraseña, con usuario `ps003_test`, host loopback y base exacta `portal_ps003_test`. Se rechazan otros hosts, bases, usuarios, credenciales, query string y fragmento.
+- `db:migrate:test` exige `NODE_ENV=test`, el marcador interno que solo configura el harness PostgreSQL y `TEST_DATABASE_URL` sin contraseña, con usuario `ps003_test`, host loopback y base exacta `portal_ps003_test`. El harness rechaza un DSN local proporcionado externamente; crea un clúster efímero y pasa el marcador solo después de crearlo. Las conexiones de prueba y migraciones fuera del harness fallan cerradas.
+- El modo remoto de pruebas usa `TEST_DATABASE_MODE=ssh-tunnel`, `TEST_DATABASE_ALLOW_MUTATIONS=portal_soporte_test`, `TEST_DATABASE_URL` para `portal_test_app` y `TEST_MIGRATOR_DATABASE_URL` para `portal_test_migrator`, ambas en `127.0.0.1:15432/portal_soporte_test`. El runner valida el forward SSH fijado, identidad, rol, permisos y estado exacto del esquema antes de migrar o probar; si algo no coincide, se detiene. Solo el proceso migrador recibe su DSN; el API E2E recibe únicamente el DSN del rol de ejecución.
+- La ejecución remota de PS-003 del 2026-11-19 pasó integración (53 pruebas), CLI de migración de pruebas y E2E (8 pruebas); la base de pruebas terminó con el esquema `portal` migrado y sin filas sintéticas. El modo remoto no usa `initdb` ni `pg_ctl` ni elimina o recrea bases completas.
+- `.env.infra-001.local` está ignorado por Git y se debe proteger con ACL del usuario. `.env.infra-001.example` contiene campos vacíos sintéticos. Comandos explícitos: `pnpm test:integration:remote`, `pnpm test:migrate-cli:remote`, `pnpm test:e2e:remote`. Estos comandos pueden escribir únicamente en `portal_soporte_test`; no ejecutar antes de aprobar el plan de aprovisionamiento, validar el acceso y completar el inventario.
 - La CLI anterior existe para validar el esquema con datos aislados; no es un procedimiento de despliegue ni habilita migraciones productivas.
+- Estado posterior del 2026-11-19: tras autorización explícita del propietario, se otorgó `CREATE` temporal únicamente a `portal_migrator` en `portal_soporte`; Drizzle aplicó las cuatro migraciones, el grant se revocó inmediatamente y el postflight confirmó seis tablas de aplicación, veinte índices, ledger completo y cero tablas en `public`. El rol `portal_app` obtuvo DML mínimo por tabla y no puede leer el ledger. No repetir esa concesión para futuras migraciones sin aprobación expresa.
 - El comando `start` ejecuta el build del API. Un fallo al escuchar libera servidor y pool; `SIGINT`/`SIGTERM` cierran ambos de forma coordinada.
 
 ## Comprobaciones locales/CI
