@@ -772,3 +772,12 @@
 - **Riesgos abiertos:** MFA ADMIN, SMTP real, backup/restore, moderado de dependencia y seguimiento de picomatch; runtime local 24.13.0 frente a pin CI 24.22.3.
 - **Límites:** sin modificaciones a PostgreSQL, servicios, servidor, DNS, Cloudflare o túneles; Cloudflare Access excluido.
 - **Estado:** PS-003.2 EN_CURSO; PS-003 EN_REVISION.
+
+### [2026-11-19T14:38:22-06:00] PS-003.2 · RESULTADOS LOCALES DE SEGURIDAD Y DEPENDENCIAS
+- **Commit inspeccionado:** HEAD local 4c9ca2ee8499b209a05828b3ecf8c482218bff72. Dependencias y lockfile no cambiaron en los fixes de CI.
+- **Auditoría de producción:** corepack pnpm@12.21.0 audit --prod --audit-level high PASS; salida “No known vulnerabilities found”.
+- **Auditoría de CI de dependencias:** check:dependencies:ci PASS; 634 dependencias, 0 high, 0 critical, 1 moderate. La excepción de desarrollo sigue bajo seguimiento.
+- **Resultado remoto no cambia:** Actions run 44605903166 terminó FAIL en pnpm test; los pasos de integración, migrate-cli, build, typecheck, E2E y auditorías quedaron skipped. La auditoría local no sustituye esos gates del PR.
+- **Publicación:** rama local limpia y dos commits por delante del remoto; el fix 97c0ead sigue sin publicar, remoto/PR head 549433b. No se llamó de nuevo a autenticación ni se incorporó token de chat a comandos o repositorio.
+- **Siguiente paso:** completar una conexión segura de GitHub sin compartir PAT por chat; publicar commits locales con push normal; esperar Actions y solicitar revisión solo después de terminar el run.
+- **Estado:** PS-003.2 EN_CURSO; PS-003 EN_REVISION.
