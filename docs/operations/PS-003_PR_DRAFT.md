@@ -30,6 +30,7 @@
 - E2E remoto con Chromium, un worker: 8/8.
 - `format:check`, `lint`, `typecheck`, `build`, `verify:skills`, `secretlint`, `drizzle-kit check`, `git diff --check` y auditoría de producción: PASS.
 - Auditoría de dependencias CI: PASS al umbral high/critical; queda un hallazgo moderate de desarrollo.
+- El runner local utilizó Node 24.13.0 (dentro de `engines`); la versión exacta `.node-version` 24.22.3 y GitHub Actions requieren verificación remota.
 
 ## Riesgos y límites conocidos
 

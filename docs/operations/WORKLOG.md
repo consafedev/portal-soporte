@@ -705,3 +705,9 @@
 - **Estado Git observado:** rama local `codex/ps-003-auth`, HEAD `612a0f6` al momento de la consulta; árbol de trabajo limpio antes de este addendum. El commit de este addendum se registrará en la historia Git local.
 - **Límite:** la solicitud de PS-003.2 exige autorización expresa antes de publicar la rama o fusionar. Esperar autorización y conexión GitHub; no realizar esas acciones automáticamente.
 - **Estado:** PS-003, PS-003.1, PS-003.2, INFRA-001 y DEPLOY-001 `EN_REVISION`.
+
+### [2026-11-19T13:27:23-06:00] PS-003.2 · LÍMITE DE REPRODUCCIÓN DEL RUNTIME CI
+- Se confirma el runtime local de esta verificación: Node `v24.13.0`, permitido por `engines` `>=24.0.0 <25`. El archivo `.node-version` fija `24.22.3`; las pruebas y build no se repitieron con esa versión exacta.
+- El runner de GitHub Actions usa Node `24.22.3`, pero no se pudo consultar su estado porque la conexión GitHub respondió `USER_NOT_LOGGED_IN` y no se publicó la rama.
+- No se instala ni cambia Node local/global en esta iteración. Registrar la verificación del runtime exacto como pendiente del PR/CI.
+- Estado: PS-003.2 `EN_REVISION`.
