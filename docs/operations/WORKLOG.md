@@ -824,3 +824,22 @@
 - **Límites:** sin cambios al portal permanente, base remota, servicios o Cloudflare. Se conservan los cambios locales de WORKLOG/TASK_BOARD. No merge.
 - **Próximo paso:** commit convencional con bitácora/tablero y diagnóstico acotado; push normal autorizado; leer el log real del nuevo run y corregir solo la causa que revele.
 - **Estado:** PS-003.2 EN_CURSO; PS-003 EN_REVISION; DEPLOY-001 BLOQUEADO hasta revisión/merge autorizados.
+
+### [2026-11-19T15:34:58-06:00] PS-003.2 · CAUSA RAÍZ Y FIX LOCAL DEL RUNNER POSTGRESQL
+- **Actions:** run `44618550814`, commit `a36cba0e3317dd9ccd9bb112751dd6bd009498a3`; la preparación, unitarias, formato y lint pasaron. `test:integration` volvió a fallar en el arranque; etapas posteriores quedaron `skipped`.
+- **Causa raíz observada en el log temporal:** `FATAL: could not create lock file "/var/run/postgresql/.s.PGSQL.42873.lock": Permission denied`. PostgreSQL 18.7 ya escuchaba por TCP loopback; además intentaba crear el socket Unix en el directorio global cuyo acceso no está permitido al usuario `runner`.
+- **Fix acotado:** el clúster efímero configura `unix_socket_directories` en su propio directorio temporal privado, derivado de `rutaLog`; conserva la escucha TCP en `127.0.0.1` y no depende de permisos root. No se cambia configuración global ni se toca una base persistente. Se mantiene la salida diagnóstica limitada del log para fallas futuras.
+- **Validaciones locales posteriores al fix:** `format:check`, `lint`, `typecheck`, `check:secrets` y `git diff --check` PASS. No ejecuté `test:integration` local porque no hay binarios PostgreSQL en Windows; el run CI será la prueba real del arreglo.
+- **Próximo paso:** registrar el fix, commit convencional y push normal; esperar el Actions del nuevo SHA y revisar todos los pasos.
+- **Límites:** sin merge, servidor Debian, PostgreSQL remoto, Cloudflare, DNS ni servicios.
+- **Estado:** PS-003.2 EN_CURSO; PS-003 EN_REVISION; DEPLOY-001 bloqueado hasta aprobación/fusión.
+
+### [2026-11-19T15:37:51-06:00] PS-003.2 · VALIDACIÓN LOCAL Y PREPARACIÓN DEL FIX
+- **Rama/base:** `codex/ps-003-auth` · base publicada `a36cba0e3317dd9ccd9bb112751dd6bd009498a3`; remoto verificado `https://github.com/consafedev/portal-soporte.git`.
+- **Objetivo:** validar localmente el fix acotado del socket Unix del PostgreSQL efímero y preservar las anotaciones previas antes de un push normal autorizado.
+- **Validaciones ejecutadas con `corepack pnpm@12.21.0`:** `format:check` PASS; `lint` PASS (terminó correctamente y continuó el comando encadenado); `typecheck` PASS (exit 0); `check:secrets` PASS; `git diff --check` PASS. El alias `pnpm` de PowerShell falló antes de ejecutar scripts por su lanzador global roto; no se registra como una prueba del proyecto.
+- **Diff revisado:** `scripts/with-test-postgres.ts` dirige `unix_socket_directories` al directorio del log/clúster temporal privado y conserva `127.0.0.1` como única escucha TCP. También se incluyen solo la fila PS-003.2 y esta entrada append-only; se conservaron los cambios documentales existentes. No hay cambios de dependencias ni secretos nuevos.
+- **NO EJECUTADO local:** integración PostgreSQL efímera, porque Windows no cuenta con `initdb.exe`/`pg_ctl.exe`; ejecutar en Actions tras el push normal para confirmar el arreglo real.
+- **Límites:** no merge, Debian, base persistente, servicios, Cloudflare, DNS ni firewall. DEPLOY-001 espera que PR #1 sea revisado y fusionado.
+- **Próximo paso:** inspeccionar el diff staged, crear commit convencional, push normal autorizado y revisar íntegro el workflow del SHA resultante.
+- **Estado:** PS-003.2 EN_CURSO; PS-003 EN_REVISION; DEPLOY-001 BLOQUEADO hasta aprobación/fusión.

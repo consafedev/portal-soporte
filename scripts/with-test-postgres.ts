@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
-import { basename, join, resolve, sep } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import postgres from 'postgres';
 type ConfiguracionBasePruebaModule = typeof import('../apps/api/src/runtime-config.js');
@@ -184,7 +184,7 @@ async function iniciarServidorTemporal(
       '-l',
       rutaLog,
       '-o',
-      `-h 127.0.0.1 -p ${puerto} -c listen_addresses=127.0.0.1 -c log_statement=none -c log_connections=off`,
+      `-h 127.0.0.1 -p ${puerto} -c listen_addresses=127.0.0.1 -c unix_socket_directories=${dirname(rutaLog)} -c log_statement=none -c log_connections=off`,
       '-w',
       'start',
     ]);
