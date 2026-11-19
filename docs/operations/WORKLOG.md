@@ -853,3 +853,10 @@
 - **Infraestructura:** no se abrió SSH ni se revalidaron recursos Debian en esta fase. El usuario confirmó acceso interactivo a `serverAlcazar` y PostgreSQL activo; Node, systemd, puertos 18840/18841 y backups quedan pendientes. No se hicieron cambios en servidor, bases, Cloudflare, DNS ni firewall. DEPLOY-001 espera la aprobación/fusión explícita de PR #1.
 - **Próximo paso:** solicitar revisión independiente del PR y aprobación del propietario para merge; no fusionar automáticamente.
 - **Estado:** PS-003.2 EN_REVISION; PS-003 EN_REVISION; DEPLOY-001 BLOQUEADO hasta revisión/fusión del PR.
+
+### [2026-11-19T15:49:44-06:00] PS-003.2 · REVALIDACIÓN CI DEL REGISTRO FINAL
+- **Commit:** `8438c5b8c3b03ef3b6e2bcc806b76e0a0cecd312`, documentación únicamente sobre `5c15ddc`.
+- **GitHub Actions:** run `44622103331` PASS, job `Calidad y seguridad básica` y todos sus pasos exitosos: pruebas, integración PostgreSQL aislado, migrate-cli, build, typecheck, E2E, secretos y auditorías. Run enlazado: https://github.com/consafedev/portal-soporte/actions/runs/44622103331.
+- **Cambios de esta iteración:** solo sincronización de PS-003/PS-003.1/PS-003.2 con el head publicado, resultado CI y estado real del PR; no cambió código de aplicación ni esquema.
+- **Próximo paso:** solicitar revisión independiente y aprobación del propietario para fusionar PR #1; no realizar merge automático.
+- **Estado:** PS-003.2 EN_REVISION; PS-003 EN_REVISION; DEPLOY-001 BLOQUEADO hasta revisión/fusión.
