@@ -723,3 +723,14 @@
 - **Riesgos/límites:** conexión GitHub anteriormente no estaba enlazada; confirmar autenticación antes de cualquier push. La ejecución local usó Node 24.13.0 frente al pin CI 24.22.3. No merge aunque Actions pase; no modificar infraestructura ni publicar el portal.
 - **Próximo paso:** completar preflight local/read-only y detenerse si remoto, base o historia tienen cambios inesperados, o si la auditoría encuentra secretos.
 - **Estado:** PS-003.2 `EN_CURSO`; PS-003 `EN_REVISION`.
+
+### [2026-11-19T13:55:26-06:00] PS-003.2 · DIAGNÓSTICO Y CORRECCIÓN ACOTADA DE CI
+- **PR:** #1, https://github.com/consafedev/portal-soporte/pull/1, abierto hacia main y sin merge. Head observado: ee3de550b6e250bd5ea8b188de0d8f61979df633.
+- **CI inicial:** run 44602140954; el único job «Calidad y seguridad básica» falló en «Preparar binarios PostgreSQL 18.7 en el runner efímero». Los pasos de dependencias, pruebas, migraciones, build, typecheck, E2E y auditorías quedaron skipped; no se consideran aprobados por este run.
+- **Causa comprobada en logs:** el workflow pedía el paquete Debian PostgreSQL 18.7 revision +2, mientras PGDG ya ofrecía revision +5 y APT resolvía el cliente +5, incompatible con la petición fijada. El fallo fue antes de instalar dependencias del proyecto.
+- **Cambio acotado:** .github/workflows/ci.yml ahora verifica que el candidato de PGDG siga siendo PostgreSQL 18.7 y permite que APT instale las revisiones de servidor/cliente compatibles. La verificación posterior de postgres --version permanece en 18.7. No se modificaron tests ni cobertura.
+- **Trazabilidad de GitHub:** se abrió el PR mediante la API oficial usando el helper de credenciales Git; el secreto de autenticación no se mostró ni registró. El conector GitHub/Code Review no tenía sesión. El control de computadora se detuvo por salvaguarda de URL antes de navegar y no modificó pestañas ni contenido externo.
+- **No ejecutado aún:** git diff --check, revisión final de secretos tras la modificación, nuevo run de Actions, resultados unitarios/integración/migración/E2E/build/typecheck/seguridad y solicitud de revisión.
+- **Límites:** no se fusiona; no se altera Cloudflare, DNS, túneles, PostgreSQL, systemd ni servidor.
+- **Próximo paso:** inspeccionar diff y exclusiones, ejecutar verificaciones locales pertinentes, commit convencional en la rama, push normal y esperar el run del nuevo head. Corregir únicamente fallos de CI dentro de PS-003; solicitar revisión externa cuando Actions termine.
+- **Estado:** PS-003.2 EN_CURSO; PS-003 EN_REVISION.

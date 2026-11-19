@@ -55,7 +55,9 @@ jobs:
             'Signed-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc' \
             | sudo tee /etc/apt/sources.list.d/pgdg.sources >/dev/null
           sudo apt-get update
-          sudo apt-get install -y postgresql-18=18.7-1.pgdg24.04+2
+          candidate="$(apt-cache policy postgresql-18 | sed -nE 's/^[[:space:]]*Candidate: ([0-9]+\.[0-9]+).*/\1/p')"
+          test "$candidate" = "18.7"
+          sudo apt-get install -y postgresql-18
           /usr/lib/postgresql/18/bin/postgres --version
           version="$(/usr/lib/postgresql/18/bin/postgres --version | sed -nE 's/^postgres \(PostgreSQL\) ([0-9]+\.[0-9]+).*/\1/p')"
           test "$version" = "18.7"
