@@ -734,3 +734,11 @@
 - **Límites:** no se fusiona; no se altera Cloudflare, DNS, túneles, PostgreSQL, systemd ni servidor.
 - **Próximo paso:** inspeccionar diff y exclusiones, ejecutar verificaciones locales pertinentes, commit convencional en la rama, push normal y esperar el run del nuevo head. Corregir únicamente fallos de CI dentro de PS-003; solicitar revisión externa cuando Actions termine.
 - **Estado:** PS-003.2 EN_CURSO; PS-003 EN_REVISION.
+
+### [2026-11-19T14:08:51-06:00] PS-003.2 · INICIO DE REPUBLICACIÓN DEL FIX DE CI
+- **Rama/estado:** codex/ps-003-auth, HEAD local c142acc32394772e64a3c50036eb3c3c2e1a31f4, árbol limpio. PR #1 permanece abierto; el head remoto aún es ee3de550b6e250bd5ea8b188de0d8f61979df633.
+- **Objetivo:** publicar el arreglo acotado de CI con push normal, comprobar el nuevo Actions run y después solicitar revisión.
+- **Hallazgo de autenticación:** la primera operación Git HTTPS fue rechazada aunque el helper autenticado consultó GitHub API; Git/credential-manager no entregó credencial utilizable para escribir. La lectura pública del head remoto confirmó que no se publicó c142acc. No se reescribió historia.
+- **Límites:** usar credencial guardada sin mostrarla ni incluirla en argumentos o archivos; no ampliar permisos, cambiar credenciales o infraestructura. Sin merge.
+- **Validación previa:** branch, remoto correcto, HEAD c142acc y árbol limpio confirmados; secreto-lint y diff check PASS. Próximo paso: un push normal con AskPass temporal fuera del repositorio, leyendo credenciales existentes del helper; borrar esos archivos temporales al terminar y verificar el head remoto.
+- **Estado:** PS-003.2 EN_CURSO; PS-003 EN_REVISION.
