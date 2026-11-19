@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { basename, join, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -26,6 +26,8 @@ const { verificarTunelSshPrueba } = (await import(
 const nombreBasePrueba = 'portal_ps003_test';
 const usuarioBasePrueba = 'ps003_test';
 const prefijoDirectorioPrueba = 'portal-ps003-test-';
+/** Limita los logs de diagnóstico del clúster temporal impresos por el job de CI. */
+const limiteCaracteresRegistroPostgres = 12_000;
 
 type OpcionesEjecucion = {
   /** Permite capturar el código de salida sin convertir un comando fallido en excepción. */
@@ -138,6 +140,24 @@ async function detenerServidorTemporal(directorioDatos: string): Promise<boolean
   );
 }
 
+/**
+ * Lee una cola acotada del registro temporal de PostgreSQL cuando el inicio falla.
+ *
+ * @param rutaLog - Ruta privada al log del clúster temporal efímero.
+ * @returns Contenido acotado o un mensaje sintético si el log no se puede leer.
+ */
+async function leerRegistroInicioTemporal(rutaLog: string): Promise<string> {
+  try {
+    const contenido = await readFile(rutaLog, 'utf8');
+    const registro = contenido.slice(-limiteCaracteresRegistroPostgres);
+    return contenido.length > limiteCaracteresRegistroPostgres
+      ? '[Se omitió el inicio del registro por límite de tamaño.]\n' + registro
+      : registro || '[El registro de PostgreSQL está vacío.]';
+  } catch {
+    return '[No se pudo leer el registro temporal de PostgreSQL.]';
+  }
+}
+
 /** Inicia una instancia temporal PostgreSQL con escucha limitada a loopback. */
 async function iniciarServidorTemporal(
   directorioDatos: string,
@@ -157,16 +177,24 @@ async function iniciarServidorTemporal(
     '--no-locale',
   ]);
 
-  await ejecutarBinario('pg_ctl', [
-    '-D',
-    directorioDatos,
-    '-l',
-    rutaLog,
-    '-o',
-    `-h 127.0.0.1 -p ${puerto} -c listen_addresses=127.0.0.1 -c log_statement=none -c log_connections=off`,
-    '-w',
-    'start',
-  ]);
+  try {
+    await ejecutarBinario('pg_ctl', [
+      '-D',
+      directorioDatos,
+      '-l',
+      rutaLog,
+      '-o',
+      `-h 127.0.0.1 -p ${puerto} -c listen_addresses=127.0.0.1 -c log_statement=none -c log_connections=off`,
+      '-w',
+      'start',
+    ]);
+  } catch (error) {
+    console.error(
+      'Registro del intento de inicio de PostgreSQL:\n' +
+        (await leerRegistroInicioTemporal(rutaLog)),
+    );
+    throw error;
+  }
 }
 
 /** Ejecuta pruebas o migración compilada contra el clúster temporal loopback. */
