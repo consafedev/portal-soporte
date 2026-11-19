@@ -1,2 +1,4 @@
-/** Punto de entrada vacío; PS-002 no implementa autenticación, sesiones ni auditoría. */
-export {};
+/** Expone tipos y políticas puras de identidad del núcleo de autenticación. */
+export * from './auth/models.js';
+export * from './auth/ports.js';
+export * from './auth/policies.js';

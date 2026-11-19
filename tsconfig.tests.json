@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"],
+    "allowImportingTsExtensions": true
+  },
+  "include": [
+    "tests/**/*.ts",
+    "scripts/**/*.ts",
+    "vitest*.ts",
+    "drizzle.config.ts",
+    "playwright.config.ts"
+  ]
+}

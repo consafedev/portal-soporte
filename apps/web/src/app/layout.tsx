@@ -2,10 +2,11 @@ import type { Metadata } from 'next';
 import type { JSX, ReactNode } from 'react';
 import './globals.css';
 
-/** Metadatos neutrales de la aplicación durante el bootstrap técnico. */
+/** Metadatos del portal interno; evita indexación de páginas con datos de cuenta. */
 export const metadata: Metadata = {
   title: 'Portal de Soporte e-Billia',
-  description: 'Estructura técnica inicial del portal interno de soporte.',
+  description: 'Acceso seguro al Portal de Soporte e-Billia.',
+  robots: { index: false, follow: false },
 };
 
 /**

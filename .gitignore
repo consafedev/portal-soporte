@@ -16,6 +16,7 @@ test-results/
 .env
 .env.*
 !.env.example
+!.env.infra-001.example
 *.pem
 *.ppk
 *.key

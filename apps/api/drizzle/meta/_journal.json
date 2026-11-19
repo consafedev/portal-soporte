@@ -1,0 +1,34 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1794974986675,
+      "tag": "0000_auth_core",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794975026898,
+      "tag": "0001_auth_throttle_expiry",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795026966779,
+      "tag": "0002_invitation_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1795053178655,
+      "tag": "0003_ps003_portal_schema_alignment",
+      "breakpoints": true
+    }
+  ]
+}

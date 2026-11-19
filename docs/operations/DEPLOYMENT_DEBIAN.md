@@ -1,71 +1,122 @@
-# Operación y despliegue — Debian + Cloudflare Tunnel (sin Docker)
+# Operación y despliegue — Debian + Cloudflare Tunnel
 
-**Versión:** 0.2 · **Estado:** plan, NO ejecutado. **Restricción principal:** no afectar servicios, puertos, dominios, túneles ni bases existentes. El despliegue requiere aprobación y ventana controlada.
+**Versión:** 0.3 · **Estado:** plan, NO ejecutado · **Revisado:** 2026-11-19.
+**Alcance:** preparar la instalación del núcleo PS-003 en el Debian inventariado sin afectar otras aplicaciones, bases, túneles ni hostnames.
 
-## 1. Diseño de publicación
+## 1. Decisiones de publicación
+
+- Cloudflare se limita a DNS, proxy HTTPS y Cloudflare Tunnel. **Cloudflare Access queda excluido**; el login del portal es el único mecanismo de autenticación de usuarios.
+- Se reutilizará exclusivamente el túnel existente `consafedev-root`, administrado por archivo local. No se creará ni modificará otro túnel.
+- El origen público será `soporte.consafedev.qzz.io`, sujeto a disponibilidad de DNS/certificado y a una aprobación separada antes de publicarlo.
+- No se requiere Nginx como proxy nuevo: Cloudflare Tunnel apuntará al servidor privado de Next.js. Next.js reenviará `/api/v1/*` al listener privado de Fastify mediante el rewrite same-origin existente.
+- El API no tendrá una regla de túnel ni un listener público. PostgreSQL solo se usará desde el servidor mediante su dirección local, con validación TLS habilitada.
 
 ```text
-Navegador usuario (HTTPS)
-  -> Cloudflare DNS + TLS + protección (Access recomendado adicional al login)
-  -> Cloudflare Tunnel EXISTENTE si se puede reutilizar sin impacto
-  -> servicio reverse-proxy en 127.0.0.1:PUERTO_NUEVO_LIBRE
-       |-> Next.js en 127.0.0.1:PUERTO_WEB_LIBRE
-       `-> Fastify en 127.0.0.1:PUERTO_API_LIBRE
-                |-> PostgreSQL interno por socket/loopback
-                `-> MySQL/SSH de clientes autorizados, solo desde backend
+Navegador (HTTPS)
+  -> DNS/proxy TLS de Cloudflare
+  -> túnel existente consafedev-root
+  -> soporte.consafedev.qzz.io -> 127.0.0.1:18840 (Next.js)
+       -> /api/v1/* same-origin -> 127.0.0.1:18841 (Fastify privado)
+            -> PostgreSQL local, BD portal_soporte, rol portal_app
 ```
 
-`soporte.consafedev.qzz.io` es un hostname **candidato**, no una DNS/ruta confirmada. Hay que comprobar control de zona DNS, facultad de crear el registro, publicación en túnel existente y cobertura TLS/certificado para subdominio multinivel. Según configuración de zona/certificados puede requerir configuración adicional o usar otro hostname propio. **No** crear túnel extra si el existente soporta una nueva aplicación sin impacto; si la zona no puede publicarlo, proponer dominio alternativo elegido por propietario.
+La ruta de aplicación no expondrá el puerto del API, PostgreSQL, secretos ni trazas técnicas. No se conectará a bases MySQL de clientes en esta etapa.
 
-Cloudflare Tunnel puede publicar varias reglas `hostname -> localhost:<port>` en un mismo túnel. No se deben cambiar reglas actuales ni el catch-all sin inventariar y respaldar configuración. Cloudflare Access para limitar el acceso por identidad es una protección adicional opcional; **no sustituye el RBAC de la app**.
+## 2. Estado de inventario de solo lectura
 
-## 2. Inventario read-only obligatorio en PS-001
+El inventario autenticado del 2026-11-19 identificó Debian 12 (`serverAlcazar`), PostgreSQL 15.20, clúster `15/main` y Node del sistema 20.20.0. El proyecto exige Node 24.22.3 según `.node-version`; cualquier runtime futuro del portal deberá instalarse de forma aislada y fijada, sin cambiar `/usr/bin/node` ni las aplicaciones existentes.
 
-En el Debian de destino, un operador autorizado debe capturar **salida redactada** (sin tokens, credenciales ni contenido de archivos secretos):
+En la captura de listeners, `18840` y `18841` estaban libres; comprobarlos otra vez inmediatamente antes de iniciar servicios. PostgreSQL escucha en las interfaces existentes: esa exposición se mantiene como riesgo separado y no se cambia en este plan. No se identificó una tarea programada de respaldo PostgreSQL; la existencia de respaldo y una restauración de prueba siguen sin verificar.
 
-```bash
-uname -a
-cat /etc/debian_version
-node --version || true
-command -v cloudflared || true
-command -v nginx || true
-ss -ltnp
-systemctl list-units --type=service --state=running --no-pager
-systemctl list-unit-files 'cloudflared*' --no-pager
-# Verificar configuración activa de túnel y DNS por vía autorizada,
-# sin imprimir credentials-file, tokens ni secrets al worklog.
+La configuración actual inspeccionada de `consafedev-root` está en `/etc/cloudflared/config-consafedev.yml` y contiene, en este orden:
+
+1. `consafedev.qzz.io` → `http://127.0.0.1:3002`
+2. `renios.consafedev.qzz.io` → `http://127.0.0.1:18804`
+3. catch-all → `http_status:404`
+
+La validación de ingress actual pasó. `soporte.consafedev.qzz.io` no resolvía a DNS durante esa consulta y coincidía con el catch-all. El hostname debe revalidarse antes de cualquier publicación. El servidor también contiene otros túneles y aplicaciones activas que quedan fuera de alcance.
+
+## 3. Servicios y configuración previstos
+
+Esta sección describe recursos nuevos; **no han sido instalados ni iniciados**.
+
+| Recurso futuro | Configuración propuesta | Límite de aislamiento |
+|---|---|---|
+| Usuario Linux `portal-soporte` | Cuenta de sistema sin shell interactivo ni grupos administrativos | Propietario de archivos de estado del Portal; no reutilizar usuarios existentes |
+| Runtime | Node 24.22.3 en un prefijo propio bajo `/opt/portal-soporte/runtime/` | No cambiar runtime global, PATH global ni binarios de otras aplicaciones |
+| Release | `/opt/portal-soporte/releases/<versión>` y symlink `current` | El despliegue escribe solo dentro de estas rutas nuevas |
+| Web | `WEB_LISTEN_HOST=127.0.0.1`, `PORT=18840`, `NODE_ENV=production` | Listener de loopback al que se conecta únicamente el túnel local |
+| API | `API_LISTEN_HOST=127.0.0.1`, `API_LISTEN_PORT=18841`, `NODE_ENV=production` | Listener de loopback; sin ingress Cloudflare propio |
+| PostgreSQL | `portal_soporte`, `portal_app`, esquema `portal` | Solo tablas del Portal, DML mínimo revisado; nunca usar `portal_migrator` durante la operación normal |
+| Configuración secreta | Archivos fuera de Git bajo `/etc/portal-soporte/`, accesibles por el gestor systemd y protegidos con permisos restrictivos | No colocar secretos en releases, unidades versionadas, argumentos, logs o repositorio |
+| Estado/cache | Directorio nuevo bajo `/var/lib/portal-soporte/` | Escritura restringida a los datos que Next.js necesite en runtime |
+
+Las unidades futuras serán separadas (`portal-soporte-api.service` y `portal-soporte-web.service`), con `User=portal-soporte`, `NoNewPrivileges=true`, `ProtectSystem=strict`, `ProtectHome=true`, `PrivateTmp=true`, `UMask=0077`, reinicio solo del proceso que falla y límites de recursos. Las rutas de escritura se permitirán únicamente para estado/cache del Portal. Ninguna unidad nueva tendrá `PartOf=`, `BindsTo=` ni dependencias de parada sobre servicios ajenos.
+
+Variables previstas, sin valores secretos:
+
+- Web: `PUBLIC_APP_ORIGIN=https://soporte.consafedev.qzz.io`, `API_INTERNAL_ORIGIN=http://127.0.0.1:18841`, `WEB_LISTEN_HOST=127.0.0.1`, `PORT=18840`, `TRUSTED_EDGE_PROXY_CIDRS=127.0.0.1/32`.
+- API: `PUBLIC_APP_ORIGIN=https://soporte.consafedev.qzz.io`, `API_INTERNAL_ORIGIN=http://127.0.0.1:18841`, `API_LISTEN_HOST=127.0.0.1`, `API_LISTEN_PORT=18841`, `TRUSTED_PROXY_CIDRS=127.0.0.1/32`, `DATABASE_URL` con `portal_app`, `AUTH_THROTTLE_HMAC_KEY` aleatoria y variables SMTP del proveedor autorizado.
+- `DATABASE_SSL_CA` se configura solo si la verificación de confianza del certificado requiere una CA explícita. Nunca se deshabilitarán `rejectUnauthorized` ni la comprobación del nombre/IP.
+- El orden de arranque será API, healthcheck de API sin datos sensibles, y luego web. El apagado o rollback detendrá solo las dos unidades del Portal.
+
+Los parámetros de proxy confiable se limitarán a la IP loopback observada en sockets cuando el proxy de Cloudflare y Next.js conecten usando IPv4 `127.0.0.1`. Confirmar el peer observado antes de habilitarlos; cabeceras de proxy de cualquier otro peer se reemplazan por la dirección TCP observada. No usar `*`, redes amplias ni `trustProxy` indiscriminado.
+
+## 4. Plan exacto para la ruta de Cloudflare
+
+La edición propuesta de `/etc/cloudflared/config-consafedev.yml` agrega una sola regla, antes del catch-all:
+
+```yaml
+  - hostname: soporte.consafedev.qzz.io
+    service: http://127.0.0.1:18840
 ```
 
-Registrar nombre exacto y modo de administración del túnel (local/dashboard), listeners activos y recursos disponibles. No asumir que `18804` (u otros) está libre: otras aplicaciones existentes pueden usar esos puertos. Elegir **tres puertos loopback libres tras inventario**; por ejemplo, `18920/18921/18922` son solamente ilustrativos y **NO reservas**. Prohibido desactivar servicios o reconfigurar túneles para liberar puertos.
+El bloque se insertará después de las reglas existentes de `consafedev.qzz.io` y `renios.consafedev.qzz.io`, sin cambiar, reordenar ni reformatear sus destinos; el catch-all permanece al final. La propuesta no altera `/etc/cloudflared/config.yml`, `config-xmlclean.yml`, otros servicios `cloudflared-*`, ni túneles `soporte`, `xml-cleaner-tunnel` o `zammad`.
 
-## 3. Provisionamiento futuro (requiere aprobación)
+Antes de pedir autorización de aplicación se presentará el diff real contra el archivo vigente y se comprobará que contiene exclusivamente la nueva regla. La ventana aprobada incluirá:
 
-- Crear cuenta Unix restringida `portal-soporte`, rutas de releases versionadas (`/opt/portal-soporte/releases/<version>` y symlink `current`) y directorios de datos secretos separados con permisos 0700/0600, sin cambios a servicios existentes.
-- Instalar Node LTS fijado (24 LTS a la fecha de esta propuesta, actualizar revisión de seguridad) y PostgreSQL si no hay un servicio seguro disponible y el servidor tiene capacidad. Instalar dependencias sin contenedores, build reproducible desde lockfile; CI independiente.
-- Migraciones **solo PostgreSQL interno** con backup previo. Cero migraciones automáticas a DBs clientes.
-- Ejecutar `portal-soporte-web` y `portal-soporte-api` como servicios `systemd` separados, `User=portal-soporte`, restart policy y hardening (`NoNewPrivileges`, `ProtectSystem`, `PrivateTmp`, límites de FD/memoria). Secretos por credenciales `systemd` o almacén protegido, jamás hardcoded en unit files, env públicos o logs.
-- Reverse proxy nuevo listener loopback; verificar headers, `X-Forwarded-Proto`, request size, rate limits, timeouts, política de cache `private/no-store` en sesiones y XML, websocket/stream si necesario. El frontend usa únicamente rutas proxied de la API autorizada; API no expuesta directamente.
-- Agregar una regla de Cloudflare Tunnel **apuntando solo al puerto nuevo** y verificar match. Revisar DNS/hostname/certificados y Access antes de publicar. Mantener backup de configuración anterior y rollback probado.
-- Cuentas MySQL por cliente con mínimo privilegio y prueba de conexiones desde servidor de aplicaciones. Verificar host keys SSH y TLS MySQL. Evitar abrir puertos de DB al Internet.
+1. Confirmar nuevamente identidad del host, estado de la unidad `cloudflared-consafedev.service`, listeners y ausencia de conflicto DNS.
+2. Respaldar el archivo a una ruta nueva con propietario/permisos conservados y registrar hashes previo y posterior; no copiar ni mostrar el contenido de credenciales del túnel.
+3. Validar la configuración candidata con `cloudflared tunnel --config <ruta> ingress validate` y simular el match del hostname nuevo y de los dos actuales.
+4. Solicitar aprobación antes de escribir el archivo, reiniciar `cloudflared-consafedev.service` o crear el registro DNS.
+5. Después de una aprobación, aplicar solo el cambio revisado y verificar que las dos rutas existentes conservan orden, hostname y destino, que la tercera ruta coincide con el nuevo puerto y que los otros dos túneles/unidades siguen activos.
 
-## 4. Puertas de seguridad previas a producción
+No se reiniciará `cloudflared.service`, `cloudflared-xmlclean.service`, ni ningún otro servicio. No se habilitará Cloudflare Access.
 
-1. Inventario read-only completado, sin colisión de recursos.
-2. Cuenta administrador inicial, MFA, RBAC, cliente asignado y restablecimiento probados.
-3. Secretos cifrados, rotación, backup/restore y permisos Unix probados.
-4. Auditoría habilitada, pruebas de 403, XXE, input de logs, inyección SQL, subida masiva, concurrencia e interrupción SSH.
-5. DDL/campos/índices/triggers verificados y prueba aislada de ambos estados completada. **La autorización funcional para insertar `PAGADA` ya está aprobada**; no repetir esta decisión de negocio.
-6. Piloto con MySQL de pruebas y fixtures sintéticos, sin tocar datos productivos.
-7. Plan de backup, restauración, retención, monitorización y rollback aprobado.
-8. Prueba de salud `/health/live` y `/health/ready` (esta última no devuelve detalles sensibles), métricas y alertas.
-9. Solo entonces habilitar `rf-1:execute` en producción para usuarios autorizados.
+## 5. Puertas pendientes antes de publicar
 
-## 5. Rollback sin afectar vecinos
+El inventario y las pruebas locales/remotas de PS-003 no equivalen a autorización para operación pública. Siguen pendientes:
 
-Mantener release anterior y backup interno, deshabilitar por flag el módulo (`rf-1` OFF) antes de rollback, detener **solo** servicios del portal, restaurar symlink/versiones/migraciones compatibles, validar salud, revertir exclusivamente la nueva ruta del túnel si corresponde. **No** revertir DNS, túneles o Postgres existentes ajenos. Las escrituras ya completadas en bases clientes no se revierten por desplegar versión anterior; cualquier reversión de datos requiere un procedimiento aparte y aprobación. En incertidumbre, bloquear escrituras, preservar evidencia y escalar.
+1. MFA para cuentas `ADMIN` y revisión de seguridad que autorice exposición pública.
+2. SMTP real con entrega y verificación de correo probadas; recuperación y activación no se consideran operativas hasta completar esa prueba.
+3. Plan de backup de PostgreSQL, retención y restauración verificada.
+4. Revisión del puerto 5432 expuesto por UFW y confirmación del alcance de `pg_hba.conf`, sin cambiarlo en este trabajo.
+5. Confirmar confianza de CA/certificado PostgreSQL desde Node 24 sin degradar TLS.
+6. Confirmar que las credenciales de aplicación/migración están almacenadas localmente fuera de Git, con permisos revisados, y que el bootstrap inicial ocurre por TTY segura.
+7. Smoke tests con cuentas sintéticas: login, 403 de SUPPORT, cambio de contraseña, expiración y revocación de sesión, ausencia de contraseñas/tokens en API y logs.
+8. Revalidar backups, espacio, memoria, runtime Node fijado y puertos justo antes de instalar servicios.
 
-## 6. Fuentes oficiales
+Mientras cualquiera de estas puertas siga abierta, no crear DNS, no añadir la ruta del túnel ni declarar el portal productivo. Si se autoriza una instalación privada previa a la publicación, deberá desplegarse sin tráfico externo y detenerse ante el primer preflight no coincidente.
 
-- Cloudflare múltiples hostnames y reglas: https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/local-management/configuration-file/
-- Cloudflare Access self-hosted: https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/
-- Next.js reverse proxy y autohospedaje: https://nextjs.org/docs/app/guides/self-hosting
+## 6. Actualización y rollback aislados
+
+La actualización futura utilizará un release nuevo e inmutable y cambiará únicamente el symlink `current` del Portal. Se valida el build y migraciones en `portal_soporte_test`; las migraciones productivas del esquema `portal` requieren revisión previa. Tras instalar, se prueba salud, login y revocación con una cuenta sintética controlada. No se ejecutan pruebas destructivas en `portal_soporte`.
+
+Rollback de aplicación: detener solo `portal-soporte-web.service` y `portal-soporte-api.service`, volver `current` al release anterior, iniciar API y web en orden, comprobar salud. No borrar releases ni revertir migraciones de forma automática.
+
+Rollback de publicación, únicamente con autorización: retirar solo el registro DNS nuevo y la regla `soporte.consafedev.qzz.io` agregada al túnel `consafedev-root`, restaurar el archivo respaldado si la comparación de rutas confirma que no hubo cambios concurrentes y reiniciar solo `cloudflared-consafedev.service`. Si el archivo difiere del respaldo por cambios ajenos, detenerse y solicitar revisión. No restaurar túneles completos ni revertir hostnames preexistentes.
+
+## 7. Registro de cambios externos
+
+| Elemento | Estado en esta revisión | Evidencia / siguiente control |
+|---|---|---|
+| Servicios del Portal en Debian | No creados | No hay usuario ni unidades `portal-soporte-*`; preparar para autorización separada |
+| Rutas existentes `consafedev` y `renios` | Sin cambios | Inventario de configuración y validación `ingress validate` del 2026-11-19 |
+| Hostname `soporte.consafedev.qzz.io` | Sin DNS ni ruta | En inventario coincide con 404; aplicar solo tras cerrar puertas y recibir autorización |
+| Otros túneles y hostnames | Sin cambios | Excluidos de la modificación y del rollback |
+| Cloudflare Access | No configurado | Decisión aprobada: excluido |
+
+## 8. Fuentes técnicas
+
+- Cloudflare Tunnel, configuración local de ingress: https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/local-management/configuration-file/
+- Next.js, autohospedaje y proxy: https://nextjs.org/docs/app/guides/self-hosting
