@@ -761,3 +761,14 @@
 - **Pendiente:** revisar staged diff, commit de fix, push normal sin force, comprobar el nuevo head/Actions y, cuando termine todo el job, solicitar revisión externa del PR.
 - **Riesgos/límites:** MFA ADMIN, SMTP real, respaldo/restauración y seguridad de dependencias siguen abiertos. Sin modificaciones a infraestructura, PostgreSQL, túneles, DNS ni Cloudflare. No se usó ni almacenó el token compartido en el chat; se indicó revocarlo por exposición.
 - **Estado:** PS-003.2 EN_CURSO; PS-003 EN_REVISION.
+
+### [2026-11-19T14:36:07-06:00] PS-003.2 · RESULTADO DEL FIX LOCAL Y LÍMITE DE PUBLICACIÓN
+- **Rama/commit local:** codex/ps-003-auth · 97c0ead (fixes de fixture Linux y contrato del workflow).
+- **Publicación confirmada por API pública:** el remoto y PR #1 siguen en 549433bd5ad71b259c7945670c96e412d5fcec35; el commit 97c0ead no se publicó. PR permanece abierto hacia main, sin merge.
+- **CI remoto:** run 44605903166 FAIL en pnpm test por dos anotaciones atendidas localmente. PostgreSQL setup, dependencias, Chromium, skills, format y lint pasaron; pasos siguientes quedaron skipped. No se solicitó revisión porque el run requerido no está verde.
+- **Verificación local del fix:** tests afectados 16/16 con ProgramData configurado y ausente; suite unitaria completa 213/213 con --maxWorkers=1; format:check, lint, check:secrets y git diff --check PASS. La consulta de ayuda confirmó --maxWorkers como opción disponible; una invocación previa con --minWorkers falló por opción no admitida antes de iniciar tests, y se repitió correctamente solo con --maxWorkers.
+- **Bloqueo de publicación:** tras el push anterior el helper local ya no devolvió credenciales no interactivas; el GitHub connector sigue desconectado. No incorporé el token que el propietario pegó en el chat a comandos, Git, logs o WORKLOG, ni lo guardé porque esta sesión no dispone de un Vault connector. Se recomendó revocarlo por exposición. No se realizó push posterior, merge, ni cambio de permisos.
+- **Pendiente:** restablecer una conexión GitHub segura ya aprobada (OAuth del conector o credencial guardada fuera del chat); después publicar 97c0ead, esperar Actions completo, corregir cualquier nuevo fallo dentro de PS-003 y solicitar revisión externa solo cuando Actions termine.
+- **Riesgos abiertos:** MFA ADMIN, SMTP real, backup/restore, moderado de dependencia y seguimiento de picomatch; runtime local 24.13.0 frente a pin CI 24.22.3.
+- **Límites:** sin modificaciones a PostgreSQL, servicios, servidor, DNS, Cloudflare o túneles; Cloudflare Access excluido.
+- **Estado:** PS-003.2 EN_CURSO; PS-003 EN_REVISION.
