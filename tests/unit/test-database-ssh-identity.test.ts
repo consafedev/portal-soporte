@@ -16,17 +16,18 @@ const huellaAprobada = 'SHA256:kJFGr6h9jFCslHQC2Ej7Mc4/NTf2AEKTCFgLkaaJ7a0';
 function crearConfiguracionSsh(ajustes = ''): string {
   const conocidos = join(homedir(), '.ssh', 'known_hosts');
   const secundarios = join(homedir(), '.ssh', 'known_hosts2');
-  const datosPrograma =
-    process.env['ProgramData'] ?? process.env['PROGRAMDATA'] ?? 'C:\\ProgramData';
-  const conocidosGlobales = join(datosPrograma, 'ssh', 'ssh_known_hosts');
-  const secundariosGlobales = join(datosPrograma, 'ssh', 'ssh_known_hosts2');
+  const datosPrograma = process.env['ProgramData'] ?? process.env['PROGRAMDATA'];
+  const almacenesGlobales =
+    datosPrograma === undefined
+      ? 'globalknownhostsfile none'
+      : `globalknownhostsfile ${join(datosPrograma, 'ssh', 'ssh_known_hosts')} ${join(datosPrograma, 'ssh', 'ssh_known_hosts2')}`;
   const lineas = [
     'hostname 10.18.170.44',
     'user daniel',
     'port 22',
     'stricthostkeychecking ask',
     `userknownhostsfile ${conocidos} ${secundarios}`,
-    'globalknownhostsfile ' + conocidosGlobales + ' ' + secundariosGlobales,
+    almacenesGlobales,
     'knownhostscommand none',
     'canonicalizehostname false',
   ];

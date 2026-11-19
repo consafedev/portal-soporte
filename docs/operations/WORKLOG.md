@@ -742,3 +742,22 @@
 - **Límites:** usar credencial guardada sin mostrarla ni incluirla en argumentos o archivos; no ampliar permisos, cambiar credenciales o infraestructura. Sin merge.
 - **Validación previa:** branch, remoto correcto, HEAD c142acc y árbol limpio confirmados; secreto-lint y diff check PASS. Próximo paso: un push normal con AskPass temporal fuera del repositorio, leyendo credenciales existentes del helper; borrar esos archivos temporales al terminar y verificar el head remoto.
 - **Estado:** PS-003.2 EN_CURSO; PS-003 EN_REVISION.
+
+### [2026-11-19T14:26:49-06:00] PS-003.2 · INICIO DE CORRECCIÓN DE TESTS EN CI
+- **Rama/commit:** codex/ps-003-auth · 549433bd5ad71b259c7945670c96e412d5fcec35. PR #1 sigue abierto hacia main, sin merge.
+- **Run observado:** GitHub Actions 44605903166. PostgreSQL 18.7, instalación, skills, formato y lint pasaron. pnpm test falló; integración, migrate-cli, build, typecheck, E2E y auditorías quedaron skipped.
+- **Causas evidenciadas por anotaciones del check:** (1) el fixture de test-database-ssh-identity inventa C:\ProgramData cuando el runner Linux no define ProgramData, pero el validador no permite un almacén global inexistente; (2) ci-auth-workflow.test.ts todavía exigía la revisión PGDG retirada +2.
+- **Plan mínimo:** alinear el fixture multiplataforma para representar globalknownhostsfile none cuando no existe ProgramData; actualizar el test de workflow para verificar candidato funcional 18.7, instalación resuelta por APT y comprobación posterior de versión, sin volver a fijar la revisión Debian. Conservar todos los controles de identidad, tests y seguridad.
+- **Archivos previstos:** tests/unit/test-database-ssh-identity.test.ts, tests/unit/ci-auth-workflow.test.ts, docs/operations/WORKLOG.md, docs/operations/TASK_BOARD.md.
+- **Pruebas:** ejecutar los tests unitarios afectados y los gates locales pertinentes; luego push normal y Actions completo. No declarar PASS al run actual.
+- **Límites:** sin secretos en comandos/registros, sin modificar claves ni servidores; sin merge ni cambios de infraestructura.
+- **Estado:** PS-003.2 EN_CURSO; PS-003 EN_REVISION.
+
+### [2026-11-19T14:29:26-06:00] PS-003.2 · VALIDACIÓN LOCAL DE LOS DOS FIXES DE CI
+- **Cambios:** el fixture de SSH emite globalknownhostsfile none cuando el entorno no tiene ProgramData; el test del workflow verifica que APT seleccione PostgreSQL 18.7, instala la revisión candidata compatible y conserva la comprobación de versión del binario.
+- **Pruebas afectadas:** 16/16 tests PASS en 2 archivos, ejecutados en Windows con ProgramData normal y nuevamente con ProgramData ausente para simular el runner Linux.
+- **Gates locales:** format:check PASS; lint PASS; check:secrets PASS; git diff --check PASS.
+- **CI remoto:** run 44605903166 sigue siendo FAIL por las anotaciones atendidas; integration, migrate-cli, build, typecheck, E2E y auditorías no se ejecutaron en ese run y no se consideran aprobadas.
+- **Pendiente:** revisar staged diff, commit de fix, push normal sin force, comprobar el nuevo head/Actions y, cuando termine todo el job, solicitar revisión externa del PR.
+- **Riesgos/límites:** MFA ADMIN, SMTP real, respaldo/restauración y seguridad de dependencias siguen abiertos. Sin modificaciones a infraestructura, PostgreSQL, túneles, DNS ni Cloudflare. No se usó ni almacenó el token compartido en el chat; se indicó revocarlo por exposición.
+- **Estado:** PS-003.2 EN_CURSO; PS-003 EN_REVISION.

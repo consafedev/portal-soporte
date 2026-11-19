@@ -17,7 +17,10 @@ describe('workflow de CI para autenticación PS-003', () => {
 
     expect(workflow).toContain('runs-on: ubuntu-24.04');
     expect(workflow).toContain('PG_BIN_DIR: /usr/lib/postgresql/18/bin');
-    expect(workflow).toContain('postgresql-18=18.7-1.pgdg24.04+2');
+    expect(workflow).toContain('apt-cache policy postgresql-18');
+    expect(workflow).toContain('test "$candidate" = "18.7"');
+    expect(workflow).toContain('sudo apt-get install -y postgresql-18');
+    expect(workflow).not.toMatch(/postgresql-18=[^\s]+/u);
     expect(workflow).toContain('B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8');
     expect(workflow).not.toMatch(/^\s*services:/mu);
     expect(workflow).not.toContain('image: postgres:');
