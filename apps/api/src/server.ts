@@ -15,7 +15,9 @@ import type { ServicioUsuariosAdmin } from './auth/admin-user-service.js';
 import type { LimitadorIntentosAuth } from '../../../packages/core/src/auth/recovery-ports.js';
 import type { ServicioRecuperacionAuth } from './auth/recovery-service.js';
 import { registrarRutasRecuperacion } from './routes/recovery-routes.js';
+import { registrarRutasPreferenciasUsuario } from './routes/user-preferences-routes.js';
 import { extraerDiagnosticoBaseDatosSeguro } from './logging/safe-database-error.js';
+import type { ServicioPreferenciasUsuario } from '../../../packages/core/src/preferences/service.js';
 
 const CAMPOS_SENSIBLES_LOG = [
   'req.headers.cookie',
@@ -47,6 +49,8 @@ export interface DependenciasServidorAuth {
   readonly limitador: LimitadorIntentosAuth;
   /** Flujos de activación, recuperación y cambios propios de credenciales/correo. */
   readonly recuperacion: ServicioRecuperacionAuth;
+  /** Preferencias visuales que la identidad autenticada puede gestionar en su perfil. */
+  readonly preferencias: ServicioPreferenciasUsuario;
   /** Servicio opcional de administración registrado solo cuando el runtime lo configura. */
   readonly usuariosAdmin?: ServicioUsuariosAdmin;
   /** Generador opcional de IDs de solicitud para aislar trazas sintéticas de integración. */
@@ -112,6 +116,11 @@ export async function crearServidorAuth(
     respuesta.code(404).send({ code: 'NOT_FOUND', message: 'La ruta solicitada no existe.' }),
   );
   registrarRutasAuth(aplicacion, dependencias);
+  registrarRutasPreferenciasUsuario(aplicacion, {
+    configuracion: dependencias.configuracion,
+    sesiones: dependencias.sesiones,
+    preferencias: dependencias.preferencias,
+  });
   await registrarRutasRecuperacion(aplicacion, {
     configuracion: dependencias.configuracion,
     sesiones: dependencias.sesiones,

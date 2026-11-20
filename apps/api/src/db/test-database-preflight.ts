@@ -181,12 +181,18 @@ const restriccionesMigradasEsperadas = [
   ['users', 'users_pkey', 'p'],
   ['users', 'users_role_check', 'c'],
   ['users', 'users_status_check', 'c'],
+  ['users', 'users_theme_preference_check', 'c'],
 ].map(([tabla, nombre, tipo]) => ({
   esquema: 'portal',
   tabla: tabla!,
   nombre: nombre!,
   tipo: tipo!,
 }));
+
+/** Restricciones exactas del esquema anterior a la última migración de perfil. */
+const restriccionesPreviasPreferenciaTemaEsperadas = restriccionesMigradasEsperadas.filter(
+  (restriccion) => restriccion.nombre !== 'users_theme_preference_check',
+);
 
 /**
  * Consulta y valida en modo read-only la identidad del rol PostgreSQL de pruebas.
@@ -509,16 +515,16 @@ export function validarMismaInstanciaBasePrueba(
 }
 
 /**
- * Acepta solo una base vacía o el esquema migrado exacto sin filas sintéticas residuales.
+ * Acepta una base vacía, el predecesor exacto de la migración de perfil o el esquema actual vacío.
  * @param estado Inventario de catálogos y conteos obtenidos en modo read-only.
  * @param hashesEsperados Hashes de migración calculados desde los archivos versionados.
- * @returns Estado vacío o migrado con las migraciones versionadas del Portal.
+ * @returns Estado vacío, inmediatamente anterior a una migración o ya migrado.
  * @throws Error si existe un objeto, restricción, hash o dato no autorizado.
  */
 export function validarEstadoEsquemaBasePrueba(
   estado: EstadoEsquemaBasePrueba,
   hashesEsperados: readonly (readonly string[])[],
-): 'vacio' | 'migrado' {
+): 'vacio' | 'migracion-pendiente' | 'migrado' {
   const esquemas = [...estado.esquemas].sort();
   const tablas = [...estado.tablas].sort(compararObjetosEsquema);
   const secuencias = [...estado.secuencias].sort(compararObjetosEsquema);
@@ -526,6 +532,9 @@ export function validarEstadoEsquemaBasePrueba(
   const relaciones = [...estado.relaciones].sort(compararObjetosEsquema);
   const restricciones = [...estado.restricciones].sort(compararRestricciones);
   const restriccionesEsperadas = [...restriccionesMigradasEsperadas].sort(compararRestricciones);
+  const restriccionesPreviasEsperadas = [...restriccionesPreviasPreferenciaTemaEsperadas].sort(
+    compararRestricciones,
+  );
   const filasSinDatos =
     estado.filas.usuarios === 0 &&
     estado.filas.sesiones === 0 &&
@@ -579,6 +588,24 @@ export function validarEstadoEsquemaBasePrueba(
     JSON.stringify(secuencias) ===
     JSON.stringify([...secuenciasEsperadas].sort(compararObjetosEsquema));
   const ledgerActualEsperado = coincidenHashesDeMigracion(hashes, hashesEsperados);
+  const ledgerAnteriorEsperado = coincidenHashesDeMigracion(hashes, hashesEsperados.slice(0, -1));
+  const restriccionesAnterioresEsperadas =
+    JSON.stringify(restricciones) === JSON.stringify(restriccionesPreviasEsperadas);
+  const esquemaPrevioSeguroParaMigrar =
+    hashesEsperados.length > 0 &&
+    esquemasPortalEsperados &&
+    tablasActualesEsperadas &&
+    secuenciasEsperadasExactas &&
+    relacionesActualesEsperadas &&
+    restriccionesAnterioresEsperadas &&
+    ledgerAnteriorEsperado &&
+    objetosAdicionalesLimpios &&
+    filasSinDatos &&
+    estado.filas.invariantes === 1;
+  if (esquemaPrevioSeguroParaMigrar) {
+    return 'migracion-pendiente';
+  }
+
   const estadoMigrado =
     esquemasPortalEsperados &&
     tablasActualesEsperadas &&
@@ -617,7 +644,9 @@ export function validarEstadoEsquemaBasePrueba(
  * @throws Error si la consulta o cualquier elemento del estado no puede validarse.
  * @effects Abre una conexión PostgreSQL read-only y la cierra antes de retornar.
  */
-export async function verificarEstadoEsquemaBasePrueba(url: string): Promise<'vacio' | 'migrado'> {
+export async function verificarEstadoEsquemaBasePrueba(
+  url: string,
+): Promise<'vacio' | 'migracion-pendiente' | 'migrado'> {
   const sql = postgres(url, {
     max: 1,
     idle_timeout: 5,

@@ -13,8 +13,10 @@ import { ServicioAutenticacionCore } from './auth/auth-service.js';
 import { ServicioRecuperacionAuth } from './auth/recovery-service.js';
 import { ServicioSesion } from './auth/session-service.js';
 import { ServicioUsuariosAdmin } from './auth/admin-user-service.js';
+import { ServicioPreferenciasUsuario } from '../../../packages/core/src/preferences/service.js';
 import { PostgresAuthRepository } from './auth/postgres-auth-repository.js';
 import { crearClienteBaseDatosAuth } from './db/client.js';
+import { RepositorioPreferenciasUsuarioPostgres } from './preferences/postgres-user-preferences-repository.js';
 import { crearServidorAuth } from './server.js';
 
 /** Runtime compuesto que expone HTTP privado y un cierre coordinado de recursos. */
@@ -74,6 +76,9 @@ export async function crearRuntimeAuth(
       publicAppOrigin: configuracion.publicAppOrigin,
     });
     const usuariosAdmin = new ServicioUsuariosAdmin(repositorio, reloj, hasheador);
+    const preferencias = new ServicioPreferenciasUsuario(
+      new RepositorioPreferenciasUsuarioPostgres(database),
+    );
     const generarIdSolicitud = crearGeneradorIdSolicitudPrueba(variables);
     const servidor = await crearServidorAuth({
       configuracion,
@@ -84,6 +89,7 @@ export async function crearRuntimeAuth(
       limitador,
       recuperacion,
       usuariosAdmin,
+      preferencias,
       ...(generarIdSolicitud === undefined ? {} : { generarIdSolicitud }),
     });
 

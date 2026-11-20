@@ -32,6 +32,7 @@ const restriccionesEsperadasPrueba = [
   ['users', 'users_pkey', 'p'],
   ['users', 'users_role_check', 'c'],
   ['users', 'users_status_check', 'c'],
+  ['users', 'users_theme_preference_check', 'c'],
 ].map(([tabla, nombre, tipo]) => ({
   esquema: 'portal',
   tabla: tabla!,
@@ -238,9 +239,9 @@ describe('validación de identidad PostgreSQL de prueba', () => {
 });
 
 describe('validación del estado persistente de la base de pruebas', () => {
-  const hashesEsperados = ['hash-0000', 'hash-0001', 'hash-0002', 'hash-0003'].map((hash) => [
-    hash,
-  ]);
+  const hashesEsperados = ['hash-0000', 'hash-0001', 'hash-0002', 'hash-0003', 'hash-0004'].map(
+    (hash) => [hash],
+  );
 
   it('acepta una base nueva antes de aplicar migraciones', () => {
     expect(validarEstadoEsquemaBasePrueba(crearEstadoVacio(), hashesEsperados)).toBe('vacio');
@@ -261,11 +262,24 @@ describe('validación del estado persistente de la base de pruebas', () => {
     ).toBe('migrado');
   });
 
+  it('acepta únicamente el esquema vacío inmediatamente anterior a la última migración', () => {
+    const estadoAnterior = crearEstadoMigrado(hashesEsperados.slice(0, -1));
+    const restriccionesAnteriores = estadoAnterior.restricciones.filter(
+      (restriccion) => restriccion.nombre !== 'users_theme_preference_check',
+    );
+
+    expect(
+      validarEstadoEsquemaBasePrueba(
+        { ...estadoAnterior, restricciones: restriccionesAnteriores },
+        hashesEsperados,
+      ),
+    ).toBe('migracion-pendiente');
+  });
+
   it('acepta hashes equivalentes de archivos con finales de línea Windows o Unix', () => {
-    const variantes = ['hash-0000', 'hash-0001', 'hash-0002', 'hash-0003'].map((hash) => [
-      `${hash}-windows`,
-      `${hash}-unix`,
-    ]);
+    const variantes = ['hash-0000', 'hash-0001', 'hash-0002', 'hash-0003', 'hash-0004'].map(
+      (hash) => [`${hash}-windows`, `${hash}-unix`],
+    );
     const estado = crearEstadoMigrado(variantes);
 
     expect(
