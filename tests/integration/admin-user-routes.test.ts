@@ -7,6 +7,8 @@ import { ServicioUsuariosAdmin } from '../../apps/api/src/auth/admin-user-servic
 import { LimitadorIntentosPostgres } from '../../apps/api/src/auth/attempt-limiter.js';
 import { ErrorRepositorioUsuariosAdmin } from '../../packages/core/src/auth/admin-ports.js';
 import { PostgresAuthRepository } from '../../apps/api/src/auth/postgres-auth-repository.js';
+import { RepositorioPreferenciasUsuarioPostgres } from '../../apps/api/src/preferences/postgres-user-preferences-repository.js';
+import { ServicioPreferenciasUsuario } from '../../packages/core/src/preferences/service.js';
 import { ServicioSesion } from '../../apps/api/src/auth/session-service.js';
 import { ServicioRecuperacionAuth } from '../../apps/api/src/auth/recovery-service.js';
 import { ServicioClientesPortal } from '../../apps/api/src/clients/client-management-service.js';
@@ -253,6 +255,9 @@ async function prepararAdministracion(): Promise<void> {
     recuperacion,
     usuariosAdmin,
     clientes,
+    preferencias: new ServicioPreferenciasUsuario(
+      new RepositorioPreferenciasUsuarioPostgres(exigirBasePrueba()),
+    ),
     generarIdSolicitud: identificadoresSolicitud.generar,
   });
   cookieAdmin = await iniciarSesion(usuarioAdmin);
@@ -296,6 +301,7 @@ async function cerrarAdministracion(): Promise<void> {
 
 /** Ejecuta requests administrativos con cookie de sesión y CSRF vigentes. */
 function definirPruebasAdmin(): void {
+  it('permite a ADMIN leer y guardar su preferencia de tema', probarPreferenciasAdmin);
   it('renueva el vencimiento de la cookie al extender una sesión por actividad', async () => {
     const cookie = cookieAdmin;
     if (cookie === null) {
@@ -952,9 +958,17 @@ function definirPruebasAdmin(): void {
       headers: { cookie: sessionToInvalidate },
     });
 
-    expect(respuesta.statusCode).toBe(200);
-    expect(respuesta.json()).toMatchObject({ role: 'ADMIN' });
-    expect(consulta.statusCode).toBe(401);
+    try {
+      expect(respuesta.statusCode).toBe(200);
+      expect(respuesta.json()).toMatchObject({ role: 'ADMIN' });
+      expect(consulta.statusCode).toBe(401);
+    } finally {
+      await exigirBaseMigrador()
+        .update(users)
+        .set({ role: 'SUPPORT' })
+        .where(eq(users.id, idSupport));
+      cookieSupport = await iniciarSesion(usuarioSupport, contrasenaActualSupport);
+    }
   });
 
   it('permite a ADMIN administrar clientes y ambientes SAP con auditoría transaccional', async () => {
@@ -969,7 +983,10 @@ function definirPruebasAdmin(): void {
       headers: await headersDeEscritura(admin),
       payload: { nombre: nombreCliente },
     });
-    const cliente = respuestaAlta.json<{ id: string; nombre: string; estado: string }>();
+    const cliente = respuestaAlta.json<{ id?: string; nombre?: string; estado?: string }>();
+    if (typeof cliente.id !== 'string') {
+      throw new Error('El alta sintética no devolvió un identificador de cliente.');
+    }
     idClientePrueba = cliente.id;
     idsClientesCreados.push(cliente.id);
 
@@ -1104,6 +1121,29 @@ function definirPruebasAdmin(): void {
     expect(respuestas.map((respuesta) => respuesta.statusCode)).toEqual([403, 403, 403, 403, 403]);
     expect(cliente[0]?.status).toBe('DISABLED');
   });
+}
+
+/** Comprueba que la identidad ADMIN use el mismo contrato de preferencia personal. */
+async function probarPreferenciasAdmin(): Promise<void> {
+  const cookie = cookieAdmin;
+  if (cookie === null) throw new Error('La prueba requiere la sesión ADMIN sintética.');
+
+  const inicial = await exigirAplicacion().inject({
+    method: 'GET',
+    url: '/api/v1/me/preferences',
+    headers: { cookie },
+  });
+  expect(inicial.statusCode).toBe(200);
+  expect(inicial.json()).toEqual({ theme: 'system' });
+
+  const guardada = await exigirAplicacion().inject({
+    method: 'PATCH',
+    url: '/api/v1/me/preferences',
+    headers: await headersDeEscritura(cookie),
+    payload: { theme: 'light' },
+  });
+  expect(guardada.statusCode).toBe(200);
+  expect(guardada.json()).toEqual({ theme: 'light' });
 }
 
 /**

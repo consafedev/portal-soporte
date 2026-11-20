@@ -113,6 +113,10 @@ export interface EstadoEsquemaBasePrueba {
     readonly limitadores: number;
     readonly auditoria: number;
     readonly invariantes: number;
+    /** Filas sintéticas de clientes creadas exclusivamente por las pruebas. */
+    readonly clientes: number;
+    /** Filas sintéticas de ambientes SAP creadas exclusivamente por las pruebas. */
+    readonly ambientesSap: number;
   };
 }
 
@@ -120,6 +124,8 @@ const nombresTablasAplicacion = [
   'audit_events',
   'auth_invariants',
   'auth_throttle_windows',
+  'client_sap_environments',
+  'clients',
   'recovery_tokens',
   'sessions',
   'users',
@@ -139,6 +145,15 @@ const relacionesMigradasEsperadas = [
   ['auth_throttle_expires_at_idx', 'i'],
   ['auth_throttle_windows', 'r'],
   ['auth_throttle_windows_pkey', 'i'],
+  ['client_sap_environments', 'r'],
+  ['client_sap_environments_client_code_unique', 'i'],
+  ['client_sap_environments_client_id_idx', 'i'],
+  ['client_sap_environments_pkey', 'i'],
+  ['client_sap_environments_status_idx', 'i'],
+  ['clients', 'r'],
+  ['clients_display_name_idx', 'i'],
+  ['clients_pkey', 'i'],
+  ['clients_status_idx', 'i'],
   ['recovery_tokens', 'r'],
   ['recovery_tokens_expires_at_idx', 'i'],
   ['recovery_tokens_pkey', 'i'],
@@ -168,6 +183,15 @@ const restriccionesMigradasEsperadas = [
   ['auth_throttle_windows', 'auth_throttle_expiration_check', 'c'],
   ['auth_throttle_windows', 'auth_throttle_scope_check', 'c'],
   ['auth_throttle_windows', 'auth_throttle_windows_pkey', 'p'],
+  ['client_sap_environments', 'client_sap_environments_client_id_clients_id_fk', 'f'],
+  ['client_sap_environments', 'client_sap_environments_code_check', 'c'],
+  ['client_sap_environments', 'client_sap_environments_name_check', 'c'],
+  ['client_sap_environments', 'client_sap_environments_pkey', 'p'],
+  ['client_sap_environments', 'client_sap_environments_status_check', 'c'],
+  ['clients', 'clients_created_by_user_id_users_id_fk', 'f'],
+  ['clients', 'clients_name_check', 'c'],
+  ['clients', 'clients_pkey', 'p'],
+  ['clients', 'clients_status_check', 'c'],
   ['recovery_tokens', 'recovery_tokens_expiration_check', 'c'],
   ['recovery_tokens', 'recovery_tokens_pkey', 'p'],
   ['recovery_tokens', 'recovery_tokens_purpose_check', 'c'],
@@ -181,12 +205,38 @@ const restriccionesMigradasEsperadas = [
   ['users', 'users_pkey', 'p'],
   ['users', 'users_role_check', 'c'],
   ['users', 'users_status_check', 'c'],
+  ['users', 'users_theme_preference_check', 'c'],
 ].map(([tabla, nombre, tipo]) => ({
   esquema: 'portal',
   tabla: tabla!,
   nombre: nombre!,
   tipo: tipo!,
 }));
+
+/** Restricciones exactas del esquema previo a la migración de clientes y ambientes SAP. */
+const restriccionesPreviasClientesEsperadas = restriccionesMigradasEsperadas.filter(
+  (restriccion) =>
+    restriccion.tabla !== 'client_sap_environments' && restriccion.tabla !== 'clients',
+);
+
+/** Objetos agregados por la migración de clientes que deben faltar antes de aplicarla. */
+const nombresRelacionesClientes = new Set([
+  'client_sap_environments',
+  'client_sap_environments_client_code_unique',
+  'client_sap_environments_client_id_idx',
+  'client_sap_environments_pkey',
+  'client_sap_environments_status_idx',
+  'clients',
+  'clients_display_name_idx',
+  'clients_pkey',
+  'clients_status_idx',
+]);
+const relacionesPreviasClientesEsperadas = relacionesMigradasEsperadas.filter(
+  (relacion) => !nombresRelacionesClientes.has(relacion.nombre),
+);
+const tablasPreviasClientesEsperadas = nombresTablasAplicacion.filter(
+  (nombre) => nombre !== 'client_sap_environments' && nombre !== 'clients',
+);
 
 /**
  * Consulta y valida en modo read-only la identidad del rol PostgreSQL de pruebas.
@@ -318,14 +368,16 @@ export async function verificarIdentidadBasePrueba(
               JOIN pg_namespace AS esquema ON esquema.oid = tabla.relnamespace
               WHERE esquema.nspname = 'portal'
                 AND tabla.relkind IN ('r', 'p', 'v', 'm', 'f')
-                AND tabla.relname = ANY(ARRAY['audit_events', 'auth_invariants', 'auth_throttle_windows', 'recovery_tokens', 'sessions', 'users'])
-            ) IN (0, 6)
+                AND tabla.relname = ANY(ARRAY['audit_events', 'auth_invariants', 'auth_throttle_windows', 'client_sap_environments', 'clients', 'recovery_tokens', 'sessions', 'users'])
+            ) IN (0, 6, 8)
             AND NOT EXISTS (
               SELECT 1
               FROM (VALUES
                 ('audit_events', false, true, false, false),
                 ('auth_invariants', true, false, true, false),
                 ('auth_throttle_windows', true, true, true, true),
+                ('client_sap_environments', true, true, true, false),
+                ('clients', true, true, true, false),
                 ('recovery_tokens', true, true, true, false),
                 ('sessions', true, true, true, false),
                 ('users', true, true, true, false)
@@ -350,7 +402,7 @@ export async function verificarIdentidadBasePrueba(
               JOIN pg_namespace AS esquema ON esquema.oid = tabla.relnamespace
               WHERE esquema.nspname IN ('public', 'portal')
                 AND tabla.relkind IN ('r', 'p', 'v', 'm', 'f')
-                AND NOT (esquema.nspname = 'portal' AND tabla.relname = ANY(ARRAY['audit_events', 'auth_invariants', 'auth_throttle_windows', 'recovery_tokens', 'sessions', 'users']))
+                AND NOT (esquema.nspname = 'portal' AND tabla.relname = ANY(ARRAY['audit_events', 'auth_invariants', 'auth_throttle_windows', 'client_sap_environments', 'clients', 'recovery_tokens', 'sessions', 'users']))
                 AND (
                   has_table_privilege(current_user, tabla.oid, 'SELECT')
                   OR has_table_privilege(current_user, tabla.oid, 'INSERT')
@@ -377,7 +429,7 @@ export async function verificarIdentidadBasePrueba(
               JOIN pg_namespace AS esquema ON esquema.oid = tabla.relnamespace
               CROSS JOIN LATERAL aclexplode(COALESCE(tabla.relacl, acldefault('r', tabla.relowner))) AS acl
               WHERE esquema.nspname = 'portal'
-                AND tabla.relname = ANY(ARRAY['audit_events', 'auth_invariants', 'auth_throttle_windows', 'recovery_tokens', 'sessions', 'users'])
+                AND tabla.relname = ANY(ARRAY['audit_events', 'auth_invariants', 'auth_throttle_windows', 'client_sap_environments', 'clients', 'recovery_tokens', 'sessions', 'users'])
                 AND acl.grantee = rol.oid
                 AND acl.is_grantable
             )
@@ -509,16 +561,16 @@ export function validarMismaInstanciaBasePrueba(
 }
 
 /**
- * Acepta solo una base vacía o el esquema migrado exacto sin filas sintéticas residuales.
+ * Acepta una base vacía, el predecesor exacto de la migración de perfil o el esquema actual vacío.
  * @param estado Inventario de catálogos y conteos obtenidos en modo read-only.
  * @param hashesEsperados Hashes de migración calculados desde los archivos versionados.
- * @returns Estado vacío o migrado con las migraciones versionadas del Portal.
+ * @returns Estado vacío, inmediatamente anterior a una migración o ya migrado.
  * @throws Error si existe un objeto, restricción, hash o dato no autorizado.
  */
 export function validarEstadoEsquemaBasePrueba(
   estado: EstadoEsquemaBasePrueba,
   hashesEsperados: readonly (readonly string[])[],
-): 'vacio' | 'migrado' {
+): 'vacio' | 'migracion-pendiente' | 'migrado' {
   const esquemas = [...estado.esquemas].sort();
   const tablas = [...estado.tablas].sort(compararObjetosEsquema);
   const secuencias = [...estado.secuencias].sort(compararObjetosEsquema);
@@ -526,12 +578,17 @@ export function validarEstadoEsquemaBasePrueba(
   const relaciones = [...estado.relaciones].sort(compararObjetosEsquema);
   const restricciones = [...estado.restricciones].sort(compararRestricciones);
   const restriccionesEsperadas = [...restriccionesMigradasEsperadas].sort(compararRestricciones);
+  const restriccionesPreviasEsperadas = [...restriccionesPreviasClientesEsperadas].sort(
+    compararRestricciones,
+  );
   const filasSinDatos =
     estado.filas.usuarios === 0 &&
     estado.filas.sesiones === 0 &&
     estado.filas.tokens === 0 &&
     estado.filas.limitadores === 0 &&
-    estado.filas.auditoria === 0;
+    estado.filas.auditoria === 0 &&
+    estado.filas.clientes === 0 &&
+    estado.filas.ambientesSap === 0;
 
   const esquemasBaseVacia =
     (esquemas.length === 1 && esquemas[0] === 'public') ||
@@ -570,15 +627,40 @@ export function validarEstadoEsquemaBasePrueba(
     esquemas.length === 2 && esquemas[0] === 'portal' && esquemas[1] === 'public';
   const tablasActualesEsperadas =
     JSON.stringify(tablas) === JSON.stringify([...tablasEsperadas].sort(compararObjetosEsquema));
+  const tablasPreviasEsperadas = ['__drizzle_migrations', ...tablasPreviasClientesEsperadas].map(
+    (nombre) => ({ esquema: 'portal', nombre, tipo: 'BASE TABLE' }),
+  );
+  const tablasActualesPreviasEsperadas =
+    JSON.stringify(tablas) ===
+    JSON.stringify([...tablasPreviasEsperadas].sort(compararObjetosEsquema));
   const relacionesActualesEsperadas =
     JSON.stringify(relaciones) ===
     JSON.stringify([...relacionesMigradasEsperadas].sort(compararObjetosEsquema));
+  const relacionesActualesPreviasEsperadas =
+    JSON.stringify(relaciones) ===
+    JSON.stringify([...relacionesPreviasClientesEsperadas].sort(compararObjetosEsquema));
   const restriccionesActualesEsperadas =
     JSON.stringify(restricciones) === JSON.stringify(restriccionesEsperadas);
   const secuenciasEsperadasExactas =
     JSON.stringify(secuencias) ===
     JSON.stringify([...secuenciasEsperadas].sort(compararObjetosEsquema));
   const ledgerActualEsperado = coincidenHashesDeMigracion(hashes, hashesEsperados);
+  const ledgerAnteriorEsperado = coincidenHashesDeMigracion(hashes, hashesEsperados.slice(0, -1));
+  const esquemaPrevioSeguroParaMigrar =
+    hashesEsperados.length > 0 &&
+    esquemasPortalEsperados &&
+    tablasActualesPreviasEsperadas &&
+    secuenciasEsperadasExactas &&
+    relacionesActualesPreviasEsperadas &&
+    JSON.stringify(restricciones) === JSON.stringify(restriccionesPreviasEsperadas) &&
+    ledgerAnteriorEsperado &&
+    objetosAdicionalesLimpios &&
+    filasSinDatos &&
+    estado.filas.invariantes === 1;
+  if (esquemaPrevioSeguroParaMigrar) {
+    return 'migracion-pendiente';
+  }
+
   const estadoMigrado =
     esquemasPortalEsperados &&
     tablasActualesEsperadas &&
@@ -594,6 +676,7 @@ export function validarEstadoEsquemaBasePrueba(
     const diferencias = [
       ...(esquemasPortalEsperados ? [] : ['esquemas']),
       ...(tablasActualesEsperadas ? [] : ['tablas']),
+      ...(tablasActualesPreviasEsperadas || tablasActualesEsperadas ? [] : ['tablas previas']),
       ...(secuenciasEsperadasExactas ? [] : ['secuencias']),
       ...(relacionesActualesEsperadas ? [] : ['índices y relaciones']),
       ...(restriccionesActualesEsperadas ? [] : ['restricciones']),
@@ -617,7 +700,9 @@ export function validarEstadoEsquemaBasePrueba(
  * @throws Error si la consulta o cualquier elemento del estado no puede validarse.
  * @effects Abre una conexión PostgreSQL read-only y la cierra antes de retornar.
  */
-export async function verificarEstadoEsquemaBasePrueba(url: string): Promise<'vacio' | 'migrado'> {
+export async function verificarEstadoEsquemaBasePrueba(
+  url: string,
+): Promise<'vacio' | 'migracion-pendiente' | 'migrado'> {
   const sql = postgres(url, {
     max: 1,
     idle_timeout: 5,
@@ -737,6 +822,8 @@ export async function verificarEstadoEsquemaBasePrueba(url: string): Promise<'va
       limitadores: 0,
       auditoria: 0,
       invariantes: 0,
+      clientes: 0,
+      ambientesSap: 0,
     };
     if (
       tablas.some((tabla) => tabla.esquema === 'portal' && tabla.nombre === '__drizzle_migrations')
@@ -758,6 +845,21 @@ export async function verificarEstadoEsquemaBasePrueba(url: string): Promise<'va
       `;
       if (conteos !== undefined) {
         filas = { ...filas, ...conteos };
+      }
+    }
+    if (
+      tablas.some((tabla) => tabla.esquema === 'portal' && tabla.nombre === 'clients') &&
+      tablas.some(
+        (tabla) => tabla.esquema === 'portal' && tabla.nombre === 'client_sap_environments',
+      )
+    ) {
+      const [conteosClientes] = await sql<{ clientes: number; ambientesSap: number }[]>`
+        SELECT
+          (SELECT count(*)::integer FROM portal.clients) AS clientes,
+          (SELECT count(*)::integer FROM portal.client_sap_environments) AS "ambientesSap"
+      `;
+      if (conteosClientes !== undefined) {
+        filas = { ...filas, ...conteosClientes };
       }
     }
     return validarEstadoEsquemaBasePrueba(

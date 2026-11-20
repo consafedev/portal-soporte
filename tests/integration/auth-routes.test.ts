@@ -6,9 +6,11 @@ import { LimitadorIntentosPostgres } from '../../apps/api/src/auth/attempt-limit
 import { Argon2PasswordHasher } from '../../apps/api/src/auth/argon2-password-hasher.js';
 import { calcularDigestTokenOpaco } from '../../apps/api/src/auth/token-service.js';
 import { PostgresAuthRepository } from '../../apps/api/src/auth/postgres-auth-repository.js';
+import { RepositorioPreferenciasUsuarioPostgres } from '../../apps/api/src/preferences/postgres-user-preferences-repository.js';
 import { ServicioSesion } from '../../apps/api/src/auth/session-service.js';
 import { ServicioRecuperacionAuth } from '../../apps/api/src/auth/recovery-service.js';
 import { cargarConfiguracionAuth } from '../../apps/api/src/config.js';
+import { ServicioPreferenciasUsuario } from '../../packages/core/src/preferences/service.js';
 import { crearServidorAuth } from '../../apps/api/src/server.js';
 import { crearClienteBaseDatosAuth } from '../../apps/api/src/db/client.js';
 import { auditEvents, authThrottleWindows, sessions, users } from '../../apps/api/src/db/schema.js';
@@ -166,6 +168,9 @@ async function prepararRutasAuth(): Promise<void> {
     reloj: relojFijo,
     limitador,
     recuperacion,
+    preferencias: new ServicioPreferenciasUsuario(
+      new RepositorioPreferenciasUsuarioPostgres(exigirBasePrueba()),
+    ),
     generarIdSolicitud: identificadoresSolicitud.generar,
   });
   /** Ruta exclusiva de la suite para verificar la interpretación de headers de red. */
@@ -280,6 +285,9 @@ async function pruebaCookiesProduccion(): Promise<void> {
     reloj: relojFijo,
     limitador: exigirLimitador(),
     recuperacion: exigirServicioRecuperacion(),
+    preferencias: new ServicioPreferenciasUsuario(
+      new RepositorioPreferenciasUsuarioPostgres(exigirBasePrueba()),
+    ),
   });
 
   try {
@@ -376,6 +384,63 @@ async function pruebaLoginSeguro(): Promise<void> {
   });
   expect(respuestaMe.statusCode).toBe(200);
   expect(respuestaMe.json()).toMatchObject({ user: { id: idUsuario, role: 'SUPPORT' } });
+}
+
+/** Comprueba sesión, CSRF y persistencia de preferencias para una cuenta SUPPORT. */
+async function pruebaPreferenciasSupport(): Promise<void> {
+  const cookieSesion = cookieSesionDePrueba;
+  if (cookieSesion === null) {
+    throw new Error('La prueba de preferencias SUPPORT requiere iniciar sesión primero.');
+  }
+
+  const anonima = await exigirAplicacion().inject({
+    method: 'GET',
+    url: '/api/v1/me/preferences',
+  });
+  expect(anonima.statusCode).toBe(401);
+
+  const inicial = await exigirAplicacion().inject({
+    method: 'GET',
+    url: '/api/v1/me/preferences',
+    headers: { cookie: cookieSesion },
+  });
+  expect(inicial.statusCode).toBe(200);
+  expect(inicial.json()).toEqual({ theme: 'system' });
+  expect(inicial.headers['cache-control']).toBe('private, no-store');
+
+  const sinCsrf = await exigirAplicacion().inject({
+    method: 'PATCH',
+    url: '/api/v1/me/preferences',
+    headers: { origin: origenPublicoPrueba, cookie: cookieSesion },
+    payload: { theme: 'dark' },
+  });
+  expect(sinCsrf.statusCode).toBe(403);
+
+  const csrf = await obtenerCsrf();
+  const guardada = await exigirAplicacion().inject({
+    method: 'PATCH',
+    url: '/api/v1/me/preferences',
+    headers: crearHeadersEscritura(csrf, cookieSesion),
+    payload: { theme: 'dark' },
+  });
+  expect(guardada.statusCode).toBe(200);
+  expect(guardada.json()).toEqual({ theme: 'dark' });
+  expect(guardada.body).not.toMatch(/password|hash|email|userId/iu);
+
+  const persistida = await exigirAplicacion().inject({
+    method: 'GET',
+    url: '/api/v1/me/preferences',
+    headers: { cookie: cookieSesion },
+  });
+  expect(persistida.json()).toEqual({ theme: 'dark' });
+
+  const campoAdicional = await exigirAplicacion().inject({
+    method: 'PATCH',
+    url: '/api/v1/me/preferences',
+    headers: crearHeadersEscritura(csrf, cookieSesion),
+    payload: { theme: 'light', userId: randomUUID() },
+  });
+  expect(campoAdicional.statusCode).toBe(400);
 }
 
 /** Comprueba que usuario desconocido y clave incorrecta comparten respuesta pública. */
@@ -606,6 +671,7 @@ function definirPruebasDeRutasAuth(): void {
     pruebaCookiesProduccion,
   );
   it('autentica y devuelve identidad sin revelar credenciales', pruebaLoginSeguro);
+  it('permite a SUPPORT gestionar solo su tema con sesión y CSRF', pruebaPreferenciasSupport);
   it('mantiene respuesta genérica ante cuenta desconocida', pruebaLoginSinEnumeracion);
   it('rechaza writes sin Origin/CSRF same-origin válido', pruebaProteccionCsrf);
   it(

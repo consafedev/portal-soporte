@@ -15,6 +15,10 @@ import type {
   SolicitudRecuperacion,
   SolicitudTokenCorreo,
 } from '@portal-soporte/contracts/auth';
+import type {
+  RespuestaPreferenciasUsuario,
+  SolicitudActualizarPreferenciasUsuario,
+} from '@portal-soporte/contracts/user-preferences';
 import {
   adminCreateUserResponseSchema,
   adminRevokedSessionsResponseSchema,
@@ -25,6 +29,7 @@ import {
   publicErrorResponseSchema,
   recoveryAcceptedResponseSchema,
 } from '@portal-soporte/contracts/auth';
+import { userPreferencesResponseSchema } from '@portal-soporte/contracts/user-preferences';
 
 type MetodoEscritura = 'POST' | 'PATCH';
 
@@ -76,6 +81,18 @@ export class ErrorApiAuth extends Error {
 export async function obtenerSesion(): Promise<RespuestaUsuarioPublico> {
   const respuesta = await solicitarApi('/api/v1/auth/me', authIdentityResponseSchema);
   return respuesta.user;
+}
+
+/** Obtiene el tema personal vigente mediante la API same-origin sin almacenar la respuesta. */
+export async function obtenerPreferenciasUsuario(): Promise<RespuestaPreferenciasUsuario> {
+  return solicitarApi('/api/v1/me/preferences', userPreferencesResponseSchema);
+}
+
+/** Guarda el tema de la cuenta autenticada usando PATCH protegido por CSRF. */
+export async function actualizarPreferenciasUsuario(
+  solicitud: SolicitudActualizarPreferenciasUsuario,
+): Promise<RespuestaPreferenciasUsuario> {
+  return enviarJson('/api/v1/me/preferences', solicitud, userPreferencesResponseSchema, 'PATCH');
 }
 
 /**

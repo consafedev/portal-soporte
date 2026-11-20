@@ -19,6 +19,15 @@ const restriccionesEsperadasPrueba = [
   ['auth_throttle_windows', 'auth_throttle_expiration_check', 'c'],
   ['auth_throttle_windows', 'auth_throttle_scope_check', 'c'],
   ['auth_throttle_windows', 'auth_throttle_windows_pkey', 'p'],
+  ['client_sap_environments', 'client_sap_environments_client_id_clients_id_fk', 'f'],
+  ['client_sap_environments', 'client_sap_environments_code_check', 'c'],
+  ['client_sap_environments', 'client_sap_environments_name_check', 'c'],
+  ['client_sap_environments', 'client_sap_environments_pkey', 'p'],
+  ['client_sap_environments', 'client_sap_environments_status_check', 'c'],
+  ['clients', 'clients_created_by_user_id_users_id_fk', 'f'],
+  ['clients', 'clients_name_check', 'c'],
+  ['clients', 'clients_pkey', 'p'],
+  ['clients', 'clients_status_check', 'c'],
   ['recovery_tokens', 'recovery_tokens_expiration_check', 'c'],
   ['recovery_tokens', 'recovery_tokens_pkey', 'p'],
   ['recovery_tokens', 'recovery_tokens_purpose_check', 'c'],
@@ -32,6 +41,7 @@ const restriccionesEsperadasPrueba = [
   ['users', 'users_pkey', 'p'],
   ['users', 'users_role_check', 'c'],
   ['users', 'users_status_check', 'c'],
+  ['users', 'users_theme_preference_check', 'c'],
 ].map(([tabla, nombre, tipo]) => ({
   esquema: 'portal',
   tabla: tabla!,
@@ -101,6 +111,8 @@ function crearEstadoVacio(): EstadoEsquemaBasePrueba {
       limitadores: 0,
       auditoria: 0,
       invariantes: 0,
+      clientes: 0,
+      ambientesSap: 0,
     },
   };
 }
@@ -108,50 +120,76 @@ function crearEstadoVacio(): EstadoEsquemaBasePrueba {
 /** Construye el único esquema migrado que admite una ejecución remota repetible. */
 function crearEstadoMigrado(
   variantesHashesMigracion: readonly (readonly string[])[],
+  incluirClientes = true,
 ): EstadoEsquemaBasePrueba {
+  const tablas = [
+    '__drizzle_migrations',
+    'audit_events',
+    'auth_invariants',
+    'auth_throttle_windows',
+    ...(incluirClientes ? ['client_sap_environments', 'clients'] : []),
+    'recovery_tokens',
+    'sessions',
+    'users',
+  ];
+  const relaciones = [
+    ['__drizzle_migrations', 'r'],
+    ['__drizzle_migrations_id_seq', 'S'],
+    ['__drizzle_migrations_pkey', 'i'],
+    ['audit_events', 'r'],
+    ['audit_events_actor_created_idx', 'i'],
+    ['audit_events_created_at_idx', 'i'],
+    ['audit_events_pkey', 'i'],
+    ['audit_events_target_created_idx', 'i'],
+    ['auth_invariants', 'r'],
+    ['auth_invariants_pkey', 'i'],
+    ['auth_throttle_expires_at_idx', 'i'],
+    ['auth_throttle_windows', 'r'],
+    ['auth_throttle_windows_pkey', 'i'],
+    ...(incluirClientes
+      ? [
+          ['client_sap_environments', 'r'],
+          ['client_sap_environments_client_code_unique', 'i'],
+          ['client_sap_environments_client_id_idx', 'i'],
+          ['client_sap_environments_pkey', 'i'],
+          ['client_sap_environments_status_idx', 'i'],
+          ['clients', 'r'],
+          ['clients_display_name_idx', 'i'],
+          ['clients_pkey', 'i'],
+          ['clients_status_idx', 'i'],
+        ]
+      : []),
+    ['recovery_tokens', 'r'],
+    ['recovery_tokens_expires_at_idx', 'i'],
+    ['recovery_tokens_pkey', 'i'],
+    ['recovery_tokens_token_hash_unique', 'i'],
+    ['recovery_tokens_user_id_idx', 'i'],
+    ['sessions', 'r'],
+    ['sessions_absolute_expires_at_idx', 'i'],
+    ['sessions_idle_expires_at_idx', 'i'],
+    ['sessions_pkey', 'i'],
+    ['sessions_token_hash_unique', 'i'],
+    ['sessions_user_id_idx', 'i'],
+    ['users', 'r'],
+    ['users_email_normalized_unique', 'i'],
+    ['users_pkey', 'i'],
+    ['users_username_normalized_unique', 'i'],
+  ];
   return {
     esquemas: ['portal', 'public'],
-    tablas: [
-      '__drizzle_migrations',
-      'audit_events',
-      'auth_invariants',
-      'auth_throttle_windows',
-      'recovery_tokens',
-      'sessions',
-      'users',
-    ].map((nombre) => ({ esquema: 'portal', nombre, tipo: 'BASE TABLE' })),
+    tablas: tablas.map((nombre) => ({ esquema: 'portal', nombre, tipo: 'BASE TABLE' })),
     secuencias: [{ esquema: 'portal', nombre: '__drizzle_migrations_id_seq' }],
-    restricciones: restriccionesEsperadasPrueba,
-    relaciones: [
-      ['__drizzle_migrations', 'r'],
-      ['__drizzle_migrations_id_seq', 'S'],
-      ['__drizzle_migrations_pkey', 'i'],
-      ['audit_events', 'r'],
-      ['audit_events_actor_created_idx', 'i'],
-      ['audit_events_created_at_idx', 'i'],
-      ['audit_events_pkey', 'i'],
-      ['audit_events_target_created_idx', 'i'],
-      ['auth_invariants', 'r'],
-      ['auth_invariants_pkey', 'i'],
-      ['auth_throttle_expires_at_idx', 'i'],
-      ['auth_throttle_windows', 'r'],
-      ['auth_throttle_windows_pkey', 'i'],
-      ['recovery_tokens', 'r'],
-      ['recovery_tokens_expires_at_idx', 'i'],
-      ['recovery_tokens_pkey', 'i'],
-      ['recovery_tokens_token_hash_unique', 'i'],
-      ['recovery_tokens_user_id_idx', 'i'],
-      ['sessions', 'r'],
-      ['sessions_absolute_expires_at_idx', 'i'],
-      ['sessions_idle_expires_at_idx', 'i'],
-      ['sessions_pkey', 'i'],
-      ['sessions_token_hash_unique', 'i'],
-      ['sessions_user_id_idx', 'i'],
-      ['users', 'r'],
-      ['users_email_normalized_unique', 'i'],
-      ['users_pkey', 'i'],
-      ['users_username_normalized_unique', 'i'],
-    ].map(([nombre, tipo]) => ({ esquema: 'portal', nombre: nombre!, tipo: tipo! })),
+    restricciones: incluirClientes
+      ? restriccionesEsperadasPrueba
+      : restriccionesEsperadasPrueba.filter(
+          (restriccion) =>
+            restriccion.tabla !== 'client_sap_environments' && restriccion.tabla !== 'clients',
+        ),
+    relaciones: relaciones.map(([nombre, tipo]) => ({
+      esquema: 'portal',
+      nombre: nombre!,
+      tipo: tipo!,
+    })),
     hashesMigraciones: variantesHashesMigracion.map((variantes) => variantes[0] ?? ''),
     objetosAdicionales: {
       rutinas: 0,
@@ -169,6 +207,8 @@ function crearEstadoMigrado(
       limitadores: 0,
       auditoria: 0,
       invariantes: 1,
+      clientes: 0,
+      ambientesSap: 0,
     },
   };
 }
@@ -238,9 +278,14 @@ describe('validación de identidad PostgreSQL de prueba', () => {
 });
 
 describe('validación del estado persistente de la base de pruebas', () => {
-  const hashesEsperados = ['hash-0000', 'hash-0001', 'hash-0002', 'hash-0003'].map((hash) => [
-    hash,
-  ]);
+  const hashesEsperados = [
+    'hash-0000',
+    'hash-0001',
+    'hash-0002',
+    'hash-0003',
+    'hash-0004',
+    'hash-0005',
+  ].map((hash) => [hash]);
 
   it('acepta una base nueva antes de aplicar migraciones', () => {
     expect(validarEstadoEsquemaBasePrueba(crearEstadoVacio(), hashesEsperados)).toBe('vacio');
@@ -261,11 +306,23 @@ describe('validación del estado persistente de la base de pruebas', () => {
     ).toBe('migrado');
   });
 
+  it('acepta únicamente el esquema vacío inmediatamente anterior a la última migración', () => {
+    const estadoAnterior = crearEstadoMigrado(hashesEsperados.slice(0, -1), false);
+
+    expect(validarEstadoEsquemaBasePrueba(estadoAnterior, hashesEsperados)).toBe(
+      'migracion-pendiente',
+    );
+  });
+
   it('acepta hashes equivalentes de archivos con finales de línea Windows o Unix', () => {
-    const variantes = ['hash-0000', 'hash-0001', 'hash-0002', 'hash-0003'].map((hash) => [
-      `${hash}-windows`,
-      `${hash}-unix`,
-    ]);
+    const variantes = [
+      'hash-0000',
+      'hash-0001',
+      'hash-0002',
+      'hash-0003',
+      'hash-0004',
+      'hash-0005',
+    ].map((hash) => [`${hash}-windows`, `${hash}-unix`]);
     const estado = crearEstadoMigrado(variantes);
 
     expect(
@@ -339,6 +396,20 @@ describe('validación del estado persistente de la base de pruebas', () => {
       {
         ...crearEstadoMigrado(hashesEsperados),
         filas: { ...crearEstadoMigrado(hashesEsperados).filas, auditoria: 1 },
+      },
+    ],
+    [
+      'cliente residual',
+      {
+        ...crearEstadoMigrado(hashesEsperados),
+        filas: { ...crearEstadoMigrado(hashesEsperados).filas, clientes: 1 },
+      },
+    ],
+    [
+      'ambiente SAP residual',
+      {
+        ...crearEstadoMigrado(hashesEsperados),
+        filas: { ...crearEstadoMigrado(hashesEsperados).filas, ambientesSap: 1 },
       },
     ],
     [

@@ -15,6 +15,10 @@
     "./clients": {
       "types": "./src/clients.ts",
       "import": "./src/clients.ts"
+    },
+    "./user-preferences": {
+      "types": "./src/user-preferences.ts",
+      "import": "./src/user-preferences.ts"
     }
   },
   "scripts": {

@@ -140,7 +140,7 @@ async function ejecutarMigracionesPrueba(variables: NodeJS.ProcessEnv): Promise<
 }
 
 /** Rechaza que una suite empiece si quedaron cuentas, sesiones o auditoría previas. */
-function exigirMigracionesLimpias(estado: 'vacio' | 'migrado'): void {
+function exigirMigracionesLimpias(estado: 'vacio' | 'migracion-pendiente' | 'migrado'): void {
   if (estado !== 'migrado') {
     throw new Error('La preparación de integración no dejó las migraciones esperadas.');
   }

@@ -226,9 +226,11 @@ async function ejecutarPruebasIntegracion(): Promise<void> {
         );
         if (estadoInicial !== 'migrado') {
           await ejecutarMigracionCompilada();
-          await verificarDestinoRemotoPrueba(
-            configuracion.TEST_DATABASE_URL,
-            configuracion.TEST_MIGRATOR_DATABASE_URL,
+          exigirEstadoMigrado(
+            await verificarDestinoRemotoPrueba(
+              configuracion.TEST_DATABASE_URL,
+              configuracion.TEST_MIGRATOR_DATABASE_URL,
+            ),
           );
         }
       }
@@ -315,16 +317,23 @@ function fijarEntornoDePruebas(): void {
 }
 
 /** Valida host SSH, ambos roles PostgreSQL y estado limpio antes de cualquier escritura. */
-async function verificarDestinoRemotoPrueba(urlApp: string, urlMigrador: string): Promise<void> {
+async function verificarDestinoRemotoPrueba(
+  urlApp: string,
+  urlMigrador: string,
+): Promise<'vacio' | 'migracion-pendiente' | 'migrado'> {
   verificarTunelSshPrueba();
-  const identidadAplicacion = await verificarIdentidadBasePrueba(urlApp, 'portal_test_app');
   const identidadMigrador = await verificarIdentidadBasePrueba(urlMigrador, 'portal_test_migrator');
+  const estado = await verificarEstadoEsquemaBasePrueba(urlMigrador);
+  if (estado === 'migrado') {
+    await concederPermisosAplicacionRemota();
+  }
+  const identidadAplicacion = await verificarIdentidadBasePrueba(urlApp, 'portal_test_app');
   validarMismaInstanciaBasePrueba(identidadAplicacion, identidadMigrador);
-  await verificarEstadoEsquemaBasePrueba(urlMigrador);
+  return estado;
 }
 
 /** Impide reportar PASS si la base remota no quedó en su estado migrado y vacío. */
-function exigirEstadoMigrado(estado: 'vacio' | 'migrado'): void {
+function exigirEstadoMigrado(estado: 'vacio' | 'migracion-pendiente' | 'migrado'): void {
   if (estado !== 'migrado') {
     throw new Error('La ejecución remota no dejó aplicadas las migraciones esperadas.');
   }
@@ -351,9 +360,11 @@ async function ejecutarPruebasE2e(argumentos: string[]): Promise<void> {
   await ejecutarMigracionCompilada();
   if (process.env['TEST_DATABASE_MODE'] === 'ssh-tunnel') {
     const configuracion = cargarConfiguracionBasePrueba({ ...process.env, NODE_ENV: 'test' });
-    await verificarDestinoRemotoPrueba(
-      configuracion.TEST_DATABASE_URL,
-      configuracion.TEST_MIGRATOR_DATABASE_URL,
+    exigirEstadoMigrado(
+      await verificarDestinoRemotoPrueba(
+        configuracion.TEST_DATABASE_URL,
+        configuracion.TEST_MIGRATOR_DATABASE_URL,
+      ),
     );
   }
   await ejecutarPlaywright(argumentos);
@@ -413,6 +424,9 @@ async function concederPermisosAplicacionRemota(): Promise<void> {
       await transaccion.unsafe('GRANT INSERT ON TABLE portal.audit_events TO portal_test_app');
       await transaccion.unsafe(
         'GRANT SELECT, UPDATE ON TABLE portal.auth_invariants TO portal_test_app',
+      );
+      await transaccion.unsafe(
+        'GRANT SELECT, INSERT, UPDATE ON TABLE portal.clients, portal.client_sap_environments TO portal_test_app',
       );
       await transaccion.unsafe(
         'REVOKE ALL ON TABLE portal.__drizzle_migrations FROM portal_test_app',

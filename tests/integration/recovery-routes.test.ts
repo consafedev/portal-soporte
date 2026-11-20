@@ -8,6 +8,8 @@ import { PostgresAuthRepository } from '../../apps/api/src/auth/postgres-auth-re
 import { ServicioRecuperacionAuth } from '../../apps/api/src/auth/recovery-service.js';
 import { ServicioSesion } from '../../apps/api/src/auth/session-service.js';
 import { ServicioUsuariosAdmin } from '../../apps/api/src/auth/admin-user-service.js';
+import { RepositorioPreferenciasUsuarioPostgres } from '../../apps/api/src/preferences/postgres-user-preferences-repository.js';
+import { ServicioPreferenciasUsuario } from '../../packages/core/src/preferences/service.js';
 import { crearClienteBaseDatosAuth } from '../../apps/api/src/db/client.js';
 import {
   auditEvents,
@@ -251,6 +253,9 @@ async function prepararFlujosRecuperacion(): Promise<void> {
     limitador,
     recuperacion: servicioCredenciales,
     usuariosAdmin: new ServicioUsuariosAdmin(repositorioActual, reloj, hasheador),
+    preferencias: new ServicioPreferenciasUsuario(
+      new RepositorioPreferenciasUsuarioPostgres(exigirBasePrueba()),
+    ),
     generarIdSolicitud: identificadoresSolicitud.generar,
   });
   cookieSupportPassword = await iniciarSesion(`support_password_${sufijo}`);

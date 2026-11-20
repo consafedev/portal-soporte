@@ -14,6 +14,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import type { EstadoUsuario, RolUsuario } from '../../../../packages/core/src/auth/models.js';
+import type { TemaPreferenciaUsuario } from '../../../../packages/core/src/preferences/models.js';
 
 const esquemaPortal = pgSchema('portal');
 
@@ -23,6 +24,7 @@ type ColumnasUsuarioRestricciones = {
   passwordHash: AnyPgColumn;
   role: AnyPgColumn;
   status: AnyPgColumn;
+  themePreference: AnyPgColumn;
   usernameNormalized: AnyPgColumn;
 };
 
@@ -78,6 +80,10 @@ function definirRestriccionesUsuario(columnas: ColumnasUsuarioRestricciones) {
     estadoValido: check(
       'users_status_check',
       sql`${columnas.status} IN ('PENDING_ACTIVATION', 'ACTIVE', 'DISABLED')`,
+    ),
+    temaPreferidoValido: check(
+      'users_theme_preference_check',
+      sql`${columnas.themePreference} IN ('system', 'light', 'dark')`,
     ),
     credencialCoherente: check(
       'users_credential_state_check',
@@ -233,6 +239,10 @@ export const users = esquemaPortal.table(
     passwordHash: text('password_hash'),
     role: text('role').$type<RolUsuario>().notNull(),
     status: text('status').$type<EstadoUsuario>().notNull(),
+    themePreference: text('theme_preference')
+      .$type<TemaPreferenciaUsuario>()
+      .notNull()
+      .default('system'),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   },
