@@ -1168,3 +1168,10 @@
 - **Pendiente:** migración versionada, ajuste del preflight PostgreSQL, integración/E2E remotos de PS-005.1 y validación visual/accesible de la pantalla. `127.0.0.1:15432` escucha y `.env.infra-001.local` existe; no se mostró su contenido. La prueba remota quedará limitada a `portal_soporte_test`/roles de prueba.
 - **Límites:** no hubo acceso a bases de clientes, escrituras a `portal_soporte`, producción, Cloudflare, DNS, UFW ni servicios. PS-004 no se fusionó ni desplegó.
 - **Estado:** PS-005 EN_CURSO; PS-004 EN_REVISION; cambios aún locales sin commit.
+
+### [2026-11-20T16:29:45-06:00] PS-005 — CHECKPOINT LOCAL
+- **Agente/tarea/rama/commit:** Codex · PS-005.1 · `codex/ps-005-clients-connections` · `ca17191` (`feat(clients): PS-005 registrar catálogo cliente SAP`).
+- **Alcance del commit:** catálogo de clientes y ambientes SAP, contratos, API ADMIN-only, auditoría atómica, pantalla y pruebas unitarias/integración preparatorias. El commit es un checkpoint local y no está publicado; el test PostgreSQL aún requiere migración versionada y preflight actualizado.
+- **Verificación tras commit:** árbol limpio; las pruebas locales registradas en la entrada anterior siguen aplicando. No se realizó push ni PR de PS-005.
+- **Siguiente paso:** revisar de solo lectura el runner remoto; cambiar temporalmente al branch publicado PS-004 para reproducir E2E usando únicamente `portal_soporte_test`; regresar después a PS-005.
+- **Estado:** PS-005 EN_CURSO; PS-004 EN_REVISION.
