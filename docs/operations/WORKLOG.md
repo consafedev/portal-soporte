@@ -1175,3 +1175,14 @@
 - **Verificación tras commit:** árbol limpio; las pruebas locales registradas en la entrada anterior siguen aplicando. No se realizó push ni PR de PS-005.
 - **Siguiente paso:** revisar de solo lectura el runner remoto; cambiar temporalmente al branch publicado PS-004 para reproducir E2E usando únicamente `portal_soporte_test`; regresar después a PS-005.
 - **Estado:** PS-005 EN_CURSO; PS-004 EN_REVISION.
+
+### [2026-11-20T16:44:04-06:00] PS-005 — INICIO DE REINGRESO Y VERIFICACIÓN DE PR #3
+- **Agente/tarea/rama/base:** Codex · PS-005.1 / seguimiento PS-004 · `codex/ps-005-clients-connections` · HEAD `60f15bf` · base `42f4fd50428ef15fc3334f09eef8dd2c0d05408e`.
+- **Objetivo:** retomar desde los checkpoints existentes, comprobar el E2E fallido del PR #3 y cerrar migración, integración y accesibilidad del incremento PS-005.1 en recursos aislados.
+- **Alcance previsto:** revisar workflow y contratos, probar sin limpieza general solo `portal_soporte_test`, conservar rama/commits locales y actualizar trazabilidad. No se modificarán `portal_soporte`, bases de clientes, Cloudflare, DNS, firewall ni servicios.
+- **Comprobaciones:** reproducción E2E relevante; integración PostgreSQL y CLI de migraciones de PS-005.1; unitarias dirigidas; `format:check` acotado a cambios, lint, typecheck, build, secretos y diff; interfaz con teclado, temas, responsive y movimiento reducido.
+- **Evidencia inicial:** el PR #3 está abierto contra `main`, head `0cac4f3ff5563d4569b4120dda1d8d0e18316270`, `mergeable=true`. Actions run `44830166637` terminó FAILURE; el job `136612793352` solo marca fallo en el paso E2E de navegador. Endpoint público de logs devuelve HTTP 403 y el run no publica artefactos. No se ensayará una corrección sin causa reproducible.
+- **UI/UX:** `.agents/skills/apple-design/SKILL.md` leída en esta iteración antes de revisar la pantalla PS-005; se aplican jerarquía simple, feedback directo, teclado/foco, contraste AA, modo claro/oscuro, responsive y `prefers-reduced-motion`. Validación visual completa queda dentro del plan; no capturar datos personales.
+- **Criterios de cierre de esta iteración:** migración probada solo sobre la base remota explícita de test; ADMIN permitido y SUPPORT denegado en API; sin persistencia/lectura de credenciales de clientes; suite/controles reportados sin omisiones; PR #3 sin merge y con causa del E2E identificada o limitación documentada.
+- **Próximo paso:** revisar el origen exacto de las diferencias CI/local y continuar con el runner del test PostgreSQL remoto.
+- **Estado:** PS-005 EN_CURSO; PS-004 EN_REVISION.
