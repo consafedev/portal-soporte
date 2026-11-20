@@ -324,7 +324,7 @@ async function verificarDestinoRemotoPrueba(urlApp: string, urlMigrador: string)
 }
 
 /** Impide reportar PASS si la base remota no quedó en su estado migrado y vacío. */
-function exigirEstadoMigrado(estado: 'vacio' | 'migrado' | 'migracion-pendiente'): void {
+function exigirEstadoMigrado(estado: 'vacio' | 'migrado'): void {
   if (estado !== 'migrado') {
     throw new Error('La ejecución remota no dejó aplicadas las migraciones esperadas.');
   }

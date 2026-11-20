@@ -11,8 +11,6 @@ import {
   authThrottleWindows,
   recoveryTokens,
   sessions,
-  userMfaFactors,
-  userMfaRecoveryCodes,
   users,
 } from '../../apps/api/src/db/schema.js';
 const database = new PGlite();
@@ -59,13 +57,9 @@ function pruebaEsquemaPortalDrizzle(): void {
     authThrottleWindows,
     auditEvents,
     authInvariants,
-    userMfaFactors,
-    userMfaRecoveryCodes,
   ];
 
   expect(tablas.map((tabla) => getTableConfig(tabla).schema)).toEqual([
-    'portal',
-    'portal',
     'portal',
     'portal',
     'portal',
@@ -84,19 +78,19 @@ async function pruebaLedgerDentroDePortal(): Promise<void> {
     "SELECT to_regclass('public.__drizzle_migrations') IS NOT NULL AS existe",
   );
   const tablasAuthPublicas = await database.query<{ cantidad: number }>(
-    "SELECT count(*)::int AS cantidad FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('audit_events', 'auth_invariants', 'auth_throttle_windows', 'recovery_tokens', 'sessions', 'user_mfa_factors', 'user_mfa_recovery_codes', 'users')",
+    "SELECT count(*)::int AS cantidad FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('audit_events', 'auth_invariants', 'auth_throttle_windows', 'recovery_tokens', 'sessions', 'users')",
   );
   const secuenciasLedger = await database.query<{ sequence_name: string }>(
     "SELECT sequence_name FROM information_schema.sequences WHERE sequence_schema = 'portal'",
   );
 
-  expect(versiones.rows).toEqual([{ cantidad: 5 }]);
+  expect(versiones.rows).toEqual([{ cantidad: 4 }]);
   expect(ledgerPublico.rows).toEqual([{ existe: false }]);
   expect(tablasAuthPublicas.rows).toEqual([{ cantidad: 0 }]);
   expect(secuenciasLedger.rows).toEqual([{ sequence_name: '__drizzle_migrations_id_seq' }]);
 }
 
-/** Comprueba la presencia de las ocho entidades persistentes del núcleo de autenticación. */
+/** Comprueba la presencia de las seis entidades persistentes del núcleo de autenticación. */
 async function pruebaTablasDeIdentidad(): Promise<void> {
   const nombresEsperados = [
     getTableName(users),
@@ -105,8 +99,6 @@ async function pruebaTablasDeIdentidad(): Promise<void> {
     getTableName(authThrottleWindows),
     getTableName(auditEvents),
     getTableName(authInvariants),
-    getTableName(userMfaFactors),
-    getTableName(userMfaRecoveryCodes),
   ];
   const filas = await database.query<{ table_name: string }>(
     "SELECT table_name FROM information_schema.tables WHERE table_schema = 'portal' AND table_name <> '__drizzle_migrations'",

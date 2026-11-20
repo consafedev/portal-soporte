@@ -32,16 +32,6 @@ const restriccionesEsperadasPrueba = [
   ['users', 'users_pkey', 'p'],
   ['users', 'users_role_check', 'c'],
   ['users', 'users_status_check', 'c'],
-  ['user_mfa_factors', 'user_mfa_factors_ciphertext_check', 'c'],
-  ['user_mfa_factors', 'user_mfa_factors_counter_check', 'c'],
-  ['user_mfa_factors', 'user_mfa_factors_enabled_counter_check', 'c'],
-  ['user_mfa_factors', 'user_mfa_factors_nonce_check', 'c'],
-  ['user_mfa_factors', 'user_mfa_factors_pkey', 'p'],
-  ['user_mfa_factors', 'user_mfa_factors_tag_check', 'c'],
-  ['user_mfa_factors', 'user_mfa_factors_user_id_users_id_fk', 'f'],
-  ['user_mfa_recovery_codes', 'user_mfa_recovery_codes_digest_check', 'c'],
-  ['user_mfa_recovery_codes', 'user_mfa_recovery_codes_pk', 'p'],
-  ['user_mfa_recovery_codes', 'user_mfa_recovery_codes_user_id_user_mfa_factors_user_id_fk', 'f'],
 ].map(([tabla, nombre, tipo]) => ({
   esquema: 'portal',
   tabla: tabla!,
@@ -111,8 +101,6 @@ function crearEstadoVacio(): EstadoEsquemaBasePrueba {
       limitadores: 0,
       auditoria: 0,
       invariantes: 0,
-      factoresMfa: 0,
-      codigosRecuperacionMfa: 0,
     },
   };
 }
@@ -130,8 +118,6 @@ function crearEstadoMigrado(
       'auth_throttle_windows',
       'recovery_tokens',
       'sessions',
-      'user_mfa_factors',
-      'user_mfa_recovery_codes',
       'users',
     ].map((nombre) => ({ esquema: 'portal', nombre, tipo: 'BASE TABLE' })),
     secuencias: [{ esquema: 'portal', nombre: '__drizzle_migrations_id_seq' }],
@@ -165,11 +151,6 @@ function crearEstadoMigrado(
       ['users_email_normalized_unique', 'i'],
       ['users_pkey', 'i'],
       ['users_username_normalized_unique', 'i'],
-      ['user_mfa_factors', 'r'],
-      ['user_mfa_factors_pkey', 'i'],
-      ['user_mfa_recovery_codes', 'r'],
-      ['user_mfa_recovery_codes_pk', 'i'],
-      ['user_mfa_recovery_codes_user_consumed_idx', 'i'],
     ].map(([nombre, tipo]) => ({ esquema: 'portal', nombre: nombre!, tipo: tipo! })),
     hashesMigraciones: variantesHashesMigracion.map((variantes) => variantes[0] ?? ''),
     objetosAdicionales: {
@@ -188,44 +169,7 @@ function crearEstadoMigrado(
       limitadores: 0,
       auditoria: 0,
       invariantes: 1,
-      factoresMfa: 0,
-      codigosRecuperacionMfa: 0,
     },
-  };
-}
-
-/** Construye la versión anterior exacta que requiere aplicar únicamente la migración MFA. */
-function crearEstadoMigradoAntesDeMfa(
-  variantesHashesMigracion: readonly (readonly string[])[],
-): EstadoEsquemaBasePrueba {
-  const estado = crearEstadoMigrado(variantesHashesMigracion.slice(0, -1));
-  const tablasMfa = new Set(['user_mfa_factors', 'user_mfa_recovery_codes']);
-  const relacionesMfa = new Set([
-    'user_mfa_factors',
-    'user_mfa_factors_pkey',
-    'user_mfa_recovery_codes',
-    'user_mfa_recovery_codes_pk',
-    'user_mfa_recovery_codes_user_consumed_idx',
-  ]);
-  const restriccionesMfa = new Set([
-    'user_mfa_factors_ciphertext_check',
-    'user_mfa_factors_counter_check',
-    'user_mfa_factors_enabled_counter_check',
-    'user_mfa_factors_nonce_check',
-    'user_mfa_factors_pkey',
-    'user_mfa_factors_tag_check',
-    'user_mfa_factors_user_id_users_id_fk',
-    'user_mfa_recovery_codes_digest_check',
-    'user_mfa_recovery_codes_pk',
-    'user_mfa_recovery_codes_user_id_user_mfa_factors_user_id_fk',
-  ]);
-  return {
-    ...estado,
-    tablas: estado.tablas.filter((tabla) => !tablasMfa.has(tabla.nombre)),
-    relaciones: estado.relaciones.filter((relacion) => !relacionesMfa.has(relacion.nombre)),
-    restricciones: estado.restricciones.filter(
-      (restriccion) => !restriccionesMfa.has(restriccion.nombre),
-    ),
   };
 }
 
@@ -294,9 +238,9 @@ describe('validación de identidad PostgreSQL de prueba', () => {
 });
 
 describe('validación del estado persistente de la base de pruebas', () => {
-  const hashesEsperados = ['hash-0000', 'hash-0001', 'hash-0002', 'hash-0003', 'hash-0004'].map(
-    (hash) => [hash],
-  );
+  const hashesEsperados = ['hash-0000', 'hash-0001', 'hash-0002', 'hash-0003'].map((hash) => [
+    hash,
+  ]);
 
   it('acepta una base nueva antes de aplicar migraciones', () => {
     expect(validarEstadoEsquemaBasePrueba(crearEstadoVacio(), hashesEsperados)).toBe('vacio');
@@ -317,36 +261,11 @@ describe('validación del estado persistente de la base de pruebas', () => {
     ).toBe('migrado');
   });
 
-  it('reconoce la estructura anterior exacta para aplicar la migración MFA versionada', () => {
-    expect(
-      validarEstadoEsquemaBasePrueba(
-        crearEstadoMigradoAntesDeMfa(hashesEsperados),
-        hashesEsperados,
-      ),
-    ).toBe('migracion-pendiente');
-  });
-
-  it('compara las migraciones pendientes por versión y no por el orden alfabético del hash', () => {
-    const hashesEnOrdenDeMigracion = [
-      'hash-zeta',
-      'hash-beta',
-      'hash-alfa',
-      'hash-mu',
-      'hash-xi',
-    ].map((hash) => [hash]);
-
-    expect(
-      validarEstadoEsquemaBasePrueba(
-        crearEstadoMigradoAntesDeMfa(hashesEnOrdenDeMigracion),
-        hashesEnOrdenDeMigracion,
-      ),
-    ).toBe('migracion-pendiente');
-  });
-
   it('acepta hashes equivalentes de archivos con finales de línea Windows o Unix', () => {
-    const variantes = ['hash-0000', 'hash-0001', 'hash-0002', 'hash-0003', 'hash-0004'].map(
-      (hash) => [`${hash}-windows`, `${hash}-unix`],
-    );
+    const variantes = ['hash-0000', 'hash-0001', 'hash-0002', 'hash-0003'].map((hash) => [
+      `${hash}-windows`,
+      `${hash}-unix`,
+    ]);
     const estado = crearEstadoMigrado(variantes);
 
     expect(
@@ -355,17 +274,6 @@ describe('validación del estado persistente de la base de pruebas', () => {
         variantes,
       ),
     ).toBe('migrado');
-  });
-
-  it('rechaza una versión anterior con datos antes de aplicar la migración MFA', () => {
-    const estado = crearEstadoMigradoAntesDeMfa(hashesEsperados);
-
-    expect(() =>
-      validarEstadoEsquemaBasePrueba(
-        { ...estado, filas: { ...estado.filas, usuarios: 1 } },
-        hashesEsperados,
-      ),
-    ).toThrow(/^La base de pruebas contiene objetos o datos fuera del estado aprobado/);
   });
 
   it.each([

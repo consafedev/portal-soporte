@@ -113,8 +113,6 @@ export interface EstadoEsquemaBasePrueba {
     readonly limitadores: number;
     readonly auditoria: number;
     readonly invariantes: number;
-    readonly factoresMfa: number;
-    readonly codigosRecuperacionMfa: number;
   };
 }
 
@@ -124,8 +122,6 @@ const nombresTablasAplicacion = [
   'auth_throttle_windows',
   'recovery_tokens',
   'sessions',
-  'user_mfa_factors',
-  'user_mfa_recovery_codes',
   'users',
 ] as const;
 
@@ -158,11 +154,6 @@ const relacionesMigradasEsperadas = [
   ['users_email_normalized_unique', 'i'],
   ['users_pkey', 'i'],
   ['users_username_normalized_unique', 'i'],
-  ['user_mfa_factors', 'r'],
-  ['user_mfa_factors_pkey', 'i'],
-  ['user_mfa_recovery_codes', 'r'],
-  ['user_mfa_recovery_codes_pk', 'i'],
-  ['user_mfa_recovery_codes_user_consumed_idx', 'i'],
 ].map(([nombre, tipo]) => ({ esquema: 'portal', nombre: nombre!, tipo: tipo! }));
 
 const restriccionesMigradasEsperadas = [
@@ -190,16 +181,6 @@ const restriccionesMigradasEsperadas = [
   ['users', 'users_pkey', 'p'],
   ['users', 'users_role_check', 'c'],
   ['users', 'users_status_check', 'c'],
-  ['user_mfa_factors', 'user_mfa_factors_ciphertext_check', 'c'],
-  ['user_mfa_factors', 'user_mfa_factors_counter_check', 'c'],
-  ['user_mfa_factors', 'user_mfa_factors_enabled_counter_check', 'c'],
-  ['user_mfa_factors', 'user_mfa_factors_nonce_check', 'c'],
-  ['user_mfa_factors', 'user_mfa_factors_pkey', 'p'],
-  ['user_mfa_factors', 'user_mfa_factors_tag_check', 'c'],
-  ['user_mfa_factors', 'user_mfa_factors_user_id_users_id_fk', 'f'],
-  ['user_mfa_recovery_codes', 'user_mfa_recovery_codes_digest_check', 'c'],
-  ['user_mfa_recovery_codes', 'user_mfa_recovery_codes_pk', 'p'],
-  ['user_mfa_recovery_codes', 'user_mfa_recovery_codes_user_id_user_mfa_factors_user_id_fk', 'f'],
 ].map(([tabla, nombre, tipo]) => ({
   esquema: 'portal',
   tabla: tabla!,
@@ -531,13 +512,13 @@ export function validarMismaInstanciaBasePrueba(
  * Acepta solo una base vacía o el esquema migrado exacto sin filas sintéticas residuales.
  * @param estado Inventario de catálogos y conteos obtenidos en modo read-only.
  * @param hashesEsperados Hashes de migración calculados desde los archivos versionados.
- * @returns Estado vacío, migrado o con la migración MFA aprobada pendiente.
+ * @returns Estado vacío o migrado con las migraciones versionadas del Portal.
  * @throws Error si existe un objeto, restricción, hash o dato no autorizado.
  */
 export function validarEstadoEsquemaBasePrueba(
   estado: EstadoEsquemaBasePrueba,
   hashesEsperados: readonly (readonly string[])[],
-): 'vacio' | 'migrado' | 'migracion-pendiente' {
+): 'vacio' | 'migrado' {
   const esquemas = [...estado.esquemas].sort();
   const tablas = [...estado.tablas].sort(compararObjetosEsquema);
   const secuencias = [...estado.secuencias].sort(compararObjetosEsquema);
@@ -550,9 +531,7 @@ export function validarEstadoEsquemaBasePrueba(
     estado.filas.sesiones === 0 &&
     estado.filas.tokens === 0 &&
     estado.filas.limitadores === 0 &&
-    estado.filas.auditoria === 0 &&
-    estado.filas.factoresMfa === 0 &&
-    estado.filas.codigosRecuperacionMfa === 0;
+    estado.filas.auditoria === 0;
 
   const esquemasBaseVacia =
     (esquemas.length === 1 && esquemas[0] === 'public') ||
@@ -587,74 +566,19 @@ export function validarEstadoEsquemaBasePrueba(
     tipo: 'BASE TABLE',
   }));
   const secuenciasEsperadas = [{ esquema: 'portal', nombre: '__drizzle_migrations_id_seq' }];
-  const tablasMfa = new Set(['user_mfa_factors', 'user_mfa_recovery_codes']);
-  const relacionesMfa = new Set([
-    'user_mfa_factors',
-    'user_mfa_factors_pkey',
-    'user_mfa_recovery_codes',
-    'user_mfa_recovery_codes_pk',
-    'user_mfa_recovery_codes_user_consumed_idx',
-  ]);
-  const restriccionesMfa = new Set([
-    'user_mfa_factors_ciphertext_check',
-    'user_mfa_factors_counter_check',
-    'user_mfa_factors_enabled_counter_check',
-    'user_mfa_factors_nonce_check',
-    'user_mfa_factors_pkey',
-    'user_mfa_factors_tag_check',
-    'user_mfa_factors_user_id_users_id_fk',
-    'user_mfa_recovery_codes_digest_check',
-    'user_mfa_recovery_codes_pk',
-    'user_mfa_recovery_codes_user_id_user_mfa_factors_user_id_fk',
-  ]);
   const esquemasPortalEsperados =
     esquemas.length === 2 && esquemas[0] === 'portal' && esquemas[1] === 'public';
   const tablasActualesEsperadas =
     JSON.stringify(tablas) === JSON.stringify([...tablasEsperadas].sort(compararObjetosEsquema));
-  const tablasAnterioresEsperadas =
-    JSON.stringify(tablas) ===
-    JSON.stringify(
-      tablasEsperadas.filter((tabla) => !tablasMfa.has(tabla.nombre)).sort(compararObjetosEsquema),
-    );
   const relacionesActualesEsperadas =
     JSON.stringify(relaciones) ===
     JSON.stringify([...relacionesMigradasEsperadas].sort(compararObjetosEsquema));
-  const relacionesAnterioresEsperadas =
-    JSON.stringify(relaciones) ===
-    JSON.stringify(
-      [...relacionesMigradasEsperadas]
-        .filter((relacion) => !relacionesMfa.has(relacion.nombre))
-        .sort(compararObjetosEsquema),
-    );
   const restriccionesActualesEsperadas =
     JSON.stringify(restricciones) === JSON.stringify(restriccionesEsperadas);
-  const restriccionesAnterioresEsperadas =
-    JSON.stringify(restricciones) ===
-    JSON.stringify(
-      [...restriccionesMigradasEsperadas]
-        .filter((restriccion) => !restriccionesMfa.has(restriccion.nombre))
-        .sort(compararRestricciones),
-    );
   const secuenciasEsperadasExactas =
     JSON.stringify(secuencias) ===
     JSON.stringify([...secuenciasEsperadas].sort(compararObjetosEsquema));
   const ledgerActualEsperado = coincidenHashesDeMigracion(hashes, hashesEsperados);
-  const ledgerAnteriorEsperado =
-    hashesEsperados.length > 0 && coincidenHashesDeMigracion(hashes, hashesEsperados.slice(0, -1));
-  const estadoConMfaPendiente =
-    ledgerAnteriorEsperado &&
-    tablasAnterioresEsperadas &&
-    relacionesAnterioresEsperadas &&
-    restriccionesAnterioresEsperadas &&
-    esquemasPortalEsperados &&
-    secuenciasEsperadasExactas &&
-    objetosAdicionalesLimpios &&
-    filasSinDatos &&
-    estado.filas.invariantes === 1;
-  if (estadoConMfaPendiente) {
-    return 'migracion-pendiente';
-  }
-
   const estadoMigrado =
     esquemasPortalEsperados &&
     tablasActualesEsperadas &&
@@ -669,15 +593,11 @@ export function validarEstadoEsquemaBasePrueba(
   if (!estadoMigrado) {
     const diferencias = [
       ...(esquemasPortalEsperados ? [] : ['esquemas']),
-      ...(tablasActualesEsperadas || tablasAnterioresEsperadas ? [] : ['tablas']),
+      ...(tablasActualesEsperadas ? [] : ['tablas']),
       ...(secuenciasEsperadasExactas ? [] : ['secuencias']),
-      ...(relacionesActualesEsperadas || relacionesAnterioresEsperadas
-        ? []
-        : ['índices y relaciones']),
-      ...(restriccionesActualesEsperadas || restriccionesAnterioresEsperadas
-        ? []
-        : ['restricciones']),
-      ...(ledgerActualEsperado || ledgerAnteriorEsperado ? [] : ['historial de migraciones']),
+      ...(relacionesActualesEsperadas ? [] : ['índices y relaciones']),
+      ...(restriccionesActualesEsperadas ? [] : ['restricciones']),
+      ...(ledgerActualEsperado ? [] : ['historial de migraciones']),
       ...(objetosAdicionalesLimpios ? [] : ['objetos adicionales']),
       ...(filasSinDatos ? [] : ['filas de autenticación']),
       ...(estado.filas.invariantes === 1 || estado.filas.invariantes === 0 ? [] : ['invariantes']),
@@ -697,9 +617,7 @@ export function validarEstadoEsquemaBasePrueba(
  * @throws Error si la consulta o cualquier elemento del estado no puede validarse.
  * @effects Abre una conexión PostgreSQL read-only y la cierra antes de retornar.
  */
-export async function verificarEstadoEsquemaBasePrueba(
-  url: string,
-): Promise<'vacio' | 'migrado' | 'migracion-pendiente'> {
+export async function verificarEstadoEsquemaBasePrueba(url: string): Promise<'vacio' | 'migrado'> {
   const sql = postgres(url, {
     max: 1,
     idle_timeout: 5,
@@ -819,8 +737,6 @@ export async function verificarEstadoEsquemaBasePrueba(
       limitadores: 0,
       auditoria: 0,
       invariantes: 0,
-      factoresMfa: 0,
-      codigosRecuperacionMfa: 0,
     };
     if (
       tablas.some((tabla) => tabla.esquema === 'portal' && tabla.nombre === '__drizzle_migrations')
@@ -844,19 +760,6 @@ export async function verificarEstadoEsquemaBasePrueba(
         filas = { ...filas, ...conteos };
       }
     }
-    if (tablas.some((tabla) => tabla.esquema === 'portal' && tabla.nombre === 'user_mfa_factors')) {
-      const [conteosMfa] = await sql<
-        Pick<typeof filas, 'factoresMfa' | 'codigosRecuperacionMfa'>[]
-      >`
-        SELECT
-          (SELECT count(*)::integer FROM portal.user_mfa_factors) AS "factoresMfa",
-          (SELECT count(*)::integer FROM portal.user_mfa_recovery_codes) AS "codigosRecuperacionMfa"
-      `;
-      if (conteosMfa !== undefined) {
-        filas = { ...filas, ...conteosMfa };
-      }
-    }
-
     return validarEstadoEsquemaBasePrueba(
       {
         esquemas: esquemas.map((fila) => fila.esquema),

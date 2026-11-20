@@ -29,7 +29,7 @@ Preparar el portal interno para exposición HTTPS tras completar los controles d
 
 ## Enfoques y decisiones de implementación
 
-1. **MFA:** no se implementará para ADMIN ni SUPPORT por decisión expresa AP-013. Las primitivas o tablas MFA existentes no se consideran controles activos ni se exponen por API/UI. El riesgo de un factor queda declarado y aceptado; solo una nueva decisión expresa del propietario podría reabrirlo.
+1. **MFA:** no se implementará para ADMIN ni SUPPORT por decisión expresa AP-013. Se retiraron del candidato la migración, las tablas y las primitivas MFA no aprobadas; no se exponen controles incompletos en API/UI. El riesgo de un factor queda declarado y aceptado; solo una nueva decisión expresa del propietario podría reabrirlo.
 2. **Alta/reset sin SMTP:** ADMIN captura una contraseña temporal fuerte; la API solo persiste Argon2id, obliga cambio propio al primer login y revoca sesiones en reset. La API nunca devuelve el password. El administrador lo comunica fuera del portal por un canal acordado. Correo permanece no verificado y no se usa como requisito de login. Recuperación, activación, verificación y cambio de correo se marcan deshabilitados hasta configurar SMTP.
 3. **Origen y proxy:** se conserva el origen público canónico `https://soporte.consafedev.qzz.io`, la web como único ingress y el API solo loopback. Se confía únicamente en los peers observados de `cloudflared`→Next y Next→Fastify; las cabeceras no confiables se eliminan y no determinan Host, Origin o protocolo de seguridad.
 4. **Respaldo:** `pg_dump` exclusivo del esquema/base del Portal en una ubicación con acceso restrictivo. La restauración se realiza en una instancia/base aislada, nunca reemplazando `portal_soporte` ni alterando bases preexistentes.
@@ -37,7 +37,7 @@ Preparar el portal interno para exposición HTTPS tras completar los controles d
 
 ## Migración y reversión
 
-La migración de contraseña inicial se mantiene versionada en el esquema `portal`. Las estructuras de MFA preexistentes en la rama son inertes y no se usan en runtime; no se afirma que habiliten un segundo factor. Antes de aplicar cualquier migración a la base persistente, el plan ejecutará backup y restore aislado y verificará el esquema en `portal_soporte_test`. Nunca se ejecutará un down migration automático ni se truncarán datos. La base runtime continúa usando exclusivamente `portal_app`.
+La migración de contraseña inicial se mantiene versionada en el esquema `portal`. El journal candidato conserva únicamente las cuatro migraciones aprobadas; la base aislada de pruebas se restauró al mismo esquema y ledger, retirando las dos tablas vacías y la fila de ledger de la migración MFA no aprobada. Antes de aplicar cualquier migración a la base persistente, el plan ejecutará backup y restore aislado y verificará el esquema en `portal_soporte_test`. Nunca se ejecutará un down migration automático ni se truncarán datos. La base runtime continúa usando exclusivamente `portal_app`.
 
 ## Criterios de salida
 

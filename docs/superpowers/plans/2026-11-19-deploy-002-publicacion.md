@@ -54,10 +54,10 @@
 
 ### Tarea 3: decisión MFA y controles de login
 
-**Estado:** cerrada por AP-013 y su aclaración expresa del propietario. No implementar MFA para ADMIN ni SUPPORT. Las primitivas criptográficas y tablas existentes permanecen inertes; no se crean flujos de enrolamiento, challenge o assurance y no se presenta MFA como activo.
+**Estado:** cerrada por AP-013 y su aclaración expresa del propietario. No implementar MFA para ADMIN ni SUPPORT. Se retiraron del candidato la migración, las tablas y las primitivas criptográficas MFA no aprobadas; no se crean flujos de enrolamiento, challenge o assurance ni se presenta MFA como activo.
 
 - [x] Registrar el riesgo residual de autenticación de ambos roles por un factor y conservar controles efectivos de contraseña, sesión, rate limit, CSRF, autorización y auditoría.
-- [x] Mantener las tablas/primitivas MFA existentes sin rutas de uso; tratarlas como inertes y no afirmar que protegen el login.
+- [x] Retirar las tablas/primitivas MFA no aprobadas y conservar una prueba que impida incorporar migraciones MFA sin nueva decisión expresa.
 - [ ] Revisión de seguridad independiente de la configuración password-only antes de la publicación.
 
 ### Tarea 4: runtime HTTPS, proxy y controles HTTP
