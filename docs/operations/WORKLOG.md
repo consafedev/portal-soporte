@@ -1265,3 +1265,11 @@ eload, se reinició únicamente cloudflared-consafedev.service; procesos web, AP
 - **Riesgos:** un moderado de desarrollo/0 altos-críticos; revisar `esbuild`; seguimiento `picomatch` revisión 2026-12-10 UTC y aceptación vence 2026-12-17 UTC. Respaldo/custodia y exposición UFW 5432 permanecen documentados.
 - **Próximo paso:** push normal y PR de PS-004; revisar Actions y solicitar autorización de merge/despliegue. Luego iniciar PS-005 con contratos aprobados, pruebas aisladas y sin consultar bases de clientes.
 - **Estado:** PS-004 EN_REVISION; PS-005 aún PENDIENTE; DEPLOY-002 EN_REVISION.
+
+### [2026-11-20T15:34:45-06:00] PS-004 — EVIDENCIA VISUAL SINTÉTICA PARA PR
+- **Agente/tarea/rama/commit:** Codex · PS-004 · `codex/ps-004-preferences-theme` · base `42f4fd50428ef15fc3334f09eef8dd2c0d05408e`; rama publicada tras commits `556004f`, `210de53` y `b032c37`.
+- **Cambios:** se incorporaron al repositorio las capturas sintéticas ya inspeccionadas, sin datos de cuentas reales: `docs/operations/evidence/ps-004-dashboard-desktop.png` y `docs/operations/evidence/ps-004-dashboard-mobile.png`. La insignia exclusiva de Next dev se oculta únicamente en la captura de Playwright.
+- **Verificación:** las capturas muestran el saludo limpio y el control global sol/luna; las pruebas E2E de 10 casos siguen pasando para el estado de código validado. Los archivos PNG pesan 27,657 y 21,037 bytes respectivamente.
+- **Límites:** no se cambió el producto ni se alteró producción; assets sintéticos para revisión visual. No se guardan cookies, correos ni secretos.
+- **Próximo paso:** incluir esta evidencia en el PR de PS-004 y comprobar Actions.
+- **Estado:** PS-004 EN_REVISION.
