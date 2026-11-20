@@ -56,6 +56,18 @@ type ColumnasInvariantesRestricciones = {
   id: AnyPgColumn;
 };
 
+type ColumnasClienteRestricciones = {
+  displayName: AnyPgColumn;
+  status: AnyPgColumn;
+};
+
+type ColumnasAmbienteSapRestricciones = {
+  clientId: AnyPgColumn;
+  code: AnyPgColumn;
+  displayName: AnyPgColumn;
+  status: AnyPgColumn;
+};
+
 /** Define índices únicos y restricciones de coherencia para la identidad del portal. */
 function definirRestriccionesUsuario(columnas: ColumnasUsuarioRestricciones) {
   return {
@@ -153,6 +165,40 @@ function definirRestriccionesInvariantes(columnas: ColumnasInvariantesRestriccio
   };
 }
 
+/** Limita nombre y estado de un cliente y facilita filtros del panel administrativo. */
+function definirRestriccionesCliente(columnas: ColumnasClienteRestricciones) {
+  return {
+    estadoValido: check('clients_status_check', sql`${columnas.status} IN ('ACTIVE', 'DISABLED')`),
+    nombreNoVacio: check('clients_name_check', sql`length(trim(${columnas.displayName})) >= 2`),
+    nombreIdx: index('clients_display_name_idx').on(columnas.displayName),
+    estadoIdx: index('clients_status_idx').on(columnas.status),
+  };
+}
+
+/** Restringe el código SAP dentro del cliente y prepara búsquedas por propietario. */
+function definirRestriccionesAmbienteSap(columnas: ColumnasAmbienteSapRestricciones) {
+  return {
+    codigoPorClienteUnico: uniqueIndex('client_sap_environments_client_code_unique').on(
+      columnas.clientId,
+      columnas.code,
+    ),
+    propietarioIdx: index('client_sap_environments_client_id_idx').on(columnas.clientId),
+    estadoIdx: index('client_sap_environments_status_idx').on(columnas.status),
+    codigoValido: check(
+      'client_sap_environments_code_check',
+      sql`${columnas.code} ~ '^[A-Z0-9][A-Z0-9_-]{0,31}$'`,
+    ),
+    estadoValido: check(
+      'client_sap_environments_status_check',
+      sql`${columnas.status} IN ('ACTIVE', 'DISABLED')`,
+    ),
+    nombreNoVacio: check(
+      'client_sap_environments_name_check',
+      sql`length(trim(${columnas.displayName})) >= 2`,
+    ),
+  };
+}
+
 /** Devuelve la clave referencial de usuario para sesiones. */
 function referenciarUsuarioDeSesion(): AnyPgColumn {
   return users.id;
@@ -191,6 +237,39 @@ export const users = esquemaPortal.table(
     updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   },
   definirRestriccionesUsuario,
+);
+
+/** Conserva el catálogo de clientes sin incluir endpoints ni credenciales externas. */
+export const clients = esquemaPortal.table(
+  'clients',
+  {
+    id: uuid('id').primaryKey(),
+    displayName: varchar('display_name', { length: 120 }).notNull(),
+    status: text('status').$type<'ACTIVE' | 'DISABLED'>().notNull().default('ACTIVE'),
+    createdByUserId: uuid('created_by_user_id').references(referenciarActorDeAuditoria, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  definirRestriccionesCliente,
+);
+
+/** Separa el código de ambiente SAP del entorno operativo de cada perfil de conexión. */
+export const clientSapEnvironments = esquemaPortal.table(
+  'client_sap_environments',
+  {
+    id: uuid('id').primaryKey(),
+    clientId: uuid('client_id')
+      .notNull()
+      .references(() => clients.id, { onDelete: 'restrict' }),
+    code: varchar('code', { length: 32 }).notNull(),
+    displayName: varchar('display_name', { length: 120 }).notNull(),
+    status: text('status').$type<'ACTIVE' | 'DISABLED'>().notNull().default('ACTIVE'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  definirRestriccionesAmbienteSap,
 );
 
 /** Persiste sesiones opacas con expiración inactiva y absoluta comprobables. */

@@ -16,6 +16,8 @@ import { ServicioUsuariosAdmin } from './auth/admin-user-service.js';
 import { PostgresAuthRepository } from './auth/postgres-auth-repository.js';
 import { crearClienteBaseDatosAuth } from './db/client.js';
 import { crearServidorAuth } from './server.js';
+import { ServicioClientesPortal } from './clients/client-management-service.js';
+import { PostgresClientRepository } from './clients/postgres-client-repository.js';
 
 /** Runtime compuesto que expone HTTP privado y un cierre coordinado de recursos. */
 export interface RuntimeAuth {
@@ -74,6 +76,7 @@ export async function crearRuntimeAuth(
       publicAppOrigin: configuracion.publicAppOrigin,
     });
     const usuariosAdmin = new ServicioUsuariosAdmin(repositorio, reloj, hasheador);
+    const clientes = new ServicioClientesPortal(new PostgresClientRepository(database), reloj);
     const generarIdSolicitud = crearGeneradorIdSolicitudPrueba(variables);
     const servidor = await crearServidorAuth({
       configuracion,
@@ -84,6 +87,7 @@ export async function crearRuntimeAuth(
       limitador,
       recuperacion,
       usuariosAdmin,
+      clientes,
       ...(generarIdSolicitud === undefined ? {} : { generarIdSolicitud }),
     });
 

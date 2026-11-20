@@ -9,12 +9,16 @@ import { ErrorRepositorioUsuariosAdmin } from '../../packages/core/src/auth/admi
 import { PostgresAuthRepository } from '../../apps/api/src/auth/postgres-auth-repository.js';
 import { ServicioSesion } from '../../apps/api/src/auth/session-service.js';
 import { ServicioRecuperacionAuth } from '../../apps/api/src/auth/recovery-service.js';
+import { ServicioClientesPortal } from '../../apps/api/src/clients/client-management-service.js';
+import { PostgresClientRepository } from '../../apps/api/src/clients/postgres-client-repository.js';
 import { cargarConfiguracionAuth } from '../../apps/api/src/config.js';
 import { crearServidorAuth } from '../../apps/api/src/server.js';
 import { crearClienteBaseDatosAuth } from '../../apps/api/src/db/client.js';
 import {
   auditEvents,
   authThrottleWindows,
+  clientSapEnvironments,
+  clients,
   recoveryTokens,
   sessions,
   users,
@@ -59,9 +63,11 @@ let servicioAdmin: ServicioUsuariosAdmin | null = null;
 let cookieAdmin: string | null = null;
 let cookieSupport: string | null = null;
 let idNuevoUsuario: string | null = null;
+let idClientePrueba: string | null = null;
 let limitadorAdmin: LimitadorIntentosPostgres | null = null;
 let fallarCorreoAdmin = false;
 const idsUsuariosCreados: string[] = [];
+const idsClientesCreados: string[] = [];
 const mensajesAdmin: MensajeCorreoAuth[] = [];
 
 /** Recupera el único PostgreSQL efímero de la suite o falla de forma explícita. */
@@ -207,6 +213,10 @@ async function prepararAdministracion(): Promise<void> {
     reloj,
   );
   const usuariosAdmin = new ServicioUsuariosAdmin(repositorio, reloj, hasheador);
+  const clientes = new ServicioClientesPortal(
+    new PostgresClientRepository(exigirBasePrueba()),
+    reloj,
+  );
   const limitador = new LimitadorIntentosPostgres(exigirBasePrueba(), Buffer.alloc(32, 29));
   limitadorAdmin = limitador;
   const recuperacion = new ServicioRecuperacionAuth({
@@ -242,6 +252,7 @@ async function prepararAdministracion(): Promise<void> {
     limitador,
     recuperacion,
     usuariosAdmin,
+    clientes,
     generarIdSolicitud: identificadoresSolicitud.generar,
   });
   cookieAdmin = await iniciarSesion(usuarioAdmin);
@@ -270,6 +281,12 @@ async function cerrarAdministracion(): Promise<void> {
         inArray(auditEvents.targetUserId, usuariosTemporales),
       ),
     );
+  if (idsClientesCreados.length > 0) {
+    await migrador
+      .delete(clientSapEnvironments)
+      .where(inArray(clientSapEnvironments.clientId, idsClientesCreados));
+    await migrador.delete(clients).where(inArray(clients.id, idsClientesCreados));
+  }
   await migrador.delete(users).where(inArray(users.id, usuariosTemporales));
   // El preflight exige que la base aislada empiece sin filas de throttling; se retira el conjunto sintético propio.
   await migrador.delete(authThrottleWindows);
@@ -939,6 +956,154 @@ function definirPruebasAdmin(): void {
     expect(respuesta.json()).toMatchObject({ role: 'ADMIN' });
     expect(consulta.statusCode).toBe(401);
   });
+
+  it('permite a ADMIN administrar clientes y ambientes SAP con auditoría transaccional', async () => {
+    const admin = cookieAdmin;
+    if (admin === null) {
+      throw new Error('La prueba requiere la sesión ADMIN preparada.');
+    }
+    const nombreCliente = `Cliente sintético ${sufijo}`;
+    const respuestaAlta = await exigirAplicacion().inject({
+      method: 'POST',
+      url: '/api/v1/admin/clients',
+      headers: await headersDeEscritura(admin),
+      payload: { nombre: nombreCliente },
+    });
+    const cliente = respuestaAlta.json<{ id: string; nombre: string; estado: string }>();
+    idClientePrueba = cliente.id;
+    idsClientesCreados.push(cliente.id);
+
+    const sinCsrf = await exigirAplicacion().inject({
+      method: 'POST',
+      url: '/api/v1/admin/clients',
+      headers: { origin: origen, 'sec-fetch-site': 'same-origin', cookie: admin },
+      payload: { nombre: `Sin CSRF ${sufijo}` },
+    });
+    const codigoAmbiente = `PRD_${sufijo.toUpperCase()}`;
+    const respuestaAmbiente = await exigirAplicacion().inject({
+      method: 'POST',
+      url: `/api/v1/admin/clients/${cliente.id}/sap-environments`,
+      headers: await headersDeEscritura(admin),
+      payload: { codigo: codigoAmbiente.toLowerCase(), nombre: 'Producción sintética' },
+    });
+    const ambiente = respuestaAmbiente.json<{ id: string; codigo: string; estado: string }>();
+    const duplicado = await exigirAplicacion().inject({
+      method: 'POST',
+      url: `/api/v1/admin/clients/${cliente.id}/sap-environments`,
+      headers: await headersDeEscritura(admin),
+      payload: { codigo: codigoAmbiente, nombre: 'Duplicado sintético' },
+    });
+    const actualizarCliente = await exigirAplicacion().inject({
+      method: 'PATCH',
+      url: `/api/v1/admin/clients/${cliente.id}`,
+      headers: await headersDeEscritura(admin),
+      payload: { nombre: `${nombreCliente} editado` },
+    });
+    const actualizarAmbiente = await exigirAplicacion().inject({
+      method: 'PATCH',
+      url: `/api/v1/admin/clients/${cliente.id}/sap-environments/${ambiente.id}`,
+      headers: await headersDeEscritura(admin),
+      payload: { codigo: `QAS_${sufijo.toUpperCase()}`, nombre: 'Calidad sintética' },
+    });
+    const desactivarAmbiente = await exigirAplicacion().inject({
+      method: 'PATCH',
+      url: `/api/v1/admin/clients/${cliente.id}/sap-environments/${ambiente.id}`,
+      headers: await headersDeEscritura(admin),
+      payload: { estado: 'DISABLED' },
+    });
+    const desactivarCliente = await exigirAplicacion().inject({
+      method: 'PATCH',
+      url: `/api/v1/admin/clients/${cliente.id}`,
+      headers: await headersDeEscritura(admin),
+      payload: { estado: 'DISABLED' },
+    });
+    const clientesRespuesta = await exigirAplicacion().inject({
+      method: 'GET',
+      url: '/api/v1/admin/clients',
+      headers: { cookie: admin },
+    });
+    const auditoria = await exigirBaseMigrador()
+      .select({ action: auditEvents.action, metadata: auditEvents.metadata })
+      .from(auditEvents)
+      .where(sql`${auditEvents.metadata}->>'clientId' = ${cliente.id}`);
+
+    expect(respuestaAlta.statusCode).toBe(201);
+    expect(cliente).toMatchObject({ nombre: nombreCliente, estado: 'ACTIVE' });
+    expect(respuestaAlta.body).not.toContain('passwordHash');
+    expect(respuestaAlta.body).not.toContain('credential');
+    expect(sinCsrf.statusCode).toBe(403);
+    expect(respuestaAmbiente.statusCode).toBe(201);
+    expect(ambiente.codigo).toBe(codigoAmbiente);
+    expect(duplicado.statusCode).toBe(409);
+    expect(duplicado.json()).toMatchObject({ code: 'SAP_ENVIRONMENT_DUPLICATE' });
+    expect(actualizarCliente.json()).toMatchObject({ nombre: `${nombreCliente} editado` });
+    expect(actualizarAmbiente.json()).toMatchObject({
+      codigo: `QAS_${sufijo.toUpperCase()}`,
+      nombre: 'Calidad sintética',
+    });
+    expect(desactivarAmbiente.json()).toMatchObject({ estado: 'DISABLED' });
+    expect(desactivarCliente.json()).toMatchObject({ estado: 'DISABLED' });
+    expect(clientesRespuesta.json()).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: cliente.id, estado: 'DISABLED' })]),
+    );
+    expect(auditoria.map((evento) => evento.action)).toEqual(
+      expect.arrayContaining([
+        'CLIENT_CREATED',
+        'CLIENT_UPDATED',
+        'CLIENT_DISABLED',
+        'CLIENT_SAP_ENVIRONMENT_CREATED',
+        'CLIENT_SAP_ENVIRONMENT_UPDATED',
+        'CLIENT_SAP_ENVIRONMENT_DISABLED',
+      ]),
+    );
+    expect(JSON.stringify(auditoria)).not.toContain(nombreCliente);
+  });
+
+  it('deniega a SUPPORT todos los endpoints de clientes incluso con sesión y CSRF', async () => {
+    const support = cookieSupport;
+    const clientId = idClientePrueba;
+    if (support === null || clientId === null) {
+      throw new Error('La prueba requiere las sesiones y el cliente sintético previos.');
+    }
+    const escritura = await headersDeEscritura(support);
+    const respuestas = await Promise.all([
+      exigirAplicacion().inject({
+        method: 'GET',
+        url: '/api/v1/admin/clients',
+        headers: { cookie: support },
+      }),
+      exigirAplicacion().inject({
+        method: 'POST',
+        url: '/api/v1/admin/clients',
+        headers: escritura,
+        payload: { nombre: `Denegado ${sufijo}` },
+      }),
+      exigirAplicacion().inject({
+        method: 'PATCH',
+        url: `/api/v1/admin/clients/${clientId}`,
+        headers: escritura,
+        payload: { estado: 'DISABLED' },
+      }),
+      exigirAplicacion().inject({
+        method: 'GET',
+        url: `/api/v1/admin/clients/${clientId}/sap-environments`,
+        headers: { cookie: support },
+      }),
+      exigirAplicacion().inject({
+        method: 'POST',
+        url: `/api/v1/admin/clients/${clientId}/sap-environments`,
+        headers: escritura,
+        payload: { codigo: 'DENIED', nombre: 'No autorizado' },
+      }),
+    ]);
+    const cliente = await exigirBasePrueba()
+      .select({ status: clients.status })
+      .from(clients)
+      .where(eq(clients.id, clientId));
+
+    expect(respuestas.map((respuesta) => respuesta.statusCode)).toEqual([403, 403, 403, 403, 403]);
+    expect(cliente[0]?.status).toBe('DISABLED');
+  });
 }
 
 /**
@@ -1104,6 +1269,6 @@ async function pruebaCancelarYReactivarInvitacion(): Promise<void> {
   expect(reenvioFallido.json()).toMatchObject({ code: 'SMTP_DELIVERY_FAILED' });
 }
 
-describe('rutas de administración de usuarios sobre PostgreSQL aislado', definirPruebasAdmin);
+describe('rutas de administración sobre PostgreSQL aislado', definirPruebasAdmin);
 beforeAll(prepararAdministracion);
 afterAll(cerrarAdministracion);

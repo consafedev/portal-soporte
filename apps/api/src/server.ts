@@ -16,6 +16,8 @@ import type { LimitadorIntentosAuth } from '../../../packages/core/src/auth/reco
 import type { ServicioRecuperacionAuth } from './auth/recovery-service.js';
 import { registrarRutasRecuperacion } from './routes/recovery-routes.js';
 import { extraerDiagnosticoBaseDatosSeguro } from './logging/safe-database-error.js';
+import type { ServicioClientesPortal } from './clients/client-management-service.js';
+import { registrarRutasAdminClientes } from './routes/admin-client-routes.js';
 
 const CAMPOS_SENSIBLES_LOG = [
   'req.headers.cookie',
@@ -49,6 +51,8 @@ export interface DependenciasServidorAuth {
   readonly recuperacion: ServicioRecuperacionAuth;
   /** Servicio opcional de administración registrado solo cuando el runtime lo configura. */
   readonly usuariosAdmin?: ServicioUsuariosAdmin;
+  /** Servicio opcional de clientes; si existe, sus rutas siguen siendo ADMIN-only en backend. */
+  readonly clientes?: ServicioClientesPortal;
   /** Generador opcional de IDs de solicitud para aislar trazas sintéticas de integración. */
   readonly generarIdSolicitud?: () => string;
 }
@@ -125,6 +129,15 @@ export async function crearServidorAuth(
       auditoria: dependencias.auditoria,
       reloj: dependencias.reloj,
       recuperacion: dependencias.recuperacion,
+    });
+  }
+  if (dependencias.clientes !== undefined) {
+    await registrarRutasAdminClientes(aplicacion, {
+      configuracion: dependencias.configuracion,
+      sesiones: dependencias.sesiones,
+      clientes: dependencias.clientes,
+      auditoria: dependencias.auditoria,
+      reloj: dependencias.reloj,
     });
   }
   await dependencias.autenticacion.preparar();

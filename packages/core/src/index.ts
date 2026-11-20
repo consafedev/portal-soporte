@@ -2,3 +2,4 @@
 export * from './auth/models.js';
 export * from './auth/ports.js';
 export * from './auth/policies.js';
+export * from './clients/ports.js';
