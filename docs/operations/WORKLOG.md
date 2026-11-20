@@ -1365,3 +1365,10 @@ eload, se reinició únicamente cloudflared-consafedev.service; procesos web, AP
 - **Corrección append-only:** la entrada anterior de 17:06 contiene un carácter BEL accidental en la referencia de `apple-design`; se conserva intacta y esta nota confirma la ruta correcta `.agents/skills/apple-design/SKILL.md`.
 - **Próximo paso:** mantener PS-004 en revisión hasta disponer de CI verde y revisión; continuar PS-005.1 tras cerrar el merge local y preparar revisión independiente. Definir la puerta de claves para PS-005.2 antes de conexiones. Sin push, merge a `main` ni despliegue.
 - **Estado:** PS-004 `EN_REVISION`; PS-005 `EN_CURSO`; RF-1 `NO INICIADO`.
+
+### [2026-11-20T17:58:01-06:00] PS-005.1 — CHECKPOINT DE INTEGRACIÓN LOCAL
+- **Agente/tarea/rama:** Codex · PS-005.1 · `codex/ps-005-clients-connections`.
+- **Commit local:** `02a558e` (`merge(core): PS-005 integrar PS-004 y catálogo SAP`), con padres `53c4c6898642104cb1963135c208361f85753545` y `dca2d244d68f9e8103f0268f7c57d7dd72785027`. Este commit solo integra las ramas de trabajo localmente; no se publicó ni fusionó a `main`.
+- **Verificación asociada:** suite unitaria 240/240, integración remota aislada 59/59, E2E 10/10, CLI de migración de prueba, lint, typecheck, build, secretos y gate de dependencias PASS; `format:check` estándar queda señalado por los 27 archivos base CRLF/LF descritos en la entrada anterior.
+- **Siguiente paso:** esperar resolución/revisión de PR #3; preparar revisión independiente y PR de PS-005.1 cuando el incremento esté separado y el estado CI sea verificable. No iniciar persistencia de credenciales/conectividad sin cerrar la puerta del proveedor de claves.
+- **Estado:** PS-004 `EN_REVISION`; PS-005 `EN_CURSO`; sin push, merge a `main` ni despliegue.
