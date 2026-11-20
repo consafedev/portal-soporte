@@ -38,6 +38,7 @@ export default defineConfig({
       url: 'http://127.0.0.1:3000/login',
       env: {
         API_INTERNAL_ORIGIN: 'http://127.0.0.1:4100',
+        PUBLIC_APP_ORIGIN: 'http://127.0.0.1:3000',
         NODE_ENV: 'development',
         DATABASE_URL: '',
         TEST_DATABASE_URL: '',

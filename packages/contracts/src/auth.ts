@@ -94,20 +94,41 @@ export const estadoInvitacionAltaSchema = Type.Union(
   { description: 'Resultado seguro de la entrega de la invitación administrativa.' },
 );
 
-/** Respuesta HTTP 201 que confirma el alta y comunica el estado real de la invitación. */
-export const adminCreateUserResponseSchema = Type.Object(
-  {
-    user: adminUserResponseSchema,
-    invitationStatus: estadoInvitacionAltaSchema,
-  },
+/** Respuesta HTTP 201 que distingue alta directa de alta mediante invitación. */
+export const adminCreateUserResponseSchema = Type.Union(
+  [
+    Type.Object(
+      {
+        user: adminUserResponseSchema,
+        invitationStatus: estadoInvitacionAltaSchema,
+      },
+      { additionalProperties: false },
+    ),
+    Type.Object(
+      {
+        user: adminUserResponseSchema,
+        credentialStatus: Type.Literal('SET_BY_ADMIN'),
+      },
+      { additionalProperties: false },
+    ),
+  ],
+  { description: 'Respuesta 201 sin contraseña, hash, enlace o token.' },
+);
+
+/** Tipo de respuesta administrativa de alta por invitación o credencial directa. */
+export type RespuestaAltaUsuarioAdmin = Static<typeof adminCreateUserResponseSchema>;
+
+/** Solicitud de restablecimiento directo de contraseña por ADMIN. */
+export const adminPasswordResetSchema = Type.Object(
+  { newPassword: Type.String({ minLength: 15, maxLength: 256 }) },
   {
     additionalProperties: false,
-    description: 'Respuesta 201 con la cuenta creada sin secretos y el resultado de su enlace.',
+    description: 'Nueva contraseña directa; nunca se devuelve en la respuesta.',
   },
 );
 
-/** Tipo de respuesta administrativa de alta y envío de invitación. */
-export type RespuestaAltaUsuarioAdmin = Static<typeof adminCreateUserResponseSchema>;
+/** Tipo de la contraseña nueva que ADMIN asigna para invalidar credenciales anteriores. */
+export type SolicitudResetContrasenaAdmin = Static<typeof adminPasswordResetSchema>;
 
 /** Lista explícita de DTOs permitidos en el listado administrativo de usuarios. */
 export const adminUserListResponseSchema = Type.Array(adminUserResponseSchema, {
@@ -241,7 +262,7 @@ export const csrfResponseSchema = Type.Object(
 /** Tipo de respuesta del endpoint CSRF. */
 export type RespuestaCsrf = Static<typeof csrfResponseSchema>;
 
-/** Solicitud para que ADMIN invite a una cuenta sin asignar una contraseña. */
+/** Solicitud para que ADMIN invite una cuenta o le asigne una credencial inicial. */
 export const adminCreateUserSchema = Type.Object(
   {
     username: Type.String({
@@ -253,10 +274,13 @@ export const adminCreateUserSchema = Type.Object(
     email: Type.String({ pattern: PATRON_CORREO, minLength: 3, maxLength: 254 }),
     displayName: Type.String({ minLength: 1, maxLength: 120 }),
     role: rolUsuarioSchema,
+    initialPassword: Type.Optional(
+      Type.String({ minLength: 15, maxLength: 256, description: 'Contraseña inicial directa.' }),
+    ),
   },
   {
     additionalProperties: false,
-    description: 'Alta administrativa; la cuenta queda pendiente de activación.',
+    description: 'Alta administrativa directa o, cuando correo está habilitado, por invitación.',
   },
 );
 

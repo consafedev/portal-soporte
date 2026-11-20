@@ -107,7 +107,7 @@ function definirPruebasDeInvariantes(): void {
   it('exige que la sesión pertenezca al actor y que la cuenta siga activa con rol ADMIN', async () => {
     const base = exigirBasePrueba();
     const repositorio = new PostgresAuthRepository(base);
-    const servicio = new ServicioUsuariosAdmin(repositorio, relojFijo);
+    const servicio = new ServicioUsuariosAdmin(repositorio, relojFijo, new Argon2PasswordHasher());
     const [idActor, destino] = idsAdministradores;
     const { sessionId } = await new ServicioSesion(repositorio, relojFijo).crear(idActor);
     const actor = { userId: idActor, sessionId, role: 'ADMIN' as const, requestId: 'membresia' };
@@ -136,7 +136,7 @@ function definirPruebasDeInvariantes(): void {
   it('deniega alta, edición, revocación y emisión con la sesión del actor vencida', async () => {
     const base = exigirBasePrueba();
     const repositorio = new PostgresAuthRepository(base);
-    const servicio = new ServicioUsuariosAdmin(repositorio, relojFijo);
+    const servicio = new ServicioUsuariosAdmin(repositorio, relojFijo, new Argon2PasswordHasher());
     const gestorSesiones = new ServicioSesion(repositorio, relojFijo);
     const { sessionId } = await gestorSesiones.crear(idsAdministradores[0]);
     await gestorSesiones.crear(idsAdministradores[0]);
@@ -206,7 +206,11 @@ function definirPruebasDeInvariantes(): void {
   it('revalida la sesión exacta tras serializar dos cambios de rol concurrentes', async () => {
     const base = exigirBasePrueba();
     const repositorio = new PostgresAuthRepository(base);
-    const administracion = new ServicioUsuariosAdmin(repositorio, relojFijo);
+    const administracion = new ServicioUsuariosAdmin(
+      repositorio,
+      relojFijo,
+      new Argon2PasswordHasher(),
+    );
     const sesiones = new ServicioSesion(repositorio, relojFijo);
     const [primera, segunda] = await Promise.all(
       idsAdministradores.map((id) => sesiones.crear(id)),
@@ -248,8 +252,16 @@ function definirPruebasDeInvariantes(): void {
   });
   it('serializa la democión de dos administradores y conserva uno activo', async () => {
     const base = exigirBasePrueba();
-    const servicioA = new ServicioUsuariosAdmin(new PostgresAuthRepository(base), relojFijo);
-    const servicioB = new ServicioUsuariosAdmin(new PostgresAuthRepository(base), relojFijo);
+    const servicioA = new ServicioUsuariosAdmin(
+      new PostgresAuthRepository(base),
+      relojFijo,
+      new Argon2PasswordHasher(),
+    );
+    const servicioB = new ServicioUsuariosAdmin(
+      new PostgresAuthRepository(base),
+      relojFijo,
+      new Argon2PasswordHasher(),
+    );
     const sesiones = new ServicioSesion(new PostgresAuthRepository(base), relojFijo);
     const sesionA = await sesiones.crear(idsAdministradores[0]);
     const sesionB = await sesiones.crear(idsAdministradores[1]);

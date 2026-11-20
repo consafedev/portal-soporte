@@ -11,6 +11,7 @@ import type {
   SolicitudCambioCorreoAdmin,
   SolicitudFinalizacionToken,
   SolicitudModificacionUsuarioAdmin,
+  SolicitudResetContrasenaAdmin,
   SolicitudRecuperacion,
   SolicitudTokenCorreo,
 } from '@portal-soporte/contracts/auth';
@@ -32,6 +33,7 @@ const MENSAJES_API_AUTH: Readonly<Record<string, string>> = {
   AUTH_REQUIRED: 'Tu sesión terminó. Inicia sesión de nuevo.',
   COMMON_PASSWORD: 'La contraseña es demasiado común o predecible.',
   CURRENT_PASSWORD_INVALID: 'La contraseña actual no es válida.',
+  EMAIL_DELIVERY_DISABLED: 'La entrega por correo está deshabilitada; contacta a administración.',
   EMAIL_ALREADY_VERIFIED: 'El correo ya está verificado.',
   EMAIL_TAKEN: 'Ese correo no está disponible para esta cuenta.',
   EMAIL_UNCHANGED: 'El correo nuevo debe ser distinto del actual.',
@@ -245,6 +247,17 @@ export function restablecerAccesoAdmin(id: string): Promise<RespuestaRecuperacio
     `/api/v1/admin/users/${encodeURIComponent(id)}/reset`,
     undefined,
     recoveryAcceptedResponseSchema,
+  );
+}
+
+/** Asigna una contraseña nueva por petición protegida y no interpreta ni conserva su respuesta. */
+export function restablecerContrasenaAdmin(
+  id: string,
+  solicitud: SolicitudResetContrasenaAdmin,
+): Promise<void> {
+  return enviarJsonSinRespuesta(
+    `/api/v1/admin/users/${encodeURIComponent(id)}/password`,
+    solicitud,
   );
 }
 

@@ -145,6 +145,7 @@ async function prepararRutasAuth(): Promise<void> {
     repositorio,
     hasheador,
     correo: { async enviar() {} },
+    correoHabilitado: true,
     limitador,
     auditoria: repositorio,
     sesiones: sesionesAuth,

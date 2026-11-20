@@ -4,11 +4,13 @@ import {
   recoveryRequestSchema,
   type SolicitudAltaUsuarioAdmin,
   type SolicitudModificacionUsuarioAdmin,
+  type SolicitudResetContrasenaAdmin,
 } from '../../../../packages/contracts/src/auth.js';
 import {
   normalizarCorreo,
   normalizarUsuario,
   esNombreUsuarioValido,
+  validarNuevaContrasena,
 } from '../../../../packages/core/src/auth/policies.js';
 import type {
   ActorSesionAdmin,
@@ -18,7 +20,7 @@ import type {
 } from '../../../../packages/core/src/auth/admin-ports.js';
 import { ErrorRepositorioUsuariosAdmin } from '../../../../packages/core/src/auth/admin-ports.js';
 import type { RespuestaUsuarioAdmin } from '../../../../packages/core/src/auth/models.js';
-import type { RelojAuth } from '../../../../packages/core/src/auth/ports.js';
+import type { HasheadorContrasena, RelojAuth } from '../../../../packages/core/src/auth/ports.js';
 
 export type {
   EntradaBootstrapAdminPersistida,
@@ -45,10 +47,11 @@ export class ErrorUsuarioAdmin extends Error {
 
 /** Administra cuentas del portal sin conceder autoridad a los datos del cliente. */
 export class ServicioUsuariosAdmin {
-  /** Construye el caso de uso con un repositorio transaccional y reloj sustituible. */
+  /** Construye el caso de uso con persistencia transaccional, reloj y hash seguro. */
   public constructor(
     private readonly repositorio: RepositorioUsuariosAdmin,
     private readonly reloj: RelojAuth,
+    private readonly hasheador: HasheadorContrasena,
   ) {}
 
   /** Lista DTOs administrativos acotados; nunca obtiene hashes o secretos. */
@@ -56,7 +59,7 @@ export class ServicioUsuariosAdmin {
     return this.repositorio.listarUsuarios();
   }
 
-  /** Crea una cuenta pendiente sin asignar contraseña ni marcar correo verificado. */
+  /** Crea una invitación pendiente o una cuenta directa con hash Argon2id. */
   public async crear(
     solicitud: SolicitudAltaUsuarioAdmin,
     actor: ActorUsuarioAdmin,
@@ -74,6 +77,17 @@ export class ServicioUsuariosAdmin {
       throw new ErrorUsuarioAdmin('INVALID_DISPLAY_NAME', 400);
     }
 
+    let passwordHash: string | null = null;
+    let status: 'ACTIVE' | 'PENDING_ACTIVATION' = 'PENDING_ACTIVATION';
+    if (solicitud.initialPassword !== undefined) {
+      const validacion = validarNuevaContrasena(solicitud.initialPassword);
+      if (!validacion.valida) {
+        throw new ErrorUsuarioAdmin(validacion.codigo, 400);
+      }
+      passwordHash = await this.hasheador.hash(solicitud.initialPassword);
+      status = 'ACTIVE';
+    }
+
     const ahora = this.reloj.ahora();
     const entrada: EntradaUsuarioAdminPersistida = {
       id: randomUUID(),
@@ -83,9 +97,9 @@ export class ServicioUsuariosAdmin {
       email,
       emailNormalized: email,
       emailVerifiedAt: null,
-      passwordHash: null,
+      passwordHash,
       role: solicitud.role,
-      status: 'PENDING_ACTIVATION',
+      status,
       createdAt: ahora,
       updatedAt: ahora,
     };
@@ -176,6 +190,29 @@ export class ServicioUsuariosAdmin {
       }
 
       return cantidad;
+    } catch (error) {
+      throw traducirErrorRepositorio(error);
+    }
+  }
+
+  /** Restablece la contraseña desde ADMIN, audita y revoca todas las sesiones objetivo. */
+  public async restablecerContrasena(
+    idUsuario: string,
+    solicitud: SolicitudResetContrasenaAdmin,
+    actor: ActorUsuarioAdmin,
+  ): Promise<void> {
+    const validacion = validarNuevaContrasena(solicitud.newPassword);
+    if (!validacion.valida) throw new ErrorUsuarioAdmin(validacion.codigo, 400);
+    const passwordHash = await this.hasheador.hash(solicitud.newPassword);
+    const actualizadaEn = this.reloj.ahora();
+    try {
+      await this.repositorio.restablecerContrasenaAdmin(
+        idUsuario,
+        passwordHash,
+        actualizadaEn,
+        this.crearEvento(actor, 'ADMIN_USER_PASSWORD_RESET', idUsuario, {}),
+        actor.sessionId,
+      );
     } catch (error) {
       throw traducirErrorRepositorio(error);
     }

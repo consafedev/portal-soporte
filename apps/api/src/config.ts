@@ -76,17 +76,15 @@ export function cargarConfiguracionAuth(
   };
 }
 
-/** Carga SMTP opcional en local y obligatorio en producción, sin exponer valores sensibles. */
+/** Carga SMTP opcional en cualquier entorno, sin exponer valores sensibles. */
 export function cargarConfiguracionSmtpAuth(
   variables: NodeJS.ProcessEnv = process.env,
 ): ConfiguracionSmtpAuth | null {
-  const entorno = resolverEntorno(variables['NODE_ENV']);
+  resolverEntorno(variables['NODE_ENV']);
   const host = variables['SMTP_HOST'];
   if (host === undefined || host.length === 0) {
-    if (entorno === 'production' || hayConfiguracionSmtpParcial(variables)) {
-      throw new Error(
-        'SMTP_HOST y la configuración de transporte SMTP requerida no están completas.',
-      );
+    if (hayConfiguracionSmtpParcial(variables)) {
+      throw new Error('La configuración SMTP está incompleta.');
     }
 
     return null;

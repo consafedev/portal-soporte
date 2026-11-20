@@ -163,7 +163,7 @@ function obtenerFiltroAuditoriaE2e(): SQL {
 async function iniciarSesionEnNavegador(
   pagina: Page,
   credenciales: CredencialesE2e,
-  rutaDestino: '/settings/users' | '/profile/password',
+  rutaDestino: '/dashboard' | '/settings/users' | '/profile/password',
   tituloDestino: 'Usuarios' | 'Mi perfil',
 ): Promise<void> {
   identificadoresLoginE2e.add(credenciales.username.toLowerCase());
@@ -171,6 +171,12 @@ async function iniciarSesionEnNavegador(
   await pagina.getByLabel('Nombre de usuario').fill(credenciales.username);
   await pagina.getByLabel('Contraseña').fill(credenciales.password);
   await pagina.getByRole('button', { name: 'Continuar' }).click();
+  await expect(pagina).toHaveURL(/\/dashboard$/u);
+  await expect(pagina.getByRole('heading', { name: 'Inicio' })).toBeVisible();
+  if (rutaDestino !== '/dashboard') {
+    const etiquetaEnlace = rutaDestino === '/settings/users' ? 'Usuarios' : 'Mi contraseña';
+    await pagina.getByRole('link', { name: etiquetaEnlace, exact: true }).click();
+  }
   await expect(pagina).toHaveURL(new RegExp(`${rutaDestino.replaceAll('/', '\\/')}$`, 'u'));
   await expect(pagina.getByRole('heading', { name: tituloDestino, exact: true })).toBeVisible();
 }
@@ -323,6 +329,9 @@ test('SUPPORT cambia su contraseña y el otro navegador queda revocado', async (
 
     await paginaParalela.getByLabel('Contraseña').fill(nuevaContrasena);
     await paginaParalela.getByRole('button', { name: 'Continuar' }).click();
+    await expect(paginaParalela).toHaveURL(/\/dashboard$/u);
+    await expect(paginaParalela.getByRole('heading', { name: 'Inicio' })).toBeVisible();
+    await paginaParalela.getByRole('link', { name: 'Mi contraseña', exact: true }).click();
     await expect(paginaParalela).toHaveURL(/\/profile\/password$/u);
     await expect(paginaParalela.getByRole('heading', { name: 'Mi perfil' })).toBeVisible();
   } finally {

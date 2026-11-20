@@ -55,12 +55,12 @@ export function crearClienteBaseDatosAuth(entorno: NodeJS.ProcessEnv = process.e
 }
 
 /**
- * Resuelve TLS verificable para bases remotas y lo desactiva solo en loopback local.
+ * Resuelve TLS verificable para bases remotas y confía en el aislamiento del loopback local.
  *
  * @param modo - Entorno que determina si la conexión local puede evitar TLS.
  * @param hostname - Host ya validado que aparece en la URL de PostgreSQL.
  * @param certificadoCa - Certificado CA PEM opcional para una autoridad privada confiable.
- * @returns Opciones TLS con validación de certificado/hostname o `false` en loopback local.
+ * @returns Opciones TLS con validación de certificado/hostname o `false` en loopback.
  * @throws Error si la CA configurada no tiene delimitadores PEM.
  */
 export function resolverConfiguracionTlsBaseDatos(
@@ -68,7 +68,7 @@ export function resolverConfiguracionTlsBaseDatos(
   hostname: string,
   certificadoCa?: string,
 ): false | OpcionesTls {
-  const requiereTls = modo === 'production' || !esLoopback(hostname);
+  const requiereTls = !esLoopback(hostname);
   if (!requiereTls) {
     return false;
   }

@@ -79,15 +79,15 @@ async function verificarPostgresAislado(): Promise<void> {
     SELECT
       (SELECT count(*)::int FROM information_schema.tables WHERE table_schema = 'portal' AND table_name <> '__drizzle_migrations') AS "tablasPortal",
       to_regclass('portal.__drizzle_migrations') IS NOT NULL AS "ledgerPortal",
-      (SELECT count(*)::int FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('audit_events', 'auth_invariants', 'auth_throttle_windows', 'recovery_tokens', 'sessions', 'users')) AS "tablasAuthPublicas"
+      (SELECT count(*)::int FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('audit_events', 'auth_invariants', 'auth_throttle_windows', 'recovery_tokens', 'sessions', 'user_mfa_factors', 'user_mfa_recovery_codes', 'users')) AS "tablasAuthPublicas"
   `;
   if (
-    estadoMigrado?.tablasPortal !== 6 ||
+    estadoMigrado?.tablasPortal !== 8 ||
     !estadoMigrado.ledgerPortal ||
     estadoMigrado.tablasAuthPublicas !== 0
   ) {
     throw new Error(
-      'La configuración global no aisló las seis tablas y el ledger de autenticación en portal.',
+      'La configuración global no aisló las ocho tablas y el ledger de autenticación en portal.',
     );
   }
 }
@@ -254,6 +254,8 @@ async function pruebaMigracionLimpia(): Promise<void> {
       'auth_throttle_windows',
       'recovery_tokens',
       'sessions',
+      'user_mfa_factors',
+      'user_mfa_recovery_codes',
       'users',
     ].sort(),
   );
@@ -274,7 +276,7 @@ async function pruebaMigracionRepetible(): Promise<void> {
     SELECT count(*)::int AS cantidad FROM portal.auth_invariants
   `;
 
-  expect(versiones[0]?.cantidad).toBe(4);
+  expect(versiones[0]?.cantidad).toBe(5);
   expect(invariantes[0]?.cantidad).toBe(1);
 }
 

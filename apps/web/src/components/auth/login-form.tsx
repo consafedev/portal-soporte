@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, type ChangeEvent, type FormEvent, type JSX } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ErrorApiAuth, iniciarSesion } from '../../lib/auth-api';
 
@@ -28,8 +27,8 @@ export function FormularioInicioSesion(): JSX.Element {
     setCargando(true);
     setError(null);
     try {
-      const usuario = await iniciarSesion(username, password);
-      router.replace(usuario.role === 'ADMIN' ? '/settings/users' : '/profile/password');
+      await iniciarSesion(username, password);
+      router.replace('/dashboard');
     } catch (rechazo: unknown) {
       if (
         rechazo instanceof ErrorApiAuth &&
@@ -118,9 +117,10 @@ export function FormularioInicioSesion(): JSX.Element {
             </button>
           </form>
           <div className="pie-panel">
-            <Link className="enlace" href="/recover-access">
-              ¿Necesitas recuperar el acceso?
-            </Link>
+            <p className="texto-secundario">
+              ¿Problemas para entrar? Contacta con una persona administradora para restablecer tu
+              acceso.
+            </p>
           </div>
         </section>
         <p className="nota-privacidad">

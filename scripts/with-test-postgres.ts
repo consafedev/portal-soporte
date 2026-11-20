@@ -224,7 +224,7 @@ async function ejecutarPruebasIntegracion(): Promise<void> {
         const estadoInicial = await verificarEstadoEsquemaBasePrueba(
           configuracion.TEST_MIGRATOR_DATABASE_URL,
         );
-        if (estadoInicial === 'vacio') {
+        if (estadoInicial !== 'migrado') {
           await ejecutarMigracionCompilada();
           await verificarDestinoRemotoPrueba(
             configuracion.TEST_DATABASE_URL,
@@ -324,7 +324,7 @@ async function verificarDestinoRemotoPrueba(urlApp: string, urlMigrador: string)
 }
 
 /** Impide reportar PASS si la base remota no quedó en su estado migrado y vacío. */
-function exigirEstadoMigrado(estado: 'vacio' | 'migrado'): void {
+function exigirEstadoMigrado(estado: 'vacio' | 'migrado' | 'migracion-pendiente'): void {
   if (estado !== 'migrado') {
     throw new Error('La ejecución remota no dejó aplicadas las migraciones esperadas.');
   }

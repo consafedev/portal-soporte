@@ -111,6 +111,10 @@ async function probarAccesoSoporteYCambioPropio({ page }: { page: Page }): Promi
   );
 
   await page.getByRole('button', { name: 'Continuar' }).click();
+  await expect(page).toHaveURL(/\/dashboard$/u);
+  await expect(page.getByRole('heading', { name: 'Inicio' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Usuarios' })).toHaveCount(0);
+  await page.getByRole('link', { name: 'Mi contraseña', exact: true }).click();
   await expect(page).toHaveURL(/\/profile\/password$/u);
   await expect(page.getByRole('heading', { name: 'Mi perfil' })).toBeVisible();
   await page.getByLabel('Contraseña actual').first().fill(contrasenaPrueba);
@@ -150,26 +154,69 @@ async function probarDenegacionVisualSoporte({ page }: { page: Page }): Promise<
   expect(seConsultaronUsuarios).toBe(false);
 }
 
+/** Valida navegación, foco, contraste y ajuste móvil del dashboard con identidad sintética. */
+async function probarDashboardAccesibleYResponsivo({ page }: { page: Page }): Promise<void> {
+  await page.route('**/api/v1/auth/login', crearManejadorJson(200, { user: usuarioSoporte }));
+  await page.route('**/api/v1/auth/me', crearManejadorJson(200, { user: usuarioSoporte }));
+  await page.goto('/login');
+  await page.getByLabel('Nombre de usuario').fill(usuarioSoporte.username);
+  await page.getByLabel('Contraseña').fill(randomBytes(24).toString('base64url'));
+  await page.getByRole('button', { name: 'Continuar' }).click();
+
+  await expect(page).toHaveURL(/\/dashboard$/u);
+  await expect(page.getByRole('heading', { name: 'Inicio' })).toBeVisible();
+  const nav = page.getByRole('navigation', { name: 'Principal' });
+  await expect(nav.getByRole('link', { name: 'Inicio' })).toHaveAttribute('aria-current', 'page');
+  await expect(nav.getByRole('link', { name: 'Usuarios' })).toHaveCount(0);
+  await page.getByRole('link', { name: 'e-Billia, Portal de Soporte' }).focus();
+  await page.keyboard.press('Tab');
+  await expect(nav.getByRole('link', { name: 'Inicio', exact: true })).toBeFocused();
+
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.screenshot({
+    path: '.superpowers/sdd/2026-11-19-deploy-002-publicacion/dashboard-ps004-sintetico.png',
+  });
+
+  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+  await page.setViewportSize({ width: 360, height: 780 });
+  const estadoVisual = await page.evaluate(() => ({
+    anchoSinDesborde: document.documentElement.scrollWidth <= window.innerWidth,
+    fondoOscuro:
+      getComputedStyle(document.documentElement).getPropertyValue('--fondo').trim() === '#0f141c',
+    movimientoReducido: matchMedia('(prefers-reduced-motion: reduce)').matches,
+    transicionAcceso: getComputedStyle(document.querySelector('.enlace-acceso') as Element)
+      .transitionDuration,
+  }));
+
+  expect(estadoVisual.anchoSinDesborde).toBe(true);
+  expect(estadoVisual.fondoOscuro).toBe(true);
+  expect(estadoVisual.movimientoReducido).toBe(true);
+  expect(estadoVisual.transicionAcceso).not.toBe('120ms');
+}
+
 /**
- * Comprueba que ADMIN pueda invitar y ver una cuenta mediante contratos de respuesta válidos.
+ * Comprueba que ADMIN cree una cuenta directa sin SMTP ni filtrar la contraseña inicial.
  *
  * @param contexto - Fixture aislado de Playwright.
  * @param contexto.page - Página que presenta una sesión ADMIN sintética.
- * @returns Promesa resuelta cuando la invitación aparece en la lista administrativa.
+ * @returns Promesa resuelta tras verificar el alta, la respuesta segura y el estado activo.
  */
-async function probarInvitacionAdministrativa({ page }: { page: Page }): Promise<void> {
+async function probarAltaDirectaAdministrativa({ page }: { page: Page }): Promise<void> {
   await interceptarCsrf(page);
   const correoPrueba = `usuario-${randomUUID()}@example.test`;
+  const contrasenaInicial = randomBytes(24).toString('base64url');
   const nuevaCuenta: RespuestaUsuarioAdmin = {
     ...usuarioSoporte,
     id: '018f1000-0000-7000-8000-000000000013',
     email: correoPrueba,
     emailVerifiedAt: null,
-    status: 'PENDING_ACTIVATION',
-    hasPassword: false,
+    status: 'ACTIVE',
+    hasPassword: true,
     createdAt: new Date().toISOString(),
   };
   let cuentas: readonly RespuestaUsuarioAdmin[] = [];
+  let seEnvioClaveInicial = false;
 
   /** Devuelve el listado actual sin incluir credenciales ni tokens. */
   async function listarUsuarios(ruta: Route): Promise<void> {
@@ -180,12 +227,14 @@ async function probarInvitacionAdministrativa({ page }: { page: Page }): Promise
     });
   }
 
-  /** Crea una cuenta sintética y comunica el fallo de entrega sin perder el alta. */
-  async function crearInvitacion(ruta: Route): Promise<void> {
+  /** Crea una cuenta sintética y responde solo con el estado público de su credencial. */
+  async function crearCuenta(ruta: Route): Promise<void> {
+    const cuerpo = ruta.request().postDataJSON() as { initialPassword?: string };
+    seEnvioClaveInicial = cuerpo.initialPassword === contrasenaInicial;
     cuentas = [nuevaCuenta];
     const resultado: RespuestaAltaUsuarioAdmin = {
       user: nuevaCuenta,
-      invitationStatus: 'DELIVERY_FAILED',
+      credentialStatus: 'SET_BY_ADMIN',
     };
     await ruta.fulfill({
       status: 201,
@@ -197,7 +246,7 @@ async function probarInvitacionAdministrativa({ page }: { page: Page }): Promise
   /** Enruta las lecturas y escrituras de usuarios contra un estado efímero en memoria. */
   async function administrarUsuarios(ruta: Route): Promise<void> {
     if (ruta.request().method() === 'POST') {
-      await crearInvitacion(ruta);
+      await crearCuenta(ruta);
       return;
     }
 
@@ -211,21 +260,27 @@ async function probarInvitacionAdministrativa({ page }: { page: Page }): Promise
   await page.getByLabel('Nombre de usuario').fill(usuarioAdmin.username);
   await page.getByLabel('Contraseña').fill(randomBytes(24).toString('base64url'));
   await page.getByRole('button', { name: 'Continuar' }).click();
+  await expect(page).toHaveURL(/\/dashboard$/u);
+  await expect(page.getByRole('heading', { name: 'Inicio' })).toBeVisible();
+  await page.getByRole('link', { name: 'Usuarios' }).click();
   await expect(page).toHaveURL(/\/settings\/users$/u);
   await expect(page.getByRole('heading', { name: 'Usuarios' })).toBeVisible();
 
   await page.getByLabel('Nombre de usuario').fill(nuevaCuenta.username);
   await page.getByLabel('Nombre visible').fill(nuevaCuenta.displayName);
-  await page.getByLabel('Correo').fill(correoPrueba);
-  await page.getByRole('button', { name: 'Crear invitación' }).click();
+  await page.getByLabel('Correo de referencia').fill(correoPrueba);
+  await page.getByLabel('Contraseña inicial', { exact: true }).fill(contrasenaInicial);
+  await page.getByLabel('Confirmar contraseña inicial', { exact: true }).fill(contrasenaInicial);
+  await page.getByRole('button', { name: 'Crear cuenta' }).click();
 
   await expect(page.getByRole('heading', { name: nuevaCuenta.displayName })).toBeVisible();
   await expect(
-    page.getByRole('region', { name: 'Cuentas' }).getByText('Pendiente', { exact: true }).first(),
+    page.getByRole('region', { name: 'Cuentas' }).getByText('Activa', { exact: true }).first(),
   ).toBeVisible();
-  await expect(page.locator('p.aviso-error')).toContainText(
-    'La cuenta se creó, pero no se pudo entregar el enlace.',
+  await expect(page.getByRole('status')).toHaveText(
+    'Cuenta creada. Comparte la contraseña inicial por un canal seguro.',
   );
+  expect(seEnvioClaveInicial).toBe(true);
 }
 
 /** Comprueba que una cuenta deshabilitada con contraseña se reactive como cuenta activa. */
@@ -282,6 +337,8 @@ async function probarReactivacionCuentaConCredencial({ page }: { page: Page }): 
   await page.getByLabel('Nombre de usuario').fill(usuarioAdmin.username);
   await page.getByLabel('Contraseña').fill(randomBytes(24).toString('base64url'));
   await page.getByRole('button', { name: 'Continuar' }).click();
+  await expect(page).toHaveURL(/\/dashboard$/u);
+  await page.getByRole('link', { name: 'Usuarios' }).click();
   await expect(page).toHaveURL(/\/settings\/users$/u);
   const tarjeta = page.locator('.tarjeta-usuario').filter({
     has: page.getByRole('heading', { name: cuentaDeshabilitada.displayName }),
@@ -297,45 +354,50 @@ async function probarReactivacionCuentaConCredencial({ page }: { page: Page }): 
 }
 
 /**
- * Comprueba respuesta genérica de recuperación y consumo de enlace sin dejar token en URL.
+ * Comprueba que los flujos dependientes del correo indiquen su indisponibilidad sin llamar al API.
  *
  * @param contexto - Fixture aislado de Playwright.
- * @param contexto.page - Página que recibe solo valores aleatorios de prueba.
- * @returns Promesa resuelta tras verificar limpieza del fragmento y POST de un solo uso.
+ * @param contexto.page - Página que navega por las pantallas de autenticación.
+ * @returns Promesa resuelta tras verificar que los formularios de correo están desactivados.
  */
-async function probarRecuperacionSinFiltrarToken({ page }: { page: Page }): Promise<void> {
-  const tokenTemporal = randomBytes(32).toString('base64url');
-  const correoSintetico = `recuperacion-${randomUUID()}@example.test`;
-  const contrasenaTemporal = randomBytes(24).toString('base64url');
-  let tokenEnviadoEnCuerpo = false;
-  await interceptarCsrf(page);
-  await page.route('**/api/v1/auth/recovery/request', crearManejadorJson(202, { accepted: true }));
+async function probarRecuperacionPorCorreoDeshabilitada({ page }: { page: Page }): Promise<void> {
+  let seSolicitoRecuperacion = false;
 
-  /** Detecta el token únicamente dentro del cuerpo POST, sin imprimir el valor. */
-  async function consumirRecuperacion(ruta: Route): Promise<void> {
-    tokenEnviadoEnCuerpo = (ruta.request().postData() ?? '').includes(tokenTemporal);
-    await ruta.fulfill({ status: 204 });
+  /**
+   * Registra una petición inesperada sin inspeccionar ni imprimir su cuerpo.
+   *
+   * @param ruta - Solicitud interceptada por Playwright.
+   * @returns Promesa resuelta tras responder con el estado deshabilitado.
+   */
+  async function registrarSolicitudRecuperacion(ruta: Route): Promise<void> {
+    seSolicitoRecuperacion = true;
+    await ruta.fulfill({ status: 503, contentType: 'application/json', body: '{}' });
   }
 
+  await page.route('**/api/v1/auth/recovery/request', registrarSolicitudRecuperacion);
+  await page.goto('/login');
+  await expect(page.getByRole('link', { name: '¿Necesitas recuperar el acceso?' })).toHaveCount(0);
+  await expect(
+    page.getByText('Contacta con una persona administradora para restablecer tu acceso.'),
+  ).toBeVisible();
+
   await page.goto('/recover-access');
-  await page.getByLabel('Correo de tu cuenta').fill(correoSintetico);
-  await page.getByRole('button', { name: 'Enviar instrucciones' }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Recuperación por correo deshabilitada' }),
+  ).toBeVisible();
   await expect(page.getByRole('status')).toContainText(
-    'Si el correo pertenece a una cuenta activa y verificada, recibirás instrucciones',
+    'Contacta con una persona administradora para restablecer tu acceso.',
   );
+  await expect(page.getByLabel('Correo de tu cuenta')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Enviar instrucciones' })).toHaveCount(0);
+  expect(seSolicitoRecuperacion).toBe(false);
 
-  await page.route('**/api/v1/auth/recovery/complete', consumirRecuperacion);
-  const fragmento = new URLSearchParams({ flow: 'recovery', token: tokenTemporal });
-  await page.goto(`/recover-access/complete#${fragmento.toString()}`);
-  await expect(page).toHaveURL('http://127.0.0.1:3000/recover-access/complete');
-  expect(!page.url().includes(tokenTemporal)).toBe(true);
-  await page.getByLabel('Contraseña nueva', { exact: true }).fill(contrasenaTemporal);
-  await page.getByLabel('Confirma la contraseña').fill(contrasenaTemporal);
-  await page.getByRole('button', { name: 'Guardar contraseña' }).click();
-
-  await expect(page.getByRole('status')).toContainText('La contraseña se actualizó.');
-  await expect(page.locator('.auth-panel').getByRole('alert')).toHaveCount(0);
-  expect(tokenEnviadoEnCuerpo).toBe(true);
+  await page.goto('/recover-access/complete#flow=recovery&token=token-sintetico-no-valido');
+  await expect(
+    page.getByRole('heading', { name: 'Recuperación por correo deshabilitada' }),
+  ).toBeVisible();
+  await expect(page.getByLabel('Contraseña nueva')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Guardar contraseña' })).toHaveCount(0);
 }
 
 test(
@@ -343,12 +405,16 @@ test(
   probarAccesoSoporteYCambioPropio,
 );
 test('SUPPORT no carga ni muestra la administración de usuarios', probarDenegacionVisualSoporte);
-test('ADMIN invita una cuenta y la ve en su lista', probarInvitacionAdministrativa);
+test(
+  'dashboard conserva teclado, contraste, movimiento reducido y formato móvil',
+  probarDashboardAccesibleYResponsivo,
+);
+test('ADMIN crea una cuenta directa y la ve en su lista', probarAltaDirectaAdministrativa);
 test(
   'ADMIN reactiva cuentas con contraseña sin reenviarlas como invitación',
   probarReactivacionCuentaConCredencial,
 );
 test(
-  'recuperación no enumera correos y envía el token solo en POST',
-  probarRecuperacionSinFiltrarToken,
+  'recuperación por correo queda deshabilitada sin SMTP',
+  probarRecuperacionPorCorreoDeshabilitada,
 );

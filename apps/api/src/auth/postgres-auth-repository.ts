@@ -659,6 +659,39 @@ export class PostgresAuthRepository
     );
   }
 
+  /** Sustituye la credencial, invalida sesiones y audita el reset ADMIN en una transacción. */
+  public async restablecerContrasenaAdmin(
+    idUsuario: string,
+    passwordHash: string,
+    actualizadaEn: Date,
+    evento: EventoAuditoriaAuth,
+    sessionId: string,
+  ): Promise<void> {
+    await this.database.transaction(
+      async (transaccion) => {
+        await bloquearInvarianteAdministradores(transaccion);
+        await exigirSesionAdmin(transaccion, evento.actorUserId, sessionId, idUsuario);
+        const [cuenta] = await transaccion
+          .select({ status: users.status, passwordHash: users.passwordHash })
+          .from(users)
+          .where(eq(users.id, idUsuario))
+          .limit(1);
+        if (cuenta === undefined) throw new ErrorRepositorioUsuariosAdmin('USER_NOT_FOUND');
+        if (cuenta.status === 'PENDING_ACTIVATION' || cuenta.passwordHash === null) {
+          throw new ErrorRepositorioUsuariosAdmin('ACTIVATION_REQUIRED');
+        }
+
+        await transaccion
+          .update(users)
+          .set({ passwordHash, updatedAt: actualizadaEn })
+          .where(eq(users.id, idUsuario));
+        await revocarCredencialesPendientes(transaccion, idUsuario, actualizadaEn);
+        await transaccion.insert(auditEvents).values(crearFilaAuditoria(evento));
+      },
+      { isolationLevel: 'read committed' },
+    );
+  }
+
   /** Crea el primer ADMIN solo tras bloquear y recontar la membresía en PostgreSQL. */
   public async crearAdministradorInicial(
     entrada: EntradaBootstrapAdminPersistida,

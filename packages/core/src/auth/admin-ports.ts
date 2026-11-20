@@ -11,7 +11,7 @@ export interface ActorSesionAdmin {
   readonly role: 'ADMIN';
 }
 
-/** Campos persistidos de un usuario invitado antes de recibir contraseña propia. */
+/** Campos persistidos de un usuario nuevo creado por ADMIN, pendiente o directo. */
 export interface EntradaUsuarioAdminPersistida {
   /** UUID generado en el servidor para la nueva cuenta. */
   readonly id: string;
@@ -25,14 +25,14 @@ export interface EntradaUsuarioAdminPersistida {
   readonly email: string;
   /** Correo normalizado para búsquedas y unicidad. */
   readonly emailNormalized: string;
-  /** Fecha nula hasta que la persona consuma el enlace de activación. */
-  readonly emailVerifiedAt: null;
-  /** Nulo mientras la cuenta invitada aún no establece contraseña. */
-  readonly passwordHash: null;
+  /** Fecha nula hasta que un flujo independiente verifique el correo. */
+  readonly emailVerifiedAt: Date | null;
+  /** Hash Argon2id para alta directa o nulo para una invitación pendiente. */
+  readonly passwordHash: string | null;
   /** Rol asignado por el administrador. */
   readonly role: RolUsuario;
-  /** Las cuentas invitadas no pueden iniciar sesión antes de activarse. */
-  readonly status: 'PENDING_ACTIVATION';
+  /** Las altas directas están activas; las invitaciones esperan entrega verificable. */
+  readonly status: 'ACTIVE' | 'PENDING_ACTIVATION';
   /** Instante UTC de creación. */
   readonly createdAt: Date;
   /** Instante UTC de última modificación. */
@@ -137,4 +137,12 @@ export interface RepositorioUsuariosAdmin extends RepositorioBootstrapAdmin {
     evento: EventoAuditoriaAuth,
     sessionId: string,
   ): Promise<number | null>;
+  /** Actualiza hash, revoca todas las sesiones y audita el reset bajo validación de actor. */
+  restablecerContrasenaAdmin(
+    idUsuario: string,
+    passwordHash: string,
+    actualizadaEn: Date,
+    evento: EventoAuditoriaAuth,
+    sessionId: string,
+  ): Promise<void>;
 }

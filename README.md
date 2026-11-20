@@ -2,7 +2,7 @@
 
 Portal interno modular de soporte operativo. Sustituye la necesidad habitual de compartir accesos directos a MySQL Workbench y PuTTY mediante acciones específicas, auditables y autorizadas desde una interfaz web.
 
-> **Estado:** línea base documental v0.2 (funcionalidad aprobada por propietario); implementación y despliegue **no ejecutados** con esta entrega. PS-001 es diagnóstico read-only.
+> **Estado:** PS-003 está fusionado en `main` y el portal se instaló de forma privada en Debian; DEPLOY-001 permanece **EN_REVISION**. No se ha publicado ni declarado productivo. La línea base funcional y sus límites siguen sujetos a las decisiones aprobadas y al tablero.
 
 ## Alcance inicial
 

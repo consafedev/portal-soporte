@@ -4,7 +4,9 @@ import {
   index,
   integer,
   jsonb,
+  numeric,
   pgSchema,
+  primaryKey,
   smallint,
   text,
   timestamp,
@@ -54,6 +56,20 @@ type ColumnasAuditoriaRestricciones = {
 
 type ColumnasInvariantesRestricciones = {
   id: AnyPgColumn;
+};
+
+type ColumnasMfaFactorRestricciones = {
+  enabledAt: AnyPgColumn;
+  lastTotpCounter: AnyPgColumn;
+  seedCiphertext: AnyPgColumn;
+  seedNonce: AnyPgColumn;
+  seedTag: AnyPgColumn;
+};
+
+type ColumnasMfaRecoveryRestricciones = {
+  consumedAt: AnyPgColumn;
+  digest: AnyPgColumn;
+  userId: AnyPgColumn;
 };
 
 /** Define índices únicos y restricciones de coherencia para la identidad del portal. */
@@ -153,6 +169,50 @@ function definirRestriccionesInvariantes(columnas: ColumnasInvariantesRestriccio
   };
 }
 
+/** Impone el formato Base64URL canónico y la coherencia de enrolamiento y contador TOTP. */
+function definirRestriccionesMfaFactor(columnas: ColumnasMfaFactorRestricciones) {
+  return {
+    nonceBase64Url: check(
+      'user_mfa_factors_nonce_check',
+      sql`${columnas.seedNonce} ~ '^[A-Za-z0-9_-]{16}$'`,
+    ),
+    ciphertextBase64Url: check(
+      'user_mfa_factors_ciphertext_check',
+      sql`${columnas.seedCiphertext} ~ '^[A-Za-z0-9_-]{26}[AEIMQUYcgkosw048]$'`,
+    ),
+    tagBase64Url: check(
+      'user_mfa_factors_tag_check',
+      sql`${columnas.seedTag} ~ '^[A-Za-z0-9_-]{21}[AEIMQUYcgkosw048]$'`,
+    ),
+    contadorEnRango: check(
+      'user_mfa_factors_counter_check',
+      sql`${columnas.lastTotpCounter} IS NULL OR (${columnas.lastTotpCounter} >= 0 AND ${columnas.lastTotpCounter} <= 18446744073709551615)`,
+    ),
+    estadoDeEnrolamientoCoherente: check(
+      'user_mfa_factors_enabled_counter_check',
+      sql`(${columnas.enabledAt} IS NULL AND ${columnas.lastTotpCounter} IS NULL) OR (${columnas.enabledAt} IS NOT NULL AND ${columnas.lastTotpCounter} IS NOT NULL)`,
+    ),
+  };
+}
+
+/** Impone digest hexadecimal y unicidad del código de recuperación por usuario. */
+function definirRestriccionesMfaRecovery(columnas: ColumnasMfaRecoveryRestricciones) {
+  return {
+    digestHexadecimal: check(
+      'user_mfa_recovery_codes_digest_check',
+      sql`${columnas.digest} ~ '^[a-f0-9]{64}$'`,
+    ),
+    propietarioDigestUnicos: primaryKey({
+      name: 'user_mfa_recovery_codes_pk',
+      columns: [columnas.userId, columnas.digest],
+    }),
+    propietarioConsumidoIdx: index('user_mfa_recovery_codes_user_consumed_idx').on(
+      columnas.userId,
+      columnas.consumedAt,
+    ),
+  };
+}
+
 /** Devuelve la clave referencial de usuario para sesiones. */
 function referenciarUsuarioDeSesion(): AnyPgColumn {
   return users.id;
@@ -191,6 +251,54 @@ export const users = esquemaPortal.table(
     updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   },
   definirRestriccionesUsuario,
+);
+
+/** Persiste una sola semilla cifrada por usuario y el estado verificable de su enrolamiento TOTP. */
+export const userMfaFactors = esquemaPortal.table(
+  'user_mfa_factors',
+  {
+    /** Cuenta propietaria; la restricción impide borrar una cuenta con factor MFA. */
+    userId: uuid('user_id')
+      .primaryKey()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    /** Nonce GCM de doce bytes codificado en Base64URL canónico sin padding. */
+    seedNonce: varchar('seed_nonce', { length: 16 }).notNull(),
+    /** Semilla TOTP cifrada de veinte bytes codificada en Base64URL canónico sin padding. */
+    seedCiphertext: varchar('seed_ciphertext', { length: 27 }).notNull(),
+    /** Etiqueta GCM de dieciséis bytes codificada en Base64URL canónico sin padding. */
+    seedTag: varchar('seed_tag', { length: 22 }).notNull(),
+    /** Instante en que se validó el primer factor; null indica enrolamiento pendiente. */
+    enabledAt: timestamp('enabled_at', { withTimezone: true, mode: 'date' }),
+    /** Último contador TOTP aceptado, exacto y no negativo, para impedir su reutilización. */
+    lastTotpCounter: numeric('last_totp_counter', {
+      precision: 20,
+      scale: 0,
+      mode: 'bigint',
+    }),
+    /** Fecha UTC de creación del factor. */
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    /** Fecha UTC de la última actualización del enrolamiento o contador. */
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  definirRestriccionesMfaFactor,
+);
+
+/** Persiste únicamente digests de códigos de recuperación y su estado de consumo. */
+export const userMfaRecoveryCodes = esquemaPortal.table(
+  'user_mfa_recovery_codes',
+  {
+    /** Factor propietario; la referencia restringida conserva integridad ante borrados. */
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => userMfaFactors.userId, { onDelete: 'restrict' }),
+    /** Digest SHA-256 hexadecimal en minúsculas; nunca se almacena el código original. */
+    digest: varchar('digest', { length: 64 }).notNull(),
+    /** Fecha UTC de creación del digest. */
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    /** Fecha UTC de consumo; null indica que el código aún es utilizable. */
+    consumedAt: timestamp('consumed_at', { withTimezone: true, mode: 'date' }),
+  },
+  definirRestriccionesMfaRecovery,
 );
 
 /** Persiste sesiones opacas con expiración inactiva y absoluta comprobables. */

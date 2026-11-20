@@ -66,13 +66,14 @@ export async function crearRuntimeAuth(
       repositorio,
       hasheador,
       correo,
+      correoHabilitado: smtp !== null,
       limitador,
       auditoria: repositorio,
       sesiones,
       reloj,
       publicAppOrigin: configuracion.publicAppOrigin,
     });
-    const usuariosAdmin = new ServicioUsuariosAdmin(repositorio, reloj);
+    const usuariosAdmin = new ServicioUsuariosAdmin(repositorio, reloj, hasheador);
     const generarIdSolicitud = crearGeneradorIdSolicitudPrueba(variables);
     const servidor = await crearServidorAuth({
       configuracion,

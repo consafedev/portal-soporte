@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState, type JSX, type ReactNode } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import type { RespuestaUsuarioPublico, RolUsuario } from '@portal-soporte/contracts/auth';
 import { cerrarSesion, ErrorApiAuth, obtenerSesion } from '../../lib/auth-api';
 
@@ -27,6 +27,7 @@ export function MarcoAutenticado({
   rolRequerido,
 }: PropiedadesMarcoAutenticado): JSX.Element {
   const router = useRouter();
+  const rutaActual = usePathname();
   const [usuario, setUsuario] = useState<RespuestaUsuarioPublico | null>(null);
   const [cargando, setCargando] = useState(true);
   const [errorSalida, setErrorSalida] = useState<string | null>(null);
@@ -123,29 +124,57 @@ export function MarcoAutenticado({
 
   return (
     <div className="area-autenticada">
-      <header className="barra-superior">
+      <aside className="barra-lateral" aria-label="Navegación del Portal de Soporte">
         <Link
           className="marca marca-enlace"
-          href="/profile/password"
+          href="/dashboard"
           aria-label="e-Billia, Portal de Soporte"
         >
           <span>e-Billia</span>
           <span className="marca-descripcion">Portal de Soporte</span>
         </Link>
-        <nav className="navegacion" aria-label="Navegación de cuenta">
-          <Link href="/profile/password">Mi contraseña</Link>
-          {usuario.role === 'ADMIN' ? <Link href="/settings/users">Usuarios</Link> : null}
+        <div className="identidad-lateral" aria-label="Cuenta activa">
+          <span className="avatar-lateral" aria-hidden="true">
+            {usuario.displayName.slice(0, 1).toUpperCase()}
+          </span>
+          <span className="identidad-detalle">
+            <strong>{usuario.displayName}</strong>
+            <span>{usuario.role === 'ADMIN' ? 'Administración' : 'Soporte'}</span>
+          </span>
+        </div>
+        <nav className="navegacion" aria-label="Principal">
+          <Link href="/dashboard" aria-current={rutaActual === '/dashboard' ? 'page' : undefined}>
+            Inicio
+          </Link>
+          {usuario.role === 'ADMIN' ? (
+            <Link
+              href="/settings/users"
+              aria-current={rutaActual === '/settings/users' ? 'page' : undefined}
+            >
+              Usuarios
+            </Link>
+          ) : null}
+        </nav>
+        <div className="navegacion-inferior">
+          <Link
+            href="/profile/password"
+            aria-current={rutaActual.startsWith('/profile/') ? 'page' : undefined}
+          >
+            Mi contraseña
+          </Link>
           <button className="boton-secundario boton-salir" type="button" onClick={manejarSalida}>
             Cerrar sesión
           </button>
-        </nav>
-      </header>
-      {errorSalida !== null ? (
-        <p className="aviso-error aviso-global" role="alert">
-          {errorSalida}
-        </p>
-      ) : null}
-      <main className="contenido-autenticado">{children}</main>
+        </div>
+      </aside>
+      <div className="panel-aplicacion">
+        {errorSalida !== null ? (
+          <p className="aviso-error aviso-global" role="alert">
+            {errorSalida}
+          </p>
+        ) : null}
+        <main className="contenido-autenticado">{children}</main>
+      </div>
     </div>
   );
 }
