@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { expect, test, type Page, type Route } from '@playwright/test';
+import { expect, test, type Page, type Response, type Route } from '@playwright/test';
 import type {
   RespuestaAltaUsuarioAdmin,
   RespuestaUsuarioAdmin,
@@ -22,6 +22,19 @@ const usuarioAdmin: RespuestaUsuarioPublico = {
 
 /** Responde una ruta del API simulado con JSON sintético y estado explícito. */
 type ManejadorJsonE2e = (ruta: Route) => Promise<void>;
+
+/**
+ * Reconoce la respuesta de la escritura de tema personal que inicia el dashboard.
+ *
+ * @param respuesta - Respuesta de red observada por Playwright.
+ * @returns `true` solo para el PATCH del contrato de preferencias de usuario.
+ */
+function esRespuestaActualizacionTema(respuesta: Response): boolean {
+  return (
+    respuesta.request().method() === 'PATCH' &&
+    new URL(respuesta.url()).pathname === '/api/v1/me/preferences'
+  );
+}
 
 /**
  * Crea un manejador Playwright para respuestas públicas JSON sin datos reales.
@@ -235,7 +248,9 @@ async function probarDashboardAccesibleYResponsivo({ page }: { page: Page }): Pr
 
   const botonTemaOscuro = page.getByRole('button', { name: 'Cambiar a tema oscuro' });
   await expect(botonTemaOscuro).toHaveAttribute('aria-pressed', 'false');
+  const respuestaTemaGuardado = page.waitForResponse(esRespuestaActualizacionTema);
   await botonTemaOscuro.click();
+  await respuestaTemaGuardado;
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   await expect(page.getByRole('button', { name: 'Cambiar a tema claro' })).toHaveAttribute(
     'aria-pressed',
