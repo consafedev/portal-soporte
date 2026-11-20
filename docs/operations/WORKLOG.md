@@ -1120,3 +1120,11 @@
 - **UI/UX:** no aplica a esta corrección de esquema y pruebas; no se modificaron pantallas. La evidencia Apple Design existente del dashboard PS-004 se conserva.
 - **Próximo paso:** revisar/publicar el branch y abrir PR para CI; no fusionar. Preparar la activación coordinada de runtime HTTPS con UFW/ingress una vez aprobados los cambios compartidos. Mantener DEPLOY-002, PS-003 y PS-004 en revisión.
 - **Estado:** DEPLOY-002 EN_CURSO; PS-003 y PS-004 EN_REVISION; PS-005 y RF-1 no iniciados.
+
+### [2026-11-20T00:58:42-06:00] DEPLOY-002 — PR #2 PUBLICADO PARA REVISIÓN
+- **Agente/tarea/rama/commit:** Codex · DEPLOY-002 · `codex/deploy-002-ps004` · branch publicada; PR inicial head `64b4d714934ef7f314b99f2dcbc1668c526be340`; corrección AP-013 `509fbe9553e693ab8119128aded7357b6e8f810c`.
+- **Publicación:** push normal sin `--force`; GitHub autenticó mediante Git Credential Manager, sin uso del PAT pegado en conversaciones. PR [#2](https://github.com/consafedev/portal-soporte/pull/2), base `main`, creado. GitHub reportó `open`, `mergeable=true`; el job `Calidad y seguridad básica` estaba `in_progress` al consultar el head inicial. No se fusionó ni se publicó release.
+- **Contenido:** se incluyeron pruebas, arquitectura Next.js/Fastify/PostgreSQL, journal de cuatro migraciones, AP-013, restauración aislada, rollback y riesgos operativos en la descripción del PR. Esta entrada y la actualización del tablero provocarán una nueva corrida de Actions al publicarse el commit documental.
+- **Seguridad:** al publicar, `git status` estaba limpio; `origin/main` coincidía con `c86af469bdb8f9d10a940ecce29d0e64110a1a57`, y la rama estaba tres commits lineales por delante, ninguno pendiente detrás. `.env.infra-001.local` continúa ignorado por `.gitignore`; `check:secrets` pasó. No se enviaron credenciales en PR ni se reutilizó el token expuesto en chat.
+- **Próximo paso:** publicar esta actualización append-only del tablero/bitácora y revisar Actions en el head resultante. No fusionar; mantener cambios de Cloudflare/DNS/UFW detrás de autorización separada.
+- **Estado:** DEPLOY-002 EN_CURSO; PR #2 EN_REVISION; PS-003 y PS-004 EN_REVISION.
