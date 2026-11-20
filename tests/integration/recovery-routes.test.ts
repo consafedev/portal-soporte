@@ -223,6 +223,7 @@ async function prepararFlujosRecuperacion(): Promise<void> {
     repositorio: repositorioActual,
     hasheador,
     correo: correoPrueba,
+    correoHabilitado: true,
     limitador,
     auditoria,
     sesiones: sesionesAuth,
@@ -249,7 +250,7 @@ async function prepararFlujosRecuperacion(): Promise<void> {
     reloj,
     limitador,
     recuperacion: servicioCredenciales,
-    usuariosAdmin: new ServicioUsuariosAdmin(repositorioActual, reloj),
+    usuariosAdmin: new ServicioUsuariosAdmin(repositorioActual, reloj, hasheador),
     generarIdSolicitud: identificadoresSolicitud.generar,
   });
   cookieSupportPassword = await iniciarSesion(`support_password_${sufijo}`);

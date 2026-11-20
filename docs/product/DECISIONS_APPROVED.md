@@ -2,6 +2,8 @@
 
 **Fecha:** 2026-11-17  · **Estado:** APROBADAS POR EL PROPIETARIO EN CONVERSACIÓN  · **Alcance:** producto y contratos de RF-1.
 
+**Addendum:** AP-013 aprobado por el propietario el 2026-11-19; aclaración expresa del 2026-11-19: no implementar MFA para `ADMIN` ni `SUPPORT`.
+
 Este documento **sí cierra decisiones de negocio**. No declara verificadas las tablas ni las conexiones de los clientes. Los datos reales deberán comprobarse antes de implementar escrituras y, en especial, antes de activar la función en producción. Ver `OPEN_DECISIONS.md`.
 
 | ID | Decisión aprobada | Consecuencia para desarrollo |
@@ -18,6 +20,7 @@ Este documento **sí cierra decisiones de negocio**. No declara verificadas las 
 | AP-010 | Toda escritura contará con vista previa, autorización, confirmación, transacción, auditoría y SELECT posterior. | Sin SQL libre ni SSH libre para soporte. |
 | AP-011 | **Clean Code y comentarios en español** para cada función, método, clase, componente, hook y contrato. | JSDoc/TSDoc de propósito, entradas, salidas y efectos relevantes; ver `docs/standards/CLEAN_CODE.md`. |
 | AP-012 | Aplicación modular, con módulos ya desplegados habilitables por administrador sin redeploy. | Permisos en backend por rol, cliente y capacidad; módulos nuevos requieren release controlada. |
+| AP-013 | El propietario decide no implementar MFA para `ADMIN` ni `SUPPORT`; el acceso de ambos roles será por nombre de usuario y contraseña. | No crear ni presentar enrolamiento, desafío o segundo factor. Se mantienen Argon2id, rate limiting, sesiones seguras, CSRF, autorización backend y auditoría. El propietario acepta el riesgo de autenticación de un factor; solo una nueva decisión expresa podrá reabrir MFA. |
 
 ## Regla de resolución contextual (contrato funcional cerrado)
 
@@ -45,4 +48,4 @@ Estos códigos son estables para API, frontend, tests y auditoría. No exponer S
 ## Alcance del cierre
 
 - **Cerrado:** reglas de negocio anteriores, rol/visibilidad, dos estados, separación de módulos, stack y norma de código.
-- **Pendiente de evidencia, NO de inventar requisitos:** DDL/collation/índices/triggers reales, compatibilidad `NULL`/defaults, prueba de transacción en MySQL de laboratorio, configuración exacta de conexión por cliente, políticas operativas de hosting y retención, MFA. No habilitar escrituras productivas antes de superar las puertas de `OPEN_DECISIONS.md`.
+- **Pendiente de evidencia, NO de inventar requisitos:** DDL/collation/índices/triggers reales, compatibilidad `NULL`/defaults, prueba de transacción en MySQL de laboratorio, configuración exacta de conexión por cliente y políticas operativas de hosting y retención. MFA queda fuera del release password-only por AP-013. No habilitar escrituras productivas antes de superar las puertas de `OPEN_DECISIONS.md`.

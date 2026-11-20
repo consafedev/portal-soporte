@@ -19,14 +19,14 @@ function definirPruebasDeConfiguracionAuth(): void {
   it('valida y conserva proxies CIDR explícitos', pruebaListaProxies);
   it('limita CIDR de desarrollo a rangos enteros de loopback', pruebaRangosLoopbackProxy);
   it('rechaza orígenes públicos/inseguros o cabeceras proxy ambiguas', pruebaRechazaConfigInsegura);
-  it('exige configuración SMTP segura en producción y permite ausencia local', pruebaSmtp);
+  it('permite SMTP apagado sin flujos de correo y permite ausencia local', pruebaSmtp);
   it('decodifica solo una clave HMAC canónica de 32 bytes', pruebaClaveHmac);
 }
 
 /** Comprueba transporte SMTP TLS y que una configuración parcial no pase inadvertida. */
 function pruebaSmtp(): void {
   expect(cargarConfiguracionSmtpAuth({ NODE_ENV: 'development' })).toBeNull();
-  expect(() => cargarConfiguracionSmtpAuth({ NODE_ENV: 'production' })).toThrow();
+  expect(cargarConfiguracionSmtpAuth({ NODE_ENV: 'production' })).toBeNull();
   expect(() =>
     cargarConfiguracionSmtpAuth({
       NODE_ENV: 'development',

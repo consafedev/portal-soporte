@@ -90,7 +90,7 @@ async function pruebaLedgerDentroDePortal(): Promise<void> {
   expect(secuenciasLedger.rows).toEqual([{ sequence_name: '__drizzle_migrations_id_seq' }]);
 }
 
-/** Comprueba la presencia de las seis entidades persistentes del diseño. */
+/** Comprueba la presencia de las seis entidades persistentes del núcleo de autenticación. */
 async function pruebaTablasDeIdentidad(): Promise<void> {
   const nombresEsperados = [
     getTableName(users),

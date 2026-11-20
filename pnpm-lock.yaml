@@ -300,6 +300,9 @@ importers:
       '@fastify/cookie':
         specifier: 11.1.5
         version: 11.1.5
+      '@sinclair/typebox':
+        specifier: 0.34.52
+        version: 0.34.52
       argon2:
         specifier: 0.45.1
         version: 0.45.1

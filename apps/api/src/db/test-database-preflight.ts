@@ -1,5 +1,6 @@
 import postgres from 'postgres';
-import { existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readMigrationFiles } from 'drizzle-orm/migrator';
@@ -511,18 +512,17 @@ export function validarMismaInstanciaBasePrueba(
  * Acepta solo una base vacía o el esquema migrado exacto sin filas sintéticas residuales.
  * @param estado Inventario de catálogos y conteos obtenidos en modo read-only.
  * @param hashesEsperados Hashes de migración calculados desde los archivos versionados.
- * @returns Estado vacío o migrado que habilita la siguiente etapa del runner.
+ * @returns Estado vacío o migrado con las migraciones versionadas del Portal.
  * @throws Error si existe un objeto, restricción, hash o dato no autorizado.
  */
 export function validarEstadoEsquemaBasePrueba(
   estado: EstadoEsquemaBasePrueba,
-  hashesEsperados: readonly string[],
+  hashesEsperados: readonly (readonly string[])[],
 ): 'vacio' | 'migrado' {
   const esquemas = [...estado.esquemas].sort();
   const tablas = [...estado.tablas].sort(compararObjetosEsquema);
   const secuencias = [...estado.secuencias].sort(compararObjetosEsquema);
-  const hashes = [...estado.hashesMigraciones].sort();
-  const hashesLocales = [...hashesEsperados].sort();
+  const hashes = [...estado.hashesMigraciones];
   const relaciones = [...estado.relaciones].sort(compararObjetosEsquema);
   const restricciones = [...estado.restricciones].sort(compararRestricciones);
   const restriccionesEsperadas = [...restriccionesMigradasEsperadas].sort(compararRestricciones);
@@ -566,23 +566,45 @@ export function validarEstadoEsquemaBasePrueba(
     tipo: 'BASE TABLE',
   }));
   const secuenciasEsperadas = [{ esquema: 'portal', nombre: '__drizzle_migrations_id_seq' }];
-  const estadoMigrado =
-    esquemas.length === 2 &&
-    esquemas[0] === 'portal' &&
-    esquemas[1] === 'public' &&
-    JSON.stringify(tablas) === JSON.stringify(tablasEsperadas.sort(compararObjetosEsquema)) &&
-    JSON.stringify(secuencias) ===
-      JSON.stringify(secuenciasEsperadas.sort(compararObjetosEsquema)) &&
+  const esquemasPortalEsperados =
+    esquemas.length === 2 && esquemas[0] === 'portal' && esquemas[1] === 'public';
+  const tablasActualesEsperadas =
+    JSON.stringify(tablas) === JSON.stringify([...tablasEsperadas].sort(compararObjetosEsquema));
+  const relacionesActualesEsperadas =
     JSON.stringify(relaciones) ===
-      JSON.stringify([...relacionesMigradasEsperadas].sort(compararObjetosEsquema)) &&
-    JSON.stringify(restricciones) === JSON.stringify(restriccionesEsperadas) &&
-    JSON.stringify(hashes) === JSON.stringify(hashesLocales) &&
+    JSON.stringify([...relacionesMigradasEsperadas].sort(compararObjetosEsquema));
+  const restriccionesActualesEsperadas =
+    JSON.stringify(restricciones) === JSON.stringify(restriccionesEsperadas);
+  const secuenciasEsperadasExactas =
+    JSON.stringify(secuencias) ===
+    JSON.stringify([...secuenciasEsperadas].sort(compararObjetosEsquema));
+  const ledgerActualEsperado = coincidenHashesDeMigracion(hashes, hashesEsperados);
+  const estadoMigrado =
+    esquemasPortalEsperados &&
+    tablasActualesEsperadas &&
+    secuenciasEsperadasExactas &&
+    relacionesActualesEsperadas &&
+    restriccionesActualesEsperadas &&
+    ledgerActualEsperado &&
     objetosAdicionalesLimpios &&
     filasSinDatos &&
     estado.filas.invariantes === 1;
 
   if (!estadoMigrado) {
-    throw new Error('La base de pruebas contiene objetos o datos fuera del estado aprobado.');
+    const diferencias = [
+      ...(esquemasPortalEsperados ? [] : ['esquemas']),
+      ...(tablasActualesEsperadas ? [] : ['tablas']),
+      ...(secuenciasEsperadasExactas ? [] : ['secuencias']),
+      ...(relacionesActualesEsperadas ? [] : ['índices y relaciones']),
+      ...(restriccionesActualesEsperadas ? [] : ['restricciones']),
+      ...(ledgerActualEsperado ? [] : ['historial de migraciones']),
+      ...(objetosAdicionalesLimpios ? [] : ['objetos adicionales']),
+      ...(filasSinDatos ? [] : ['filas de autenticación']),
+      ...(estado.filas.invariantes === 1 || estado.filas.invariantes === 0 ? [] : ['invariantes']),
+    ];
+    throw new Error(
+      `La base de pruebas contiene objetos o datos fuera del estado aprobado (${diferencias.join(', ')}).`,
+    );
   }
 
   return 'migrado';
@@ -705,10 +727,7 @@ export async function verificarEstadoEsquemaBasePrueba(url: string): Promise<'va
       JOIN pg_namespace AS namespace ON namespace.oid = extension.extnamespace
       ORDER BY extension.extname, namespace.nspname
     `;
-    const hashesEsperados = readMigrationFiles({
-      migrationsFolder: resolverCarpetaMigracionesPrueba(),
-      migrationsSchema: 'portal',
-    }).map((migracion) => migracion.hash);
+    const hashesEsperados = resolverVariantesHashesMigracionPrueba();
 
     let hashesMigraciones: string[] = [];
     let filas = {
@@ -738,10 +757,9 @@ export async function verificarEstadoEsquemaBasePrueba(url: string): Promise<'va
           (SELECT count(*)::integer FROM portal.auth_invariants) AS invariantes
       `;
       if (conteos !== undefined) {
-        filas = conteos;
+        filas = { ...filas, ...conteos };
       }
     }
-
     return validarEstadoEsquemaBasePrueba(
       {
         esquemas: esquemas.map((fila) => fila.esquema),
@@ -763,8 +781,26 @@ export async function verificarEstadoEsquemaBasePrueba(url: string): Promise<'va
       },
       hashesEsperados,
     );
-  } catch {
-    throw new Error('No fue posible verificar el estado de la base de pruebas.');
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.startsWith(
+        'La base de pruebas contiene objetos o datos fuera del estado aprobado',
+      )
+    ) {
+      throw error;
+    }
+
+    const codigoSql =
+      error !== null &&
+      typeof error === 'object' &&
+      'code' in error &&
+      typeof error.code === 'string' &&
+      /^[0-9A-Z]{5}$/.test(error.code)
+        ? error.code
+        : undefined;
+    const diagnostico = codigoSql === undefined ? '' : ` (SQLSTATE ${codigoSql})`;
+    throw new Error(`No fue posible verificar el estado de la base de pruebas.${diagnostico}`);
   } finally {
     try {
       await sql.end({ timeout: 5 });
@@ -817,6 +853,60 @@ function compararRestricciones(
     izquierda.nombre.localeCompare(derecha.nombre) ||
     izquierda.tipo.localeCompare(derecha.tipo)
   );
+}
+
+/**
+ * Compara el ledger remoto con las variantes locales permitidas en orden de migración.
+ * @param hashesRegistrados Hashes del ledger PostgreSQL ordenados por id.
+ * @param variantesEsperadas Hashes permitidos para cada migración versionada.
+ * @returns `true` cuando cantidad, orden y contenido coinciden.
+ */
+function coincidenHashesDeMigracion(
+  hashesRegistrados: readonly string[],
+  variantesEsperadas: readonly (readonly string[])[],
+): boolean {
+  return (
+    hashesRegistrados.length === variantesEsperadas.length &&
+    hashesRegistrados.every((hash, indice) => variantesEsperadas[indice]?.includes(hash) === true)
+  );
+}
+
+/**
+ * Calcula los hashes Drizzle válidos para archivos con finales de línea Windows o Unix.
+ * @returns Variantes permitidas por migración, conservando el orden del journal.
+ * @throws Error si el journal o sus archivos no coinciden.
+ * @effects Lee únicamente los archivos locales versionados de migración.
+ */
+function resolverVariantesHashesMigracionPrueba(): readonly (readonly string[])[] {
+  const carpeta = resolverCarpetaMigracionesPrueba();
+  const diario = JSON.parse(readFileSync(resolve(carpeta, 'meta', '_journal.json'), 'utf8')) as {
+    readonly entries: readonly { readonly tag: string }[];
+  };
+  const migraciones = readMigrationFiles({ migrationsFolder: carpeta, migrationsSchema: 'portal' });
+  if (diario.entries.length !== migraciones.length) {
+    throw new Error('El diario y los archivos de migración no coinciden.');
+  }
+
+  return diario.entries.map((entrada, indice) => {
+    if (!/^[A-Za-z0-9_-]+$/.test(entrada.tag)) {
+      throw new Error('El diario de migraciones contiene una etiqueta no válida.');
+    }
+    const contenidoOriginal = readFileSync(resolve(carpeta, `${entrada.tag}.sql`), 'utf8');
+    const contenidoUnix = contenidoOriginal.split('\r\n').join('\n');
+    const contenidoWindows = contenidoUnix.split('\n').join('\r\n');
+    const hashMigracion = migraciones[indice]?.hash;
+    if (hashMigracion === undefined) {
+      throw new Error('No se pudo calcular el hash de una migración.');
+    }
+
+    return [
+      ...new Set([
+        hashMigracion,
+        createHash('sha256').update(contenidoUnix).digest('hex'),
+        createHash('sha256').update(contenidoWindows).digest('hex'),
+      ]),
+    ];
+  });
 }
 
 /**

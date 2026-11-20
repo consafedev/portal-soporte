@@ -38,6 +38,7 @@ const sufijo = randomUUID().slice(0, 8);
 const usuarioAdmin = `admin_${sufijo}`;
 const usuarioSupport = `support_${sufijo}`;
 const contrasenaSintetica = 'Clave admin sintética Unicode ñ';
+let contrasenaActualSupport = contrasenaSintetica;
 const origen = 'http://127.0.0.1:3000';
 const ahora = new Date();
 // La cabecera Expires de la cookie expresa solo segundos completos.
@@ -149,7 +150,10 @@ async function obtenerCsrf(): Promise<{ token: string; cookie: string }> {
 }
 
 /** Inicia una sesión de integración con la cuenta sintética identificada. */
-async function iniciarSesion(username: string): Promise<string> {
+async function iniciarSesion(
+  username: string,
+  password: string = contrasenaSintetica,
+): Promise<string> {
   const csrf = await obtenerCsrf();
   const respuesta = await exigirAplicacion().inject({
     method: 'POST',
@@ -160,7 +164,7 @@ async function iniciarSesion(username: string): Promise<string> {
       'x-csrf-token': csrf.token,
       cookie: csrf.cookie,
     },
-    payload: { username, password: contrasenaSintetica },
+    payload: { username, password },
   });
   expect(respuesta.statusCode).toBe(200);
 
@@ -202,7 +206,7 @@ async function prepararAdministracion(): Promise<void> {
     repositorio,
     reloj,
   );
-  const usuariosAdmin = new ServicioUsuariosAdmin(repositorio, reloj);
+  const usuariosAdmin = new ServicioUsuariosAdmin(repositorio, reloj, hasheador);
   const limitador = new LimitadorIntentosPostgres(exigirBasePrueba(), Buffer.alloc(32, 29));
   limitadorAdmin = limitador;
   const recuperacion = new ServicioRecuperacionAuth({
@@ -217,6 +221,7 @@ async function prepararAdministracion(): Promise<void> {
         mensajesAdmin.push(mensaje);
       },
     },
+    correoHabilitado: true,
     limitador,
     auditoria: repositorio,
     sesiones: sesionesAuth,
@@ -266,14 +271,8 @@ async function cerrarAdministracion(): Promise<void> {
       ),
     );
   await migrador.delete(users).where(inArray(users.id, usuariosTemporales));
-  await migrador
-    .delete(authThrottleWindows)
-    .where(
-      and(
-        eq(authThrottleWindows.windowStartedAt, ahora),
-        inArray(authThrottleWindows.scope, ['RECOVERY_ACCOUNT', 'RECOVERY_NETWORK']),
-      ),
-    );
+  // El preflight exige que la base aislada empiece sin filas de throttling; se retira el conjunto sintético propio.
+  await migrador.delete(authThrottleWindows);
   await migrador.$client.end({ timeout: 5 });
   await exigirBasePrueba().$client.end({ timeout: 5 });
 }
@@ -443,6 +442,56 @@ function definirPruebasAdmin(): void {
     expect(fila).toHaveLength(1);
     expect(fila[0]?.passwordHash).toBeNull();
   });
+
+  it('permite a ADMIN crear cuenta directa sin SMTP y persiste solo hash Argon2id', async () => {
+    const cookie = cookieAdmin;
+    if (cookie === null) {
+      throw new Error('La prueba requiere la sesión ADMIN preparada.');
+    }
+    const contrasenaInicialSintetica = 'Clave directa sintética para pruebas 2032';
+    const mensajesPrevios = mensajesAdmin.length;
+    const respuesta = await exigirAplicacion().inject({
+      method: 'POST',
+      url: '/api/v1/admin/users',
+      headers: await headersDeEscritura(cookie),
+      payload: {
+        username: `direct_${sufijo}`,
+        email: `direct_${sufijo}@example.test`,
+        displayName: 'Cuenta directa',
+        role: 'SUPPORT',
+        initialPassword: contrasenaInicialSintetica,
+      },
+    });
+    const resultado = respuesta.json<{
+      user: { id: string; status: string; hasPassword: boolean; emailVerifiedAt: null };
+      credentialStatus: string;
+    }>();
+    const [fila] = await exigirBasePrueba()
+      .select({ passwordHash: users.passwordHash, status: users.status })
+      .from(users)
+      .where(eq(users.id, resultado.user.id));
+    idsUsuariosCreados.push(resultado.user.id);
+    const hasheador = new Argon2PasswordHasher();
+
+    expect(respuesta.statusCode).toBe(201);
+    expect(resultado).toMatchObject({
+      user: {
+        username: `direct_${sufijo}`,
+        status: 'ACTIVE',
+        hasPassword: true,
+        emailVerifiedAt: null,
+      },
+      credentialStatus: 'SET_BY_ADMIN',
+    });
+    expect(respuesta.body).not.toContain(contrasenaInicialSintetica);
+    expect(respuesta.body).not.toContain('passwordHash');
+    expect(fila?.status).toBe('ACTIVE');
+    expect(fila?.passwordHash).toMatch(/^\$argon2id\$/u);
+    expect(await hasheador.verificar(fila?.passwordHash ?? '', contrasenaInicialSintetica)).toBe(
+      true,
+    );
+    expect(mensajesAdmin).toHaveLength(mensajesPrevios);
+  });
   it(
     'expone el estado de invitación y nunca presenta como enviado un correo limitado o fallido',
     pruebaEstadosDeEntregaAlta,
@@ -483,6 +532,64 @@ function definirPruebasAdmin(): void {
       purpose: 'PASSWORD_RECOVERY',
     });
     expect(filas.some((fila) => fila.tokenHash === token)).toBe(false);
+  });
+
+  it('restablece contraseña directamente, audita y revoca las sesiones previas', async () => {
+    const cookieAdminActual = cookieAdmin;
+    const cookieSupportAnterior = cookieSupport;
+    if (cookieAdminActual === null || cookieSupportAnterior === null) {
+      throw new Error('La prueba requiere sesiones sintéticas de ADMIN y SUPPORT.');
+    }
+    const passwordNuevaSintetica = 'Contraseña reiniciada sintética 2041';
+    const denegada = await exigirAplicacion().inject({
+      method: 'POST',
+      url: `/api/v1/admin/users/${idSupport}/password`,
+      headers: await headersDeEscritura(cookieSupportAnterior),
+      payload: { newPassword: passwordNuevaSintetica },
+    });
+    const [hashAnterior] = await exigirBasePrueba()
+      .select({ passwordHash: users.passwordHash })
+      .from(users)
+      .where(eq(users.id, idSupport));
+    const respuesta = await exigirAplicacion().inject({
+      method: 'POST',
+      url: `/api/v1/admin/users/${idSupport}/password`,
+      headers: await headersDeEscritura(cookieAdminActual),
+      payload: { newPassword: passwordNuevaSintetica },
+    });
+    const [hashActual] = await exigirBasePrueba()
+      .select({ passwordHash: users.passwordHash })
+      .from(users)
+      .where(eq(users.id, idSupport));
+    const eventos = await exigirBaseMigrador()
+      .select({ action: auditEvents.action, metadata: auditEvents.metadata })
+      .from(auditEvents)
+      .where(eq(auditEvents.targetUserId, idSupport));
+    const sesionAnterior = await exigirAplicacion().inject({
+      method: 'GET',
+      url: '/api/v1/auth/me',
+      headers: { cookie: cookieSupportAnterior },
+    });
+    const nuevoLogin = await iniciarSesion(usuarioSupport, passwordNuevaSintetica);
+
+    expect(denegada.statusCode).toBe(403);
+    expect(respuesta.statusCode).toBe(204);
+    expect(respuesta.body).toBe('');
+    expect(respuesta.body).not.toContain(passwordNuevaSintetica);
+    expect(hashActual?.passwordHash).not.toBe(hashAnterior?.passwordHash);
+    expect(hashActual?.passwordHash).toMatch(/^\$argon2id\$/u);
+    expect(
+      await new Argon2PasswordHasher().verificar(
+        hashActual?.passwordHash ?? '',
+        passwordNuevaSintetica,
+      ),
+    ).toBe(true);
+    expect(eventos.some((evento) => evento.action === 'ADMIN_USER_PASSWORD_RESET')).toBe(true);
+    expect(JSON.stringify(eventos)).not.toContain(passwordNuevaSintetica);
+    expect(sesionAnterior.statusCode).toBe(401);
+    expect(nuevoLogin).toMatch(/^portal_test_session=/u);
+    contrasenaActualSupport = passwordNuevaSintetica;
+    cookieSupport = nuevoLogin;
   });
 
   it('permite a ADMIN cambiar correo solo mediante el enlace de verificación', async () => {
@@ -815,7 +922,7 @@ function definirPruebasAdmin(): void {
     if (admin === null) {
       throw new Error('La prueba requiere la sesión ADMIN preparada.');
     }
-    const sessionToInvalidate = await iniciarSesion(usuarioSupport);
+    const sessionToInvalidate = await iniciarSesion(usuarioSupport, contrasenaActualSupport);
     const respuesta = await exigirAplicacion().inject({
       method: 'PATCH',
       url: `/api/v1/admin/users/${idSupport}`,

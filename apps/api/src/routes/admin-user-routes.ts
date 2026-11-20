@@ -1,3 +1,4 @@
+import { Type } from '@sinclair/typebox';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
   adminCreateUserSchema,
@@ -7,12 +8,13 @@ import {
   adminUpdateUserSchema,
   adminUserListResponseSchema,
   adminUserResponseSchema,
+  adminPasswordResetSchema,
   publicErrorResponseSchema,
   recoveryAcceptedResponseSchema,
   userIdParamsSchema,
-  type RespuestaAltaUsuarioAdmin,
   type SolicitudAltaUsuarioAdmin,
   type SolicitudModificacionUsuarioAdmin,
+  type SolicitudResetContrasenaAdmin,
   type SolicitudCambioCorreoAdmin,
 } from '../../../../packages/contracts/src/auth.js';
 import type { EscritorAuditoriaAuth, RelojAuth } from '../../../../packages/core/src/auth/ports.js';
@@ -122,20 +124,29 @@ export async function registrarRutasUsuariosAdmin(
       return respuesta.code(200).send(await dependencias.usuarios.listar());
     }
 
-    /** Crea una cuenta pendiente y responde sin credenciales ni tokens. */
+    /** Crea una cuenta directa o una invitación y responde sin credenciales ni tokens. */
     async function crearUsuario(
       solicitud: FastifyRequest<{ Body: SolicitudAltaUsuarioAdmin }>,
       respuesta: FastifyReply,
     ) {
       const actor = exigirActorAdmin(solicitud);
+      if (
+        solicitud.body.initialPassword === undefined &&
+        !dependencias.recuperacion.correoHabilitado
+      ) {
+        throw new ErrorCredencialesAuth('EMAIL_DELIVERY_DISABLED', 503);
+      }
       const usuario = await dependencias.usuarios.crear(solicitud.body, actor);
+      if (solicitud.body.initialPassword !== undefined) {
+        return respuesta.code(201).send({ user: usuario, credentialStatus: 'SET_BY_ADMIN' });
+      }
       const resultado = await dependencias.recuperacion.solicitarInvitacion(
         usuario.id,
         actor,
         solicitud.ip,
         solicitud.id,
       );
-      const invitationStatus: RespuestaAltaUsuarioAdmin['invitationStatus'] =
+      const invitationStatus: 'ACCEPTED' | 'RATE_LIMITED' | 'DELIVERY_FAILED' =
         resultado === 'ACEPTADA'
           ? 'ACCEPTED'
           : resultado === 'LIMITADA'
@@ -203,6 +214,23 @@ export async function registrarRutasUsuariosAdmin(
       return respuesta.code(202).send({ accepted: true });
     }
 
+    /** Sustituye credencial sin correo, revoca sesiones y nunca devuelve el valor ingresado. */
+    async function restablecerContrasenaDirecta(
+      solicitud: FastifyRequest<{
+        Params: { id: string };
+        Body: SolicitudResetContrasenaAdmin;
+      }>,
+      respuesta: FastifyReply,
+    ) {
+      await dependencias.usuarios.restablecerContrasena(
+        solicitud.params.id,
+        solicitud.body,
+        exigirActorAdmin(solicitud),
+      );
+
+      return respuesta.header('Cache-Control', 'no-store').code(204).send();
+    }
+
     /** Envía un enlace al correo nuevo sin sustituirlo hasta verificar el destino. */
     async function cambiarCorreoAdmin(
       solicitud: FastifyRequest<{
@@ -254,6 +282,7 @@ export async function registrarRutasUsuariosAdmin(
             401: publicErrorResponseSchema,
             403: publicErrorResponseSchema,
             409: publicErrorResponseSchema,
+            503: publicErrorResponseSchema,
           },
         },
       },
@@ -318,6 +347,29 @@ export async function registrarRutasUsuariosAdmin(
     );
     rutas.post<{
       Params: { id: string };
+      Body: SolicitudResetContrasenaAdmin;
+    }>(
+      '/api/v1/admin/users/:id/password',
+      {
+        preHandler,
+        schema: {
+          params: userIdParamsSchema,
+          body: adminPasswordResetSchema,
+          response: {
+            204: Type.Null(),
+            400: publicErrorResponseSchema,
+            401: publicErrorResponseSchema,
+            403: publicErrorResponseSchema,
+            404: publicErrorResponseSchema,
+            409: publicErrorResponseSchema,
+            503: publicErrorResponseSchema,
+          },
+        },
+      },
+      restablecerContrasenaDirecta,
+    );
+    rutas.post<{
+      Params: { id: string };
       Body: SolicitudCambioCorreoAdmin;
     }>(
       '/api/v1/admin/users/:id/email-change',
@@ -334,6 +386,7 @@ export async function registrarRutasUsuariosAdmin(
             404: publicErrorResponseSchema,
             409: publicErrorResponseSchema,
             429: publicErrorResponseSchema,
+            503: publicErrorResponseSchema,
           },
         },
       },
@@ -373,6 +426,9 @@ function obtenerMensajeErrorAdmin(codigo: string): string {
     INVALID_DISPLAY_NAME: 'El nombre visible no tiene un formato válido.',
     INVALID_EMAIL: 'El correo no tiene un formato válido.',
     INVALID_USERNAME: 'El nombre de usuario no tiene un formato válido.',
+    PASSWORD_TOO_SHORT: 'La contraseña debe tener al menos 15 puntos de código.',
+    PASSWORD_TOO_LONG: 'La contraseña no puede superar 128 puntos de código.',
+    COMMON_PASSWORD: 'La contraseña es demasiado común o predecible.',
     LAST_ADMIN_REQUIRED: 'Debe permanecer al menos un administrador activo.',
     USERNAME_TAKEN: 'El nombre de usuario ya está asociado con otra cuenta.',
     USER_NOT_FOUND: 'No se encontró la cuenta solicitada.',

@@ -6,6 +6,8 @@
 | Estado | APROBADO por el propietario con cinco ajustes técnicos obligatorios (2026-11-17). |
 | Aprobación de enfoque | Sesiones opacas en PostgreSQL, Argon2id, SMTP configurable, login solo por usuario, roles ADMIN/SUPPORT y expiraciones definidas. |
 | Límite de autorización | Implementar PS-003 según este diseño y el plan técnico. La entrega queda EN_REVISION; no autoriza producción, PS-004 ni RF-1. |
+
+> **Addendum propietario (2026-11-19):** AP-013 y su aclaración posterior prevalecen sobre cualquier referencia MFA de este diseño. No implementar MFA para ADMIN ni SUPPORT; MFA no bloquea publicación. Las secciones históricas que lo indiquen como requisito de producción quedan supersedidas.
 **Referencias:** `AGENTS.md`, `docs/specs/PORTAL_CORE.md`, `docs/architecture/ADR-0001_STACK.md`, `docs/standards/CLEAN_CODE.md`, `docs/product/OPEN_DECISIONS.md` y la skill `.agents/skills/apple-design/SKILL.md`.
 
 ## Propósito
@@ -24,7 +26,7 @@ Entregar la identidad mínima operable del portal: el equipo inicia sesión con 
 ## Fuera de alcance
 
 - Dashboard, clientes, conexiones, credenciales externas, RF-1, consultas o escrituras en bases de clientes.
-- MFA y liberación productiva. `OPEN_DECISIONS.md` VT-08 conserva MFA de administradores como requisito previo a producción; PS-003 no afirma resolver esa puerta.
+- MFA no se implementará para ADMIN ni SUPPORT por AP-013. La liberación productiva requiere las demás verificaciones operativas vigentes, no un segundo factor.
 - Preferencias completas de perfil, avatar, asignaciones de cliente o permisos por módulo.
 - Proveedor SMTP, dominio, cuenta de correo o secretos reales. La aplicación ofrecerá el adaptador y la configuración requerida, pero no se conectará a un servicio externo durante esta tarea.
 - Debian, Cloudflare, servicios, túneles o bases productivas.
@@ -127,7 +129,7 @@ El propietario aprobó el enfoque 1 y este diseño con cinco ajustes técnicos o
 - Migraciones aplican y revierten contra PostgreSQL real efímero y aislado; suite de integración confirma SQL, constraints, sesión, transacciones y concurrencia. PGlite sirve solo a simulaciones rápidas cuando su compatibilidad es suficiente. Consultas parametrizadas; CI conserva gates existentes y se ejecutan format, lint, typecheck, tests, build, análisis de secretos y auditorías.
 - El canal SMTP y credenciales de servicio no existen en el repositorio. Hasta que el propietario de operación los configure no se prueba entrega real ni se declara recuperación lista para producción.
 - El umbral temporal de picomatch permanece exclusivo de desarrollo, revisión 2026-12-10 UTC y vencimiento 2026-12-17 UTC.
-- MFA admin sigue pendiente y bloquea producción aunque PS-003 cumpla sus criterios de revisión.
+- **Supersedido por AP-013 (2026-11-19):** no implementar MFA para ADMIN ni SUPPORT; no es puerta de producción.
 
 ## Fuentes de seguridad consultadas
 
@@ -140,4 +142,4 @@ El propietario aprobó el enfoque 1 y este diseño con cinco ajustes técnicos o
 - [Next.js Rewrites](https://nextjs.org/docs/app/api-reference/config/next-config-js/rewrites): proxy URL server-side para el origen único.
 - [PostgreSQL Explicit Locking](https://www.postgresql.org/docs/current/explicit-locking.html): `SELECT FOR UPDATE` para serializar transacciones que modifican el invariante.
 - [PGlite](https://pglite.dev/docs/about): motor PostgreSQL embebido útil para simulación; no reemplaza la integración con servidor PostgreSQL real.
-- `docs/product/OPEN_DECISIONS.md` VT-08: MFA de administradores antes de producción.
+- `docs/product/OPEN_DECISIONS.md` VT-08: MFA excluido para ambos roles por AP-013; revisar los demás controles operativos.

@@ -41,6 +41,11 @@ function pruebaDesactivaTlsSoloEnLoopbackDePrueba(): void {
   expect(resolverConfiguracionTlsBaseDatos('test', '127.0.0.1')).toBe(false);
 }
 
+/** Comprueba que loopback en la misma máquina no exija TLS en producción. */
+function pruebaPermiteLoopbackProduccion(host: string): void {
+  expect(resolverConfiguracionTlsBaseDatos('production', host)).toBe(false);
+}
+
 /** Comprueba que una CA configurada se use con validación de hostname activa. */
 function pruebaAceptaCaConVerificacionEstrica(): void {
   const certificado =
@@ -139,6 +144,10 @@ describe('verificación del certificado PostgreSQL', () => {
   it(
     'permite el servidor efímero loopback de pruebas sin TLS',
     pruebaDesactivaTlsSoloEnLoopbackDePrueba,
+  );
+  it.each(['127.0.0.1', '::1'])(
+    'permite PostgreSQL en loopback sin TLS en producción cuando comparte host (%s)',
+    pruebaPermiteLoopbackProduccion,
   );
   it(
     'acepta una CA PEM con verificación de certificado y hostname activa',

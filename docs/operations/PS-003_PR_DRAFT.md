@@ -1,6 +1,6 @@
 # Registro del Pull Request #1 — PS-003
 
-**Estado:** abierto para revisión, no fusionado. Rama `codex/ps-003-auth`, head revisado `2581f10301aa47d042b225a78ea6744226a485ac`. [Pull Request #1](https://github.com/consafedev/portal-soporte/pull/1). No se ha autorizado el merge.
+**Estado:** registro histórico; PR #1 fusionado normalmente a `main` en `c86af469bdb8f9d10a940ecce29d0e64110a1a57`. Rama original `codex/ps-003-auth`, head revisado `2581f10301aa47d042b225a78ea6744226a485ac`. [Pull Request #1](https://github.com/consafedev/portal-soporte/pull/1).
 
 ## Título
 
@@ -34,7 +34,7 @@
 
 ## Riesgos y límites conocidos
 
-- MFA para `ADMIN`, SMTP real, respaldo/restauración verificados y revisión del alcance de PostgreSQL expuesto siguen pendientes antes de producción.
+- MFA no se implementará para `ADMIN` ni `SUPPORT` por AP-013 y no es requisito de producción. SMTP puede permanecer deshabilitado si los flujos dependientes continúan inactivos y se informa la limitación. Respaldo cifrado/restauración aislada se verificaron el 2026-11-20; custodia independiente de clave, revisión del alcance de PostgreSQL expuesto, revisión independiente y moderado `esbuild` siguen pendientes antes de producción.
 - Existe `CONNECT` heredado por `PUBLIC` en bases preexistentes, sin permisos efectivos de datos para roles Portal; no se cambió ninguna ACL existente.
 - El runtime global del servidor es Node 20.20.0 y el proyecto requiere Node 24.22.3; no se cambió el runtime global.
 - Picomatch queda en seguimiento: revisión 2026-12-10 UTC y vencimiento de aceptación temporal 2026-12-17 UTC.
@@ -43,4 +43,4 @@
 
 ## Publicación y reversión
 
-La rama ya está publicada y el PR #1 queda pendiente de revisión independiente y aprobación del propietario para fusionar. Las migraciones son propias de `portal`; no se propone `DROP` ni rollback destructivo. No añadir DNS ni cambiar/reiniciar el túnel compartido hasta completar las puertas de seguridad y obtener autorización separada.
+El PR #1 está fusionado en `main`; la Actions del commit de merge pasó. Las migraciones son propias de `portal`; no se propone `DROP` ni rollback destructivo. DEPLOY-002/PS-004 se revisan en una rama separada. No añadir DNS ni cambiar/reiniciar el túnel compartido hasta completar las puertas de seguridad y obtener autorización separada.

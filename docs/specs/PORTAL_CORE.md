@@ -23,8 +23,8 @@ Aplicación web interna que autentica al personal, muestra un dashboard y permit
 
 - Roles iniciales exactos: `ADMIN` y `SUPPORT`; usuarios individuales, nunca credenciales compartidas. Cuenta bootstrap de administrador creada de modo seguro, una sola vez, sin contraseña de ejemplo.
 - Sesiones servidor-side con cookie `HttpOnly; Secure; SameSite=Lax/Strict` según flujo, expiración por inactividad/absoluta, rotación en login, CSRF según arquitectura, protección contra fuerza bruta, cierre y revocación de sesiones.
-- Hash de contraseña Argon2id con parámetros revisados según hardware y OWASP; reset vía token de un solo uso con vencimiento o invitación temporal. Al reset revocar sesiones anteriores. No enviar contraseñas por correo ni mostrar secretos. MFA obligatorio para admins antes de producción (método por definir).
-- Endpoints de administración con autorización en backend, validación de payload, revisión de alcance y auditoría. MFA/cambio de credenciales crítica puede requerir reautenticación.
+- Hash de contraseña Argon2id con parámetros revisados según hardware y OWASP; reset vía token de un solo uso con vencimiento o invitación temporal. Al reset revocar sesiones anteriores. No enviar contraseñas por correo ni mostrar secretos. Por AP-013, `ADMIN` y `SUPPORT` autentican únicamente mediante usuario y contraseña; el propietario decidió no implementar MFA ni simularlo en interfaz/API.
+- Endpoints de administración con autorización en backend, validación de payload, revisión de alcance y auditoría. Los cambios de credenciales críticas pueden requerir reautenticación por contraseña. MFA solo podrá reabrirse con una nueva decisión expresa del propietario.
 - Política de permisos calculada como: `sesión válida && rol habilitado && módulo activo && usuario activo && acción permitida && cliente asignado && conexión permitida`. Sin permiso -> 403 y evento auditado; nunca recuperar credenciales para mostrarlas al navegador.
 - Acceso de soporte al historial de sus propios trabajos sin permisos para leer el de otros salvo política explícita.
 

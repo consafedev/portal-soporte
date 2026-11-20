@@ -88,6 +88,7 @@ function crearDependencias(
   return {
     repositorio,
     correo,
+    correoHabilitado: true,
     limitador,
     auditoria,
     hasheador,
@@ -113,6 +114,17 @@ function crearCuentaInvitada(): CuentaCredencialesAuth {
 }
 
 describe('recuperación de credenciales del portal', () => {
+  it('deshabilita recuperación sin guardar tokens si no hay SMTP', async () => {
+    const dependencias = crearDependencias({ correoHabilitado: false });
+    const servicio = new ServicioRecuperacionAuth(dependencias);
+
+    await expect(
+      servicio.solicitarRecuperacion(correoSintetico, '127.0.0.1', 'req-smtp-off'),
+    ).rejects.toMatchObject({ code: 'EMAIL_DELIVERY_DISABLED', statusCode: 503 });
+    expect(dependencias.repositorio.crearToken).not.toHaveBeenCalled();
+    expect(dependencias.repositorio.buscarCuentaPorCorreo).not.toHaveBeenCalled();
+  });
+
   it('genera enlaces desde el origen configurado y mantiene el token solo en el fragmento', () => {
     const enlace = crearEnlaceCorreoAuth(
       'https://portal.example.test',

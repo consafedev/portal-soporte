@@ -16,11 +16,10 @@ import type {
 } from '@portal-soporte/contracts/auth';
 import {
   actualizarUsuarioAdmin,
-  cambiarCorreoAdmin,
   crearUsuarioAdmin,
   ErrorApiAuth,
   listarUsuariosAdmin,
-  restablecerAccesoAdmin,
+  restablecerContrasenaAdmin,
   revocarSesionesAdmin,
 } from '../../lib/auth-api';
 
@@ -37,6 +36,8 @@ export function AdministracionUsuarios(): JSX.Element {
   const [email, setEmail] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [role, setRole] = useState<RolUsuario>('SUPPORT');
+  const [initialPassword, setInitialPassword] = useState('');
+  const [passwordConfirmation, setPasswordConfirmation] = useState('');
   const [aviso, setAviso] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -97,7 +98,7 @@ export function AdministracionUsuarios(): JSX.Element {
   useEffect(cargarUsuariosIniciales, [cargarUsuariosIniciales]);
 
   /**
-   * Crea una invitación individual sin solicitar o asignar una contraseña inicial.
+   * Crea una cuenta individual con una credencial inicial definida por ADMIN.
    *
    * @param evento - Envío del formulario de invitación.
    * @returns Promesa que actualiza la lista o publica un error controlado.
@@ -107,20 +108,33 @@ export function AdministracionUsuarios(): JSX.Element {
     setEnviando(true);
     setAviso(null);
     setError(null);
-    const solicitud: SolicitudAltaUsuarioAdmin = { username, email, displayName, role };
+    if (initialPassword !== passwordConfirmation) {
+      setError('Las contraseñas iniciales no coinciden.');
+      setEnviando(false);
+      return;
+    }
+    const solicitud: SolicitudAltaUsuarioAdmin = {
+      username,
+      email,
+      displayName,
+      role,
+      initialPassword,
+    };
     try {
       const resultado = await crearUsuarioAdmin(solicitud);
       setUsername('');
       setEmail('');
       setDisplayName('');
       setRole('SUPPORT');
+      setInitialPassword('');
+      setPasswordConfirmation('');
       await recargarUsuarios();
-      if (resultado.invitationStatus === 'ACCEPTED') {
+      if ('credentialStatus' in resultado) {
+        setAviso('Cuenta creada. Comparte la contraseña inicial por un canal seguro.');
+      } else if (resultado.invitationStatus === 'ACCEPTED') {
         setAviso('La cuenta se creó y el enlace de activación se envió.');
       } else if (resultado.invitationStatus === 'RATE_LIMITED') {
-        setError(
-          'La cuenta se creó, pero el enlace no se envió por el límite de intentos. Puedes reenviarlo desde su ficha.',
-        );
+        setError('La cuenta se creó, pero el enlace se limitó.');
       } else {
         setError(
           'La cuenta se creó, pero no se pudo entregar el enlace. Puedes volver a intentarlo desde su ficha.',
@@ -150,6 +164,16 @@ export function AdministracionUsuarios(): JSX.Element {
   /** Actualiza el correo al que se enviará la invitación verificada. */
   function manejarCambioCorreo(evento: ChangeEvent<HTMLInputElement>): void {
     setEmail(evento.currentTarget.value);
+  }
+
+  /** Actualiza la contraseña inicial sin conservarla fuera del estado de esta pantalla. */
+  function manejarCambioContrasenaInicial(evento: ChangeEvent<HTMLInputElement>): void {
+    setInitialPassword(evento.currentTarget.value);
+  }
+
+  /** Actualiza la confirmación local sin enviarla al servidor. */
+  function manejarConfirmacionContrasena(evento: ChangeEvent<HTMLInputElement>): void {
+    setPasswordConfirmation(evento.currentTarget.value);
   }
 
   /** Conserva únicamente uno de los dos roles que admite el contrato de identidad. */
@@ -184,11 +208,12 @@ export function AdministracionUsuarios(): JSX.Element {
         <p className="sobrelinea">Administración</p>
         <h1>Usuarios</h1>
         <p className="texto-secundario">
-          Las cuentas son personales y los cambios de correo requieren verificación.
+          Las altas se gestionan directamente por administración. El correo de referencia no se
+          verifica ni recibe notificaciones.
         </p>
       </header>
       <section className="panel-contenido" aria-labelledby="crear-usuario-titulo">
-        <h2 id="crear-usuario-titulo">Invitar a una persona</h2>
+        <h2 id="crear-usuario-titulo">Crear una cuenta</h2>
         <form className="formulario formulario-invitacion" onSubmit={crear}>
           <div className="campo">
             <label htmlFor="new-username">Nombre de usuario</label>
@@ -216,7 +241,7 @@ export function AdministracionUsuarios(): JSX.Element {
             />
           </div>
           <div className="campo">
-            <label htmlFor="new-user-email">Correo</label>
+            <label htmlFor="new-user-email">Correo de referencia</label>
             <input
               id="new-user-email"
               type="email"
@@ -234,8 +259,39 @@ export function AdministracionUsuarios(): JSX.Element {
               <option value="ADMIN">Administración</option>
             </select>
           </div>
+          <div className="campo">
+            <label htmlFor="new-user-password">Contraseña inicial</label>
+            <input
+              id="new-user-password"
+              type="password"
+              autoComplete="new-password"
+              minLength={15}
+              maxLength={256}
+              required
+              value={initialPassword}
+              onChange={manejarCambioContrasenaInicial}
+              aria-describedby="new-user-password-help"
+            />
+            <p id="new-user-password-help" className="texto-secundario">
+              Usa al menos 15 caracteres y comparte la contraseña con la persona por un canal
+              seguro.
+            </p>
+          </div>
+          <div className="campo">
+            <label htmlFor="new-user-password-confirmation">Confirmar contraseña inicial</label>
+            <input
+              id="new-user-password-confirmation"
+              type="password"
+              autoComplete="new-password"
+              minLength={15}
+              maxLength={256}
+              required
+              value={passwordConfirmation}
+              onChange={manejarConfirmacionContrasena}
+            />
+          </div>
           <button className="boton-primario" type="submit" disabled={enviando} aria-busy={enviando}>
-            {enviando ? 'Enviando invitación…' : 'Crear invitación'}
+            {enviando ? 'Creando cuenta…' : 'Crear cuenta'}
           </button>
         </form>
       </section>
@@ -308,7 +364,8 @@ function TarjetaUsuario({
 }: PropiedadesTarjetaUsuario): JSX.Element {
   const [nombre, setNombre] = useState(usuario.displayName);
   const [rol, setRol] = useState<RolUsuario>(usuario.role);
-  const [correoNuevo, setCorreoNuevo] = useState('');
+  const [contrasenaNueva, setContrasenaNueva] = useState('');
+  const [confirmacionContrasena, setConfirmacionContrasena] = useState('');
   const [cargando, setCargando] = useState(false);
 
   /**
@@ -326,6 +383,33 @@ function TarjetaUsuario({
     );
   }
 
+  /** Asigna una credencial nueva y comunica que las sesiones vigentes se revocaron. */
+  async function guardarContrasena(evento: FormEvent<HTMLFormElement>): Promise<void> {
+    evento.preventDefault();
+    if (contrasenaNueva !== confirmacionContrasena) {
+      reportarError('Las contraseñas no coinciden.');
+      return;
+    }
+
+    setCargando(true);
+    reportarError(null);
+    try {
+      await restablecerContrasenaAdmin(usuario.id, { newPassword: contrasenaNueva });
+      setContrasenaNueva('');
+      setConfirmacionContrasena('');
+      notificar('La contraseña se actualizó y las sesiones anteriores se revocaron.');
+      await actualizarLista();
+    } catch (rechazo: unknown) {
+      reportarError(
+        rechazo instanceof ErrorApiAuth
+          ? rechazo.message
+          : 'No fue posible actualizar la contraseña. Inténtalo de nuevo.',
+      );
+    } finally {
+      setCargando(false);
+    }
+  }
+
   /**
    * Cambia el estado de una cuenta y pide confirmación antes de desactivarla.
    *
@@ -338,12 +422,7 @@ function TarjetaUsuario({
     if (esInvitacionPendiente && !window.confirm('¿Cancelar esta invitación y anular su enlace?')) {
       return;
     }
-    if (
-      esInvitacionReactivable &&
-      !window.confirm('¿Reactivar esta invitación y enviar un enlace nuevo?')
-    ) {
-      return;
-    }
+    if (esInvitacionReactivable) return;
     if (esCuentaReactivable && !window.confirm(`¿Reactivar la cuenta de ${usuario.username}?`)) {
       return;
     }
@@ -358,57 +437,18 @@ function TarjetaUsuario({
     }
     const nuevoEstado = esInvitacionPendiente
       ? 'DISABLED'
-      : esInvitacionReactivable
-        ? 'PENDING_ACTIVATION'
-        : usuario.status === 'ACTIVE'
-          ? 'DISABLED'
-          : 'ACTIVE';
+      : usuario.status === 'ACTIVE'
+        ? 'DISABLED'
+        : 'ACTIVE';
     const confirmacion = esInvitacionPendiente
       ? 'La invitación se canceló y su enlace quedó invalidado.'
-      : esInvitacionReactivable
-        ? 'La invitación se reactivó y se envió un enlace nuevo.'
-        : nuevoEstado === 'ACTIVE'
-          ? 'La cuenta quedó activa.'
-          : 'La cuenta quedó desactivada.';
+      : nuevoEstado === 'ACTIVE'
+        ? 'La cuenta quedó activa.'
+        : 'La cuenta quedó desactivada.';
     await ejecutarOperacion(async () => {
       const actualizada = await actualizarUsuarioAdmin(usuario.id, { status: nuevoEstado });
-      if (esInvitacionReactivable) {
-        try {
-          await restablecerAccesoAdmin(usuario.id);
-        } catch (rechazo: unknown) {
-          await actualizarLista();
-          throw rechazo;
-        }
-      }
       return actualizada;
     }, confirmacion);
-  }
-
-  /**
-   * Solicita un enlace compatible con el estado actual de la cuenta.
-   *
-   * @returns Promesa resuelta tras la respuesta genérica de envío o un error controlado.
-   */
-  async function reenviarAcceso(): Promise<void> {
-    await ejecutarOperacion(
-      async () => restablecerAccesoAdmin(usuario.id),
-      'Si la cuenta puede recibir un enlace, se enviarán instrucciones a su correo verificado.',
-    );
-  }
-
-  /**
-   * Solicita un cambio de correo que requiere consumir el token enviado al destino.
-   *
-   * @param evento - Envío del formulario de verificación del correo nuevo.
-   * @returns Promesa que termina tras publicar el resultado y limpiar el campo de correo.
-   */
-  async function enviarCambioCorreo(evento: FormEvent<HTMLFormElement>): Promise<void> {
-    evento.preventDefault();
-    await ejecutarOperacion(
-      async () => cambiarCorreoAdmin(usuario.id, { newEmail: correoNuevo }),
-      'Si el correo está disponible, recibirá un enlace para verificarlo.',
-    );
-    setCorreoNuevo('');
   }
 
   /**
@@ -465,14 +505,14 @@ function TarjetaUsuario({
     }
   }
 
-  /** Actualiza el correo candidato sin marcarlo como verificado. */
-  function manejarCambioCorreo(evento: ChangeEvent<HTMLInputElement>): void {
-    setCorreoNuevo(evento.currentTarget.value);
+  /** Actualiza la nueva contraseña solo en memoria del formulario administrativo. */
+  function manejarContrasenaNueva(evento: ChangeEvent<HTMLInputElement>): void {
+    setContrasenaNueva(evento.currentTarget.value);
   }
 
-  /** Invoca el reenvío sin trasladar la promesa al manejador del botón. */
-  function manejarReenvio(): void {
-    void reenviarAcceso();
+  /** Actualiza la confirmación local sin transmitirla al backend. */
+  function manejarConfirmacionContrasena(evento: ChangeEvent<HTMLInputElement>): void {
+    setConfirmacionContrasena(evento.currentTarget.value);
   }
 
   /** Solicita la revocación de sesiones sin bloquear el evento de botón. */
@@ -535,32 +575,41 @@ function TarjetaUsuario({
               Guardar nombre y rol
             </button>
           </form>
-          <form className="formulario formulario-tarjeta" onSubmit={enviarCambioCorreo}>
+          <form className="formulario formulario-tarjeta" onSubmit={guardarContrasena}>
             <div className="campo">
-              <label htmlFor={`correo-${usuario.id}`}>Correo nuevo</label>
+              <label htmlFor={`password-${usuario.id}`}>Contraseña nueva</label>
               <input
-                id={`correo-${usuario.id}`}
-                type="email"
-                autoComplete="off"
-                maxLength={254}
+                id={`password-${usuario.id}`}
+                type="password"
+                autoComplete="new-password"
+                minLength={15}
+                maxLength={256}
                 required
-                value={correoNuevo}
-                onChange={manejarCambioCorreo}
+                value={contrasenaNueva}
+                onChange={manejarContrasenaNueva}
               />
             </div>
+            <div className="campo">
+              <label htmlFor={`password-confirm-${usuario.id}`}>Confirmar contraseña nueva</label>
+              <input
+                id={`password-confirm-${usuario.id}`}
+                type="password"
+                autoComplete="new-password"
+                minLength={15}
+                maxLength={256}
+                required
+                value={confirmacionContrasena}
+                onChange={manejarConfirmacionContrasena}
+              />
+            </div>
+            <p className="texto-secundario">
+              Comparte la contraseña por un canal seguro. Las sesiones vigentes se cerrarán.
+            </p>
             <button className="boton-secundario" type="submit" disabled={cargando}>
-              Enviar verificación
+              Asignar contraseña nueva
             </button>
           </form>
           <div className="fila-acciones">
-            <button
-              className="boton-secundario"
-              type="button"
-              onClick={manejarReenvio}
-              disabled={cargando}
-            >
-              Enviar enlace de acceso
-            </button>
             <button
               className="boton-secundario"
               type="button"
@@ -582,10 +631,10 @@ function TarjetaUsuario({
               <button
                 className="boton-secundario"
                 type="button"
-                onClick={manejarCambioEstado}
-                disabled={cargando}
+                title="La reactivación de invitaciones requiere SMTP."
+                disabled
               >
-                Reactivar invitación
+                Reactivación requiere SMTP
               </button>
             ) : (
               <button

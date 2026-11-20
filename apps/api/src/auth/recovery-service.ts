@@ -37,6 +37,8 @@ export interface DependenciasRecuperacionAuth {
   readonly hasheador: HasheadorContrasena;
   /** Servicio que entrega enlaces sin registrar los mensajes. */
   readonly correo: ServicioCorreoAuth;
+  /** Indica si se permiten flujos que requieren entregar enlaces por correo. */
+  readonly correoHabilitado: boolean;
   /** Contador HMAC de intentos de login y recuperación. */
   readonly limitador: LimitadorIntentosAuth;
   /** Escritor de auditoría sin datos de identidad completos o secretos. */
@@ -66,12 +68,18 @@ export class ServicioRecuperacionAuth {
   /** Construye el caso de uso con adaptadores explícitos y reloj inyectable. */
   public constructor(private readonly dependencias: DependenciasRecuperacionAuth) {}
 
+  /** Indica si las operaciones que requieren correo pueden ejecutarse en el runtime. */
+  public get correoHabilitado(): boolean {
+    return this.dependencias.correoHabilitado;
+  }
+
   /** Atiende recuperación con respuesta idéntica para correo desconocido o no verificado. */
   public async solicitarRecuperacion(
     correo: string,
     direccionIp: string,
     requestId: string,
   ): Promise<'ACEPTADA' | 'LIMITADA'> {
+    this.exigirCorreoHabilitado();
     const email = normalizarCorreo(correo);
     this.validarCorreo(email);
     const ahora = this.dependencias.reloj.ahora();
@@ -97,6 +105,7 @@ export class ServicioRecuperacionAuth {
     direccionIp: string,
     requestId: string,
   ): Promise<void> {
+    this.exigirCorreoHabilitado();
     return this.completarTokenConContrasena(
       token,
       'PASSWORD_RECOVERY',
@@ -113,6 +122,7 @@ export class ServicioRecuperacionAuth {
     direccionIp: string,
     requestId: string,
   ): Promise<void> {
+    this.exigirCorreoHabilitado();
     return this.completarTokenConContrasena(
       token,
       'ACTIVATION',
@@ -181,6 +191,7 @@ export class ServicioRecuperacionAuth {
     direccionIp: string,
     requestId: string,
   ): Promise<'ACEPTADA' | 'LIMITADA'> {
+    this.exigirCorreoHabilitado();
     const email = normalizarCorreo(correoNuevo);
     this.validarCorreo(email);
     const cuenta = await this.exigirCuentaActiva(userId);
@@ -223,6 +234,7 @@ export class ServicioRecuperacionAuth {
     direccionIp: string,
     requestId: string,
   ): Promise<void> {
+    this.exigirCorreoHabilitado();
     const tokenHash = await this.exigirTokenYLimite(token, direccionIp, requestId);
     const propositos = ['EMAIL_CHANGE', 'EMAIL_VERIFICATION'] as const;
     for (const purpose of propositos) {
@@ -257,6 +269,7 @@ export class ServicioRecuperacionAuth {
     direccionIp: string,
     requestId: string,
   ): Promise<'ACEPTADA' | 'LIMITADA' | 'DELIVERY_FAILED'> {
+    this.exigirCorreoHabilitado();
     const cuenta = await this.dependencias.repositorio.buscarCuentaPorId(userId);
     if (cuenta === null) {
       throw new ErrorCredencialesAuth('USER_NOT_FOUND', 404);
@@ -288,6 +301,7 @@ export class ServicioRecuperacionAuth {
     direccionIp: string,
     requestId: string,
   ): Promise<'ACEPTADA' | 'LIMITADA' | 'DELIVERY_FAILED'> {
+    this.exigirCorreoHabilitado();
     const cuenta = await this.dependencias.repositorio.buscarCuentaPorId(userId);
     if (cuenta === null) {
       throw new ErrorCredencialesAuth('USER_NOT_FOUND', 404);
@@ -326,6 +340,7 @@ export class ServicioRecuperacionAuth {
     direccionIp: string,
     requestId: string,
   ): Promise<'ACEPTADA' | 'LIMITADA'> {
+    this.exigirCorreoHabilitado();
     const email = normalizarCorreo(correoNuevo);
     this.validarCorreo(email);
     const cuenta = await this.exigirCuentaActiva(userId);
@@ -383,6 +398,13 @@ export class ServicioRecuperacionAuth {
       calcularDigestTokenOpaco(token),
       direccionIp,
     );
+  }
+
+  /** Falla antes de consultar cuentas o guardar tokens si el runtime no envía correo. */
+  private exigirCorreoHabilitado(): void {
+    if (!this.dependencias.correoHabilitado) {
+      throw new ErrorCredencialesAuth('EMAIL_DELIVERY_DISABLED', 503);
+    }
   }
 
   /** Verifica contraseña actual sin permitir que usuarios pendientes o desactivados muten. */

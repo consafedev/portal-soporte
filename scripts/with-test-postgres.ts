@@ -224,7 +224,7 @@ async function ejecutarPruebasIntegracion(): Promise<void> {
         const estadoInicial = await verificarEstadoEsquemaBasePrueba(
           configuracion.TEST_MIGRATOR_DATABASE_URL,
         );
-        if (estadoInicial === 'vacio') {
+        if (estadoInicial !== 'migrado') {
           await ejecutarMigracionCompilada();
           await verificarDestinoRemotoPrueba(
             configuracion.TEST_DATABASE_URL,

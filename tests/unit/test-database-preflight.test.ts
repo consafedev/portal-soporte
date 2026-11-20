@@ -106,7 +106,9 @@ function crearEstadoVacio(): EstadoEsquemaBasePrueba {
 }
 
 /** Construye el único esquema migrado que admite una ejecución remota repetible. */
-function crearEstadoMigrado(hashesMigraciones: readonly string[]): EstadoEsquemaBasePrueba {
+function crearEstadoMigrado(
+  variantesHashesMigracion: readonly (readonly string[])[],
+): EstadoEsquemaBasePrueba {
   return {
     esquemas: ['portal', 'public'],
     tablas: [
@@ -150,7 +152,7 @@ function crearEstadoMigrado(hashesMigraciones: readonly string[]): EstadoEsquema
       ['users_pkey', 'i'],
       ['users_username_normalized_unique', 'i'],
     ].map(([nombre, tipo]) => ({ esquema: 'portal', nombre: nombre!, tipo: tipo! })),
-    hashesMigraciones,
+    hashesMigraciones: variantesHashesMigracion.map((variantes) => variantes[0] ?? ''),
     objetosAdicionales: {
       rutinas: 0,
       disparadores: 0,
@@ -236,7 +238,9 @@ describe('validación de identidad PostgreSQL de prueba', () => {
 });
 
 describe('validación del estado persistente de la base de pruebas', () => {
-  const hashesEsperados = ['hash-0000', 'hash-0001', 'hash-0002', 'hash-0003'];
+  const hashesEsperados = ['hash-0000', 'hash-0001', 'hash-0002', 'hash-0003'].map((hash) => [
+    hash,
+  ]);
 
   it('acepta una base nueva antes de aplicar migraciones', () => {
     expect(validarEstadoEsquemaBasePrueba(crearEstadoVacio(), hashesEsperados)).toBe('vacio');
@@ -254,6 +258,21 @@ describe('validación del estado persistente de la base de pruebas', () => {
   it('acepta solo las tablas versionadas y vacías del Portal tras migrar', () => {
     expect(
       validarEstadoEsquemaBasePrueba(crearEstadoMigrado(hashesEsperados), hashesEsperados),
+    ).toBe('migrado');
+  });
+
+  it('acepta hashes equivalentes de archivos con finales de línea Windows o Unix', () => {
+    const variantes = ['hash-0000', 'hash-0001', 'hash-0002', 'hash-0003'].map((hash) => [
+      `${hash}-windows`,
+      `${hash}-unix`,
+    ]);
+    const estado = crearEstadoMigrado(variantes);
+
+    expect(
+      validarEstadoEsquemaBasePrueba(
+        { ...estado, hashesMigraciones: variantes.map((hashes) => hashes[1] ?? '') },
+        variantes,
+      ),
     ).toBe('migrado');
   });
 
@@ -307,7 +326,7 @@ describe('validación del estado persistente de la base de pruebas', () => {
       },
     ],
     ['historial incompleto', crearEstadoMigrado(hashesEsperados.slice(0, 2))],
-    ['hash de migración distinto', crearEstadoMigrado(['externo', ...hashesEsperados.slice(1)])],
+    ['hash de migración distinto', crearEstadoMigrado([['externo'], ...hashesEsperados.slice(1)])],
     [
       'usuario previo',
       {
@@ -364,7 +383,7 @@ describe('validación del estado persistente de la base de pruebas', () => {
     ],
   ])('rechaza estado no limpio con %s', (_caso, estado) => {
     expect(() => validarEstadoEsquemaBasePrueba(estado, hashesEsperados)).toThrow(
-      'La base de pruebas contiene objetos o datos fuera del estado aprobado.',
+      /^La base de pruebas contiene objetos o datos fuera del estado aprobado/,
     );
   });
 });

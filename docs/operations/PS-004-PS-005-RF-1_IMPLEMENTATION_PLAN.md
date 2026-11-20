@@ -1,7 +1,7 @@
 # Plan ejecutable propuesto — PS-004, PS-005 y RF-1
 
-**Estado:** propuesta de secuenciación; ninguna de estas tareas está iniciada
-**Restricción:** no iniciar PS-004, PS-005, RF-1 ni PS-004 de AGENTS.md sin aprobación del cierre de PS-003 y una autorización específica.
+**Estado:** PS-004 tiene un incremento de dashboard en `EN_REVISION`; catálogo/activación y preferencias persistidas siguen pendientes. PS-005 y RF-1 no se han iniciado.
+**Restricción:** no iniciar incrementos adicionales de PS-004, PS-005 ni RF-1 sin autorización específica y reconciliación de alcance conforme al cierre de PS-003.
 
 ## Dependencias y puerta de alcance
 
@@ -63,7 +63,7 @@ Antes de cualquier componente, HTML visible, CSS, navegación, interacción o ac
 
 ## Riesgos de secuencia
 
-- PS-003 sigue `EN_REVISION`; integración PostgreSQL real de la corrección `portal` todavía no se ejecutó.
+- PS-003 sigue `EN_REVISION`; integración remota PostgreSQL en `portal_soporte_test` pasó en la revisión anterior, y el restore de respaldo se verificó en un destino temporal el 2026-11-20.
 - En PS-003.2 se repitieron pruebas PostgreSQL reales en `portal_soporte_test` (53/53 integración, 8/8 E2E y CLI de migración); no se usó `portal_soporte` para pruebas destructivas. INFRA-001 queda `EN_REVISION` después de inventario read-only y migraciones autorizadas.
-- MFA ADMIN, SMTP real, respaldo/restauración verificados, revisión de exposición de PostgreSQL, revisión independiente y el moderado de `esbuild` en desarrollo permanecen abiertos. Picomatch conserva revisión **2026-12-10 UTC** y vencimiento de aceptación temporal **2026-12-17 UTC**.
+- MFA no se implementará para ADMIN ni SUPPORT por AP-013; el propietario acepta el riesgo de autenticación por un factor. SMTP puede permanecer deshabilitado mientras las funciones dependientes estén inactivas y claramente informadas. Custodia independiente de la clave de respaldo, revisión de exposición de PostgreSQL, revisión independiente y el moderado de `esbuild` en desarrollo permanecen abiertos. Picomatch conserva revisión **2026-12-10 UTC** y vencimiento de aceptación temporal **2026-12-17 UTC**.
 - El inventario de Debian 12/PostgreSQL 15.20 y las ACL está registrado en WORKLOG y `DEPLOYMENT_DEBIAN.md`; no se modificaron servicios ni túneles. No guardar ni enviar secretos por chat.

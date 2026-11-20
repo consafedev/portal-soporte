@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   adminCreateUserSchema,
   adminCreateUserResponseSchema,
+  adminPasswordResetSchema,
   adminUserResponseSchema,
   loginRequestSchema,
   publicUserResponseSchema,
@@ -13,6 +14,11 @@ function definirPruebasDeContratos(): void {
   it('rechaza propiedades desconocidas en el login', pruebaLoginRechazaPropiedadExtra);
   it('rechaza un username que no cumple el formato acordado', pruebaLoginRechazaUsuarioInvalido);
   it('acepta exclusivamente los roles definidos', pruebaAltaAdminAceptaRolValido);
+  it(
+    'valida la credencial que ADMIN asigna en un restablecimiento directo',
+    pruebaResetDirectoAdmin,
+  );
+  it('permite que ADMIN asigne una credencial inicial en el alta directa', pruebaAltaDirectaAdmin);
   it('no permite secretos en la respuesta pública', pruebaRespuestaPublicaNoIncluyeSecretos);
   it('no permite hashes ni tokens en el DTO administrativo', pruebaRespuestaAdminNoIncluyeSecretos);
   it(
@@ -53,6 +59,33 @@ function pruebaAltaAdminAceptaRolValido(): void {
       role: 'SUPPORT',
     }),
   ).toBe(true);
+}
+
+/** Comprueba que la solicitud directa admita contraseña sin ampliar campos no documentados. */
+function pruebaAltaDirectaAdmin(): void {
+  expect(
+    Value.Check(adminCreateUserSchema, {
+      username: 'soporte_1',
+      email: 'soporte@example.test',
+      displayName: 'Cuenta Sintética',
+      role: 'SUPPORT',
+      initialPassword: 'Clave inicial sintética 123',
+    }),
+  ).toBe(true);
+}
+
+/** Comprueba la política estricta de contraseña para el reset administrativo directo. */
+function pruebaResetDirectoAdmin(): void {
+  expect(Value.Check(adminPasswordResetSchema, { newPassword: 'Clave nueva sintética 2032' })).toBe(
+    true,
+  );
+  expect(Value.Check(adminPasswordResetSchema, { newPassword: 'corta' })).toBe(false);
+  expect(
+    Value.Check(adminPasswordResetSchema, {
+      newPassword: 'Clave nueva sintética 2032',
+      currentPassword: 'campo-no-permitido',
+    }),
+  ).toBe(false);
 }
 
 /** Comprueba que el contrato de identidad pública cierre el DTO ante secretos. */
@@ -138,6 +171,21 @@ function pruebaEstadosRespuestaAlta(): void {
   ).toBe(false);
   expect(
     Value.Check(adminCreateUserResponseSchema, { user: usuario, invitationStatus: 'UNKNOWN' }),
+  ).toBe(false);
+
+  const usuarioDirecto = { ...usuario, status: 'ACTIVE', hasPassword: true } as const;
+  expect(
+    Value.Check(adminCreateUserResponseSchema, {
+      user: usuarioDirecto,
+      credentialStatus: 'SET_BY_ADMIN',
+    }),
+  ).toBe(true);
+  expect(
+    Value.Check(adminCreateUserResponseSchema, {
+      user: usuarioDirecto,
+      credentialStatus: 'SET_BY_ADMIN',
+      initialPassword: 'no-debe-ser-respuesta',
+    }),
   ).toBe(false);
 }
 

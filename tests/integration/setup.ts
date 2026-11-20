@@ -56,7 +56,7 @@ export async function setup(): Promise<void> {
     if (configuracion.modo === 'local-ephemeral' && estadoInicial !== 'vacio') {
       throw new Error('La suite local requiere una base efímera nueva sin objetos.');
     }
-    if (configuracion.modo === 'local-ephemeral' || estadoInicial === 'vacio') {
+    if (configuracion.modo === 'local-ephemeral' || estadoInicial !== 'migrado') {
       await ejecutarMigracionesPrueba(variables);
     }
     exigirMigracionesLimpias(

@@ -23,6 +23,7 @@ const CAMPOS_SENSIBLES_LOG = [
   'req.headers.authorization',
   'req.headers["x-csrf-token"]',
   'req.body.password',
+  'req.body.initialPassword',
   'req.body.currentPassword',
   'req.body.newPassword',
   'req.body.passwordHash',

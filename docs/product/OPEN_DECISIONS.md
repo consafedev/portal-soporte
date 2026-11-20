@@ -13,7 +13,7 @@
 | VT-05 | Seguridad de acceso a DB | Cuenta con mínimos privilegios, TLS/host SSH verificados y permisos efectivos por cliente | INSERT |
 | VT-06 | Conexión/catálogos y multiambiente | Prueba con dataset sintético de L-01..L-10; verificar cómo comparan RFC según collation y que `ambienteSap` se lee de sociedad | INSERT |
 | VT-07 | Política de datos fiscales | Retención temporal, cifrado, borrado, auditoría, backups y tratamiento de incidentes establecidos | PROD |
-| VT-08 | Gobierno de usuarios/operación | MFA admin, bootstrap, revocación, alcance de clientes y módulos, confirmación PROD, revisión independiente | PROD |
+| VT-08 | Gobierno de usuarios/operación | Bootstrap seguro, revocación, alcance de clientes y módulos, confirmación PROD y revisión independiente. No se implementará MFA para ADMIN ni SUPPORT por AP-013; queda aceptado el riesgo de un factor | PROD |
 | VT-09 | Compatibilidad del estatus con esquema | Probar en **laboratorio** INSERT `CONTABILIZADO` y `PAGADA`; el negocio YA aprobó ambos, verificar restricciones/triggers existentes, sin reinterpretar requisito | INSERT |
 | VT-10 | Infraestructura Debian/Cloudflare | Inventario de servicios, puertos libres, túneles, DNS/certificado/subdominio y plan de rollback, sin alterar servicios ajenos | Deploy |
 | VT-11 | Compatibilidad de conectividad MySQL | Matriz práctica TCP, URL, SSH con password, `.pem`/`.ppk` soportados, passphrase, CA y claves de host | Conector PROD |

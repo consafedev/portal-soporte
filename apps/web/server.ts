@@ -1,14 +1,16 @@
 import { once } from 'node:events';
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { createServer } from 'node:http';
 import { isIP } from 'node:net';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import next from 'next';
-import {
-  cargarProxiesBordeConfiables,
-  sanearCabecerasProxyBorde,
-} from './src/lib/proxy-address.ts';
+import { cargarProxiesBordeConfiables } from './src/lib/proxy-address.ts';
+import { crearManejadorSolicitudWeb } from './src/lib/web-request-handler.ts';
 
 const modoDesarrollo = process.argv.includes('--dev');
-process.env['NODE_ENV'] ??= modoDesarrollo ? 'development' : 'production';
+if (process.env['NODE_ENV'] === undefined) {
+  Object.assign(process.env, { NODE_ENV: modoDesarrollo ? 'development' : 'production' });
+}
 const host = process.env['WEB_LISTEN_HOST'] ?? '127.0.0.1';
 const port = resolverPuerto(process.env['PORT']);
 const proxiesBorde = cargarProxiesBordeConfiables(process.env);
@@ -18,41 +20,9 @@ const aplicacion = next({ dev: modoDesarrollo, hostname: host, port });
 /** Handler de Next.js que conserva las rutas same-origin y sus respuestas HTTP. */
 const manejarSolicitudNext = aplicacion.getRequestHandler();
 /** Servidor que valida el peer TCP antes de entregar cabeceras reenviadas a Next.js. */
-const servidor = createServer(procesarSolicitudWeb);
-
-/**
- * Sanea cabeceras de proxy con la dirección del socket antes de pasar la solicitud a Next.js.
- * @param solicitud - Petición HTTP recibida en el listener privado del portal.
- * @param respuesta - Respuesta HTTP que Next.js completará o cerrará con error genérico.
- * @returns Nada; inicia el manejo asíncrono sin registrar cuerpos ni cabeceras sensibles.
- */
-function procesarSolicitudWeb(solicitud: IncomingMessage, respuesta: ServerResponse): void {
-  const peerRemoto = solicitud.socket.remoteAddress;
-  if (peerRemoto === undefined) {
-    respuesta.writeHead(400, { 'Cache-Control': 'no-store' }).end();
-    return;
-  }
-
-  solicitud.headers = sanearCabecerasProxyBorde(solicitud.headers, peerRemoto, proxiesBorde);
-  void manejarSolicitudNext(solicitud, respuesta).catch(() =>
-    responderFalloSolicitudWeb(respuesta),
-  );
-}
-
-/**
- * Termina la solicitud con un mensaje fijo sin reemplazar una respuesta ya cerrada.
- * @param respuesta - Socket HTTP al que Next.js pudo haber iniciado una respuesta.
- * @returns Nada; solo escribe estado y texto genéricos cuando todavía es posible.
- */
-function responderFalloSolicitudWeb(respuesta: ServerResponse): void {
-  if (respuesta.writableEnded) {
-    return;
-  }
-  if (!respuesta.headersSent) {
-    respuesta.writeHead(500, { 'Cache-Control': 'no-store' });
-  }
-  respuesta.end('No fue posible procesar la solicitud.');
-}
+const servidor = createServer(
+  crearManejadorSolicitudWeb(manejarSolicitudNext, proxiesBorde, process.env['PUBLIC_APP_ORIGIN']),
+);
 
 /**
  * Prepara Next.js y espera el evento de escucha del host privado validado.
@@ -149,4 +119,15 @@ function manejarFalloInicio(): void {
   process.exitCode = 1;
 }
 
-void iniciarServidorWeb().then(registrarCierre, manejarFalloInicio);
+if (esModuloEjecutadoDirectamente()) {
+  void iniciarServidorWeb().then(registrarCierre, manejarFalloInicio);
+}
+
+/**
+ * Determina si Node ejecuta este archivo como entrada, en vez de importarlo en pruebas.
+ * @returns `true` cuando la ruta de entrada de Node coincide con este módulo.
+ */
+function esModuloEjecutadoDirectamente(): boolean {
+  const rutaEntrada = process.argv[1];
+  return rutaEntrada !== undefined && fileURLToPath(import.meta.url) === resolve(rutaEntrada);
+}

@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@fastify/cookie": "11.1.5",
+    "@sinclair/typebox": "0.34.52",
     "argon2": "0.45.1",
     "drizzle-orm": "0.45.4",
     "fastify": "catalog:",
