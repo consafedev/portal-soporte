@@ -22,6 +22,8 @@ import { registrarRutasAdminClientes } from './routes/admin-client-routes.js';
 import type { ServicioPreferenciasUsuario } from '../../../packages/core/src/preferences/service.js';
 import type { ServicioPerfilesConexion } from './clients/connection-profile-service.js';
 import { registrarRutasAdminPerfilesConexion } from './routes/admin-connection-profile-routes.js';
+import { registrarRutasAccesoClientes } from './routes/client-access-routes.js';
+import type { ServicioAccesoCliente } from './clients/client-access-service.js';
 
 const CAMPOS_SENSIBLES_LOG = [
   'req.headers.cookie',
@@ -62,6 +64,8 @@ export interface DependenciasServidorAuth {
   readonly clientes?: ServicioClientesPortal;
   /** Servicio opcional ADMIN para perfiles; recibe secretos solo en operaciones de escritura. */
   readonly perfilesConexion?: ServicioPerfilesConexion;
+  /** Servicio opcional de asignaciones y capacidades por cliente. */
+  readonly accesoClientes?: ServicioAccesoCliente;
   /** Generador opcional de IDs de solicitud para aislar trazas sintéticas de integración. */
   readonly generarIdSolicitud?: () => string;
 }
@@ -158,6 +162,21 @@ export async function crearServidorAuth(
     await registrarRutasAdminPerfilesConexion(aplicacion, {
       configuracion: dependencias.configuracion,
       sesiones: dependencias.sesiones,
+      perfiles: dependencias.perfilesConexion,
+      auditoria: dependencias.auditoria,
+      reloj: dependencias.reloj,
+    });
+  }
+  if (
+    dependencias.accesoClientes !== undefined &&
+    dependencias.clientes !== undefined &&
+    dependencias.perfilesConexion !== undefined
+  ) {
+    await registrarRutasAccesoClientes(aplicacion, {
+      configuracion: dependencias.configuracion,
+      sesiones: dependencias.sesiones,
+      acceso: dependencias.accesoClientes,
+      clientes: dependencias.clientes,
       perfiles: dependencias.perfilesConexion,
       auditoria: dependencias.auditoria,
       reloj: dependencias.reloj,

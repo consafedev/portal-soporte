@@ -56,6 +56,18 @@ export interface AsignacionClienteUsuario {
   readonly revokedAt: Date | null;
 }
 
+/** Estado persistido de una capacidad; la ausencia de fila se presenta como deshabilitada. */
+export interface EstadoCapacidadCliente {
+  /** Identificador del cliente propietario. */
+  readonly clientId: string;
+  /** Capacidad allowlisted que se consulta. */
+  readonly capabilityId: CapacidadCliente;
+  /** Estado explícito; las capacidades ausentes se exponen con valor `false`. */
+  readonly enabled: boolean;
+  /** Fecha del último cambio o `null` si aún no existe una decisión persistida. */
+  readonly changedAt: Date | null;
+}
+
 /** Resultados controlados al conceder o reactivar una asignación. */
 export type ResultadoConcesionAccesoCliente =
   | 'CREATED'
@@ -77,6 +89,8 @@ export interface RepositorioAccesoCliente {
   listarClientesAsignados(userId: string): Promise<readonly ClienteAccesible[]>;
   /** Lista el historial de asignaciones con campos aptos para ADMIN. */
   listarAsignaciones(clientId: string): Promise<readonly AsignacionClienteUsuario[]>;
+  /** Lista las capacidades conocidas y representa como apagadas las que no tienen fila. */
+  listarCapacidades(clientId: string): Promise<readonly EstadoCapacidadCliente[]>;
   /** Concede o reactiva acceso y audita dentro de una transacción que revalida al ADMIN. */
   conceder(
     clientId: string,

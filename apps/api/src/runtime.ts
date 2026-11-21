@@ -23,6 +23,8 @@ import { PostgresClientRepository } from './clients/postgres-client-repository.j
 import { ServicioPerfilesConexion } from './clients/connection-profile-service.js';
 import { RepositorioPerfilesConexionPostgres } from './clients/postgres-connection-profile-repository.js';
 import { cargarRuntimePerfilesConexion } from './clients/connection-runtime-config.js';
+import { ServicioAccesoCliente } from './clients/client-access-service.js';
+import { PostgresClientAccessRepository } from './clients/postgres-client-access-repository.js';
 
 /** Runtime compuesto que expone HTTP privado y un cierre coordinado de recursos. */
 export interface RuntimeAuth {
@@ -83,6 +85,7 @@ export async function crearRuntimeAuth(
     });
     const usuariosAdmin = new ServicioUsuariosAdmin(repositorio, reloj, hasheador);
     const clientes = new ServicioClientesPortal(new PostgresClientRepository(database), reloj);
+    const accesoClientes = new ServicioAccesoCliente(new PostgresClientAccessRepository(database));
     const perfilesConexion = new ServicioPerfilesConexion(
       new RepositorioPerfilesConexionPostgres(database),
       runtimePerfiles.custodia,
@@ -105,6 +108,7 @@ export async function crearRuntimeAuth(
       usuariosAdmin,
       clientes,
       perfilesConexion,
+      accesoClientes,
       preferencias,
       ...(generarIdSolicitud === undefined ? {} : { generarIdSolicitud }),
     });

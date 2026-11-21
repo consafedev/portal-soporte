@@ -2,6 +2,7 @@ import type {
   ActorAccesoCliente,
   AsignacionClienteUsuario,
   CapacidadCliente,
+  EstadoCapacidadCliente,
   ClienteAccesible,
   RepositorioAccesoCliente,
   ResultadoConcesionAccesoCliente,
@@ -55,6 +56,12 @@ export class ServicioAccesoCliente {
   public async listarAsignaciones(clientId: string): Promise<readonly AsignacionClienteUsuario[]> {
     validarUuid(clientId);
     return this.repositorio.listarAsignaciones(clientId);
+  }
+
+  /** Lista las capacidades efectivas para que ADMIN pueda revisar el estado por cliente. */
+  public async listarCapacidades(clientId: string): Promise<readonly EstadoCapacidadCliente[]> {
+    validarUuid(clientId);
+    return this.repositorio.listarCapacidades(clientId);
   }
 
   /** Concede o reactiva una asignación vigente mediante una transacción auditada. */
