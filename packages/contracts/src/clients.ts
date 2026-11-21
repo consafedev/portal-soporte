@@ -455,6 +455,108 @@ export const establecerCapacidadClienteSchema = Type.Object(
   { additionalProperties: false, description: 'Nuevo estado explícito de la capacidad.' },
 );
 
+/** Estatus permitidos para presentar una futura operación RF-1 sin ejecutarla. */
+export const estatusVistaPreviaRf1Schema = Type.Union(
+  [Type.Literal('CONTABILIZADO'), Type.Literal('PAGADA')],
+  { description: 'Estatus de negocio que se muestra en preview; no habilita inserciones.' },
+);
+
+/** Tipo de estatus aceptado por la ruta de vista previa RF-1. */
+export type EstatusVistaPreviaRf1Contrato = Static<typeof estatusVistaPreviaRf1Schema>;
+
+/** Query estricta para seleccionar un perfil y estatus ya autorizados por el servidor. */
+export const solicitudVistaPreviaRf1Schema = Type.Object(
+  {
+    profileId: Type.String({ pattern: PATRON_UUID_CLIENTE }),
+    estatus: estatusVistaPreviaRf1Schema,
+  },
+  { additionalProperties: false, description: 'Identidad del perfil y estatus de preview.' },
+);
+
+/** Tipo de query permitido en una solicitud RF-1 de solo lectura. */
+export type SolicitudVistaPreviaRf1Contrato = Static<typeof solicitudVistaPreviaRf1Schema>;
+
+/** Sociedad SAP revelada solo después de una consulta autorizada al catálogo del cliente. */
+const sociedadVistaPreviaRf1Schema = Type.Object(
+  {
+    sociedad: Type.String({ minLength: 1, maxLength: 64 }),
+    ambienteSap: Type.String({ minLength: 1, maxLength: 32 }),
+  },
+  { additionalProperties: false },
+);
+
+/** Campos fiscales serializables que puede presentar la vista previa sin XML original. */
+const facturaVistaPreviaRf1Schema = Type.Object(
+  {
+    uuid: Type.String({ minLength: 36, maxLength: 36 }),
+    rfcEmisor: Type.String({ minLength: 1, maxLength: 13 }),
+    rfcReceptor: Type.String({ minLength: 1, maxLength: 13 }),
+    fecha: Type.String({ minLength: 1, maxLength: 64 }),
+    subtotal: Type.String({ minLength: 1, maxLength: 64 }),
+    descuento: Type.String({ minLength: 1, maxLength: 64 }),
+    moneda: Type.String({ minLength: 3, maxLength: 3 }),
+    total: Type.String({ minLength: 1, maxLength: 64 }),
+    referencia: Type.String({ maxLength: 256 }),
+    tipoComprobante: Type.Literal('I'),
+    importeIvaFAC: Type.String({ minLength: 1, maxLength: 64 }),
+    retencionIsr: Type.String({ minLength: 1, maxLength: 64 }),
+    retencionIva: Type.String({ minLength: 1, maxLength: 64 }),
+    retencionIeps: Type.String({ minLength: 1, maxLength: 64 }),
+    metodoPago: Type.Optional(Type.String({ maxLength: 8 })),
+    formaPago: Type.Optional(Type.String({ maxLength: 8 })),
+    serie: Type.Optional(Type.String({ maxLength: 25 })),
+    folio: Type.Optional(Type.String({ maxLength: 40 })),
+  },
+  { additionalProperties: false, description: 'Datos tipados derivados del CFDI, nunca el XML.' },
+);
+
+/** Resolución contextual de sociedad/proveedor obtenida mediante lecturas RF-1 fijas. */
+const resolucionVistaPreviaRf1Schema = Type.Object(
+  {
+    sociedad: Type.String({ minLength: 1, maxLength: 64 }),
+    ambienteSap: Type.String({ minLength: 1, maxLength: 32 }),
+    idProveedor: Type.String({ minLength: 1, maxLength: 64 }),
+  },
+  { additionalProperties: false },
+);
+
+/** Resultado público de un único CFDI, sin archivo, SQL, conexión ni secreto. */
+export const resultadoArchivoVistaPreviaRf1Schema = Type.Object(
+  {
+    status: Type.Union([
+      Type.Literal('READY'),
+      Type.Literal('NEEDS_SELECTION'),
+      Type.Literal('BLOCKED'),
+    ]),
+    errorCode: Type.Optional(Type.String({ pattern: '^[A-Z0-9_]{1,64}$' })),
+    factura: Type.Optional(facturaVistaPreviaRf1Schema),
+    sociedadesDisponibles: Type.Optional(
+      Type.Array(sociedadVistaPreviaRf1Schema, { maxItems: 100 }),
+    ),
+    resolution: Type.Optional(resolucionVistaPreviaRf1Schema),
+    estatus: Type.Optional(estatusVistaPreviaRf1Schema),
+  },
+  {
+    additionalProperties: false,
+    description: 'Previsualización redactada sin efectos de escritura.',
+  },
+);
+
+/** Tipo serializable del resultado de preview de un XML. */
+export type ResultadoArchivoVistaPreviaRf1Contrato = Static<
+  typeof resultadoArchivoVistaPreviaRf1Schema
+>;
+
+/** Colección de resultados en el mismo orden en que se recibieron los archivos. */
+export const resultadosVistaPreviaRf1Schema = Type.Array(resultadoArchivoVistaPreviaRf1Schema, {
+  minItems: 1,
+  maxItems: 100,
+  description: 'Un resultado por archivo XML admitido, sin persistir el archivo original.',
+});
+
+/** Tipo de respuesta HTTP con resultados por CFDI en el lote de lectura. */
+export type ResultadosVistaPreviaRf1Contrato = Static<typeof resultadosVistaPreviaRf1Schema>;
+
 /** Tipo de entrada de escritura de una capacidad por cliente. */
 export type SolicitudEstablecerCapacidadCliente = Static<typeof establecerCapacidadClienteSchema>;
 
