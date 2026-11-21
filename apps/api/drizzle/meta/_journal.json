@@ -50,6 +50,13 @@
       "when": 1795236271028,
       "tag": "0006_client_connection_profiles",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795296042120,
+      "tag": "0007_client_user_access_capabilities",
+      "breakpoints": true
     }
   ]
 }

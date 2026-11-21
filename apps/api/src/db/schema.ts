@@ -1,10 +1,12 @@
 import { sql } from 'drizzle-orm';
 import {
+  boolean,
   check,
   index,
   integer,
   jsonb,
   pgSchema,
+  primaryKey,
   smallint,
   text,
   timestamp,
@@ -57,6 +59,18 @@ type ColumnasAuditoriaRestricciones = {
 
 type ColumnasInvariantesRestricciones = {
   id: AnyPgColumn;
+};
+
+type ColumnasAsignacionClienteRestricciones = {
+  clientId: AnyPgColumn;
+  userId: AnyPgColumn;
+  revokedByUserId: AnyPgColumn;
+  revokedAt: AnyPgColumn;
+};
+
+type ColumnasCapacidadClienteRestricciones = {
+  capabilityId: AnyPgColumn;
+  enabled: AnyPgColumn;
 };
 
 type ColumnasClienteRestricciones = {
@@ -180,6 +194,36 @@ function definirRestriccionesAuditoria(columnas: ColumnasAuditoriaRestricciones)
 function definirRestriccionesInvariantes(columnas: ColumnasInvariantesRestricciones) {
   return {
     singleton: check('auth_invariants_singleton_check', sql`${columnas.id} = 1`),
+  };
+}
+
+/** Evita concesiones activas duplicadas y exige metadatos de revocación coherentes. */
+function definirRestriccionesAsignacionCliente(columnas: ColumnasAsignacionClienteRestricciones) {
+  return {
+    clienteUsuarioActivoUnico: uniqueIndex('client_user_assignments_active_pair_unique')
+      .on(columnas.clientId, columnas.userId)
+      .where(sql`${columnas.revokedAt} IS NULL`),
+    usuarioActivoIdx: index('client_user_assignments_user_id_idx')
+      .on(columnas.userId)
+      .where(sql`${columnas.revokedAt} IS NULL`),
+    revocacionCoherente: check(
+      'client_user_assignments_revocation_metadata_check',
+      sql`(${columnas.revokedByUserId} IS NULL AND ${columnas.revokedAt} IS NULL) OR (${columnas.revokedByUserId} IS NOT NULL AND ${columnas.revokedAt} IS NOT NULL)`,
+    ),
+  };
+}
+
+/** Limita la tabla de capacidades a IDs conocidos y bloquea la ejecución de escrituras RF-1. */
+function definirRestriccionesCapacidadCliente(columnas: ColumnasCapacidadClienteRestricciones) {
+  return {
+    capacidadPermitida: check(
+      'client_capabilities_id_check',
+      sql`${columnas.capabilityId} IN ('rf-1:read', 'rf-1:execute')`,
+    ),
+    ejecucionRf1Deshabilitada: check(
+      'client_capabilities_execute_disabled_check',
+      sql`${columnas.capabilityId} <> 'rf-1:execute' OR ${columnas.enabled} = false`,
+    ),
   };
 }
 
@@ -447,4 +491,50 @@ export const authInvariants = esquemaPortal.table(
     updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   },
   definirRestriccionesInvariantes,
+);
+
+/** Conserva el historial de concesiones y revocaciones de clientes para usuarios SUPPORT. */
+export const clientUserAssignments = esquemaPortal.table(
+  'client_user_assignments',
+  {
+    id: uuid('id').primaryKey(),
+    clientId: uuid('client_id')
+      .notNull()
+      .references(() => clients.id, { onDelete: 'restrict' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    grantedByUserId: uuid('granted_by_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    grantedAt: timestamp('granted_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    revokedByUserId: uuid('revoked_by_user_id').references(() => users.id, {
+      onDelete: 'restrict',
+    }),
+    revokedAt: timestamp('revoked_at', { withTimezone: true, mode: 'date' }),
+  },
+  definirRestriccionesAsignacionCliente,
+);
+
+/** Conserva capacidades explícitas por cliente, apagadas por defecto y sin ejecución RF-1. */
+export const clientCapabilities = esquemaPortal.table(
+  'client_capabilities',
+  {
+    clientId: uuid('client_id')
+      .notNull()
+      .references(() => clients.id, { onDelete: 'restrict' }),
+    capabilityId: varchar('capability_id', { length: 64 }).notNull(),
+    enabled: boolean('enabled').notNull().default(false),
+    changedByUserId: uuid('changed_by_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    changedAt: timestamp('changed_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (columnas) => ({
+    clavePrimaria: primaryKey({
+      name: 'client_capabilities_pkey',
+      columns: [columnas.clientId, columnas.capabilityId],
+    }),
+    ...definirRestriccionesCapacidadCliente(columnas),
+  }),
 );
