@@ -1591,3 +1591,12 @@ eload, se reinició únicamente cloudflared-consafedev.service; procesos web, AP
 - Cambios de seguimiento: `TASK_BOARD.md` cambia PS-005 a `EN_REVISION` y enlaza PR #4; esta entrada mantiene el registro append-only.
 - Próximo paso: subir esta actualización documental y comprobar el run asociado al nuevo head; después dejar el PR abierto para revisión y merge manual del propietario.
 - Estado: PS-005/PS-005.2 `EN_REVISION`; sin merge, despliegue, migraciones persistentes ni acceso a bases de clientes.
+
+### [2026-11-21T02:53:05-06:00] PS-005.2 — VERIFICACIÓN FINAL DEL HEAD ACTUAL DE PR #4
+- Agente/tarea/rama: Codex · PS-005/PS-005.2 · `codex/ps-005-clients-connections` · head publicado `e7c0a5191e6b86b46264dd6d83c14f0da2842792`.
+- Verificación GitHub: PR [#4](https://github.com/consafedev/portal-soporte/pull/4) permanece abierto a `main`, mergeable y sin merge. Para el SHA exacto del head, run `44886687826` (`push`) y run `44886690955` (`pull_request`) terminaron con ambos jobs SUCCESS: calidad/seguridad y fixture MySQL/SSH.
+- Alcance confirmado: el cambio que produjo el head posterior al código SSH solo agrega trazabilidad documental; la corrección funcional continúa en `a3edf4c`. No hubo modificaciones de bases, servicios, infraestructura, migraciones, RF-1 o PS-004.
+- Preparación de entrega: TASK_BOARD mantiene PS-005 en `EN_REVISION`, enlaza PR #4 y registra ambos runs del head. Esta entrada es append-only; cualquier commit documental de cierre posterior vuelve a ejecutar Actions.
+- Riesgos abiertos: el llavero y recuperación en Debian no están provisionados; no se probaron destinos/credenciales de clientes; PPK v3/DSA no tienen soporte; `esbuild` moderado y aceptación temporal de `picomatch` con revisión `2026-12-10 UTC` / vencimiento `2026-12-17 UTC` siguen registrados.
+- Próximo paso: revisión y eventual merge exclusivamente por el propietario; no iniciar RF-1 ni PS-006/PS-008 en esta rama.
+- Estado: PS-005/PS-005.2 `EN_REVISION`; PR listo para revisión humana, sin merge ni despliegue.
