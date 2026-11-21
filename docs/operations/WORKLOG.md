@@ -1311,3 +1311,14 @@ eload, se reinició únicamente cloudflared-consafedev.service; procesos web, AP
 - **Límites:** no se ejecutaron las 234 unitarias localmente ni se declara PASS para E2E local. No se modificó PS-005, la BD permanente, migraciones 0004/0005, DNS, Tunnel ni servicios. PS-005 sigue en su rama y HEAD `9e33e540b770c9189b58db7df8964938af6283ab`.
 - **Próximo paso:** revisar secretos/diff final, crear commit focalizado, publicar mediante push normal autorizado y comprobar el nuevo run de Actions del PR #3. Sin merge automático.
 - **Estado:** PS-004 EN_REVISION para revisión CI; PR #3 abierto.
+
+### [2026-11-20T19:43:26-06:00] PS-004 — PR #3 E2E CORREGIDO Y CI VERDE
+- **Agente/tarea/rama/commit:** Codex · PS-004 · `codex/ps-004-preferences-theme` · `128bfdf77b8606ff5fda3cea7f73f66b6ca4ff7a`.
+- **GitHub:** commit publicado con push normal. PR [#3](https://github.com/consafedev/portal-soporte/pull/3) permanece abierto hacia `main`; run [44851520210](https://github.com/consafedev/portal-soporte/actions/runs/44851520210) se verificó por la API pública, evento `pull_request`, head exacto `128bfdf77b8606ff5fda3cea7f73f66b6ca4ff7a`, conclusión `success`.
+- **CI:** job `Calidad y seguridad básica` y todos los pasos informados SUCCESS, incluidos instalación fijada, Chromium, verificación de skills, formato, análisis de código, unitarias, integración PostgreSQL aislada, CLI de migración, build, tipos, E2E navegador, secretos y auditorías de dependencias.
+- **Verificación local:** el E2E no se ejecutó localmente porque la guarda detecta tablas/permisos legítimos de PS-005 en `portal_soporte_test`; no se relaja el preflight ni se modifica la BD. La CI usó su PostgreSQL 18.7 efímero y ejecutó el E2E completo con éxito. `lint`, typecheck, secretlint, Prettier dirigido y diff-check locales PASS.
+- **Cambio final:** el radio `Oscuro` se localiza con `getByRole('radio', { name: /^Oscuro/u })`; `toBeChecked`, persistencia al recargar, localStorage, preferencias del usuario, SUPPORT y restricciones por falta de SMTP permanecen en el test.
+- **Separación/seguridad:** PS-005 sigue intacto en `codex/ps-005-clients-connections` HEAD `9e33e540b770c9189b58db7df8964938af6283ab`, ausente del historial PR #3. No se fusionó, desplegó, ni modificó migraciones/DB permanente.
+- **Riesgos abiertos:** MFA excluido por AP-013; SMTP inactivo; seguimiento `picomatch` permanece con revisión `2026-12-10 UTC` y vencimiento `2026-12-17 UTC`. El bloqueo local de E2E en la base compartida queda trazado.
+- **Próximo paso:** revisión humana y merge manual del propietario; Codex no fusionará PR #3. Tras el merge, revisar cuidadosamente historial PS-005 y continuar con la etapa expresamente autorizada.
+- **Estado:** PS-004 EN_REVISION; PR #3 listo para revisión humana. PS-005 preservado en rama independiente.
