@@ -1498,3 +1498,12 @@ eload, se reinició únicamente cloudflared-consafedev.service; procesos web, AP
 - No realizado: push, PR, integración PostgreSQL remota, prueba TCP/SSH MySQL (pendiente runner CI con Docker), migración productiva, despliegue o acceso a datos de clientes.
 - Próximo paso: anexar cierre documental de PS-005, comprobar alcance de diff, separar RF-1 en branch desde main y publicar este branch mediante push normal autorizado para ejecutar GitHub Actions.
 - Estado: PS-005.2 EN_REVISION; PR todavía no creado. PS-007 EN_CURSO y sin DML.
+
+### [2026-11-21T01:49:35-06:00] PS-005.2 — INICIO DE AISLAMIENTO FINAL Y PUBLICACIÓN
+- Agente/tarea/rama/base: Codex · PS-005/PS-005.2 · `codex/ps-005-clients-connections` · HEAD `0856030b746f7ff95a552fb6c2e88c855368e903`; `origin/main` verificada en `c6baae1973acd3721d76f9fde448f05ef78225fb`.
+- Objetivo: confirmar que PS-005 conserva solo su alcance, que el lockfile es reproducible y que fixture MySQL/SSH sintético está correctamente conectado a CI antes de push y PR autorizados.
+- Alcance/riesgos: preservar PS-005.1 y PS-004 integrados en main; excluir RF-1 del PR y su dependencia `saxes`; mantener hashes 0004/0005/0006; no usar BD/clientes reales ni alterar servidor, túneles, DNS, firewall o servicios ajenos. Posible bloqueo local: Docker Engine no disponible, por lo que el handshake fixture dependerá del runner de GitHub Actions.
+- Cambios realizados desde la evidencia anterior: se retiró del lockfile el importer RF-1 `saxes`/`xmlchars` que se había filtrado al regenerarlo; commit `0856030b746f7ff95a552fb6c2e88c855368e903`. Se verificó que RF-1 y su plan no aparecen en el diff PS-005 y se conservaron íntegros en `codex/rf-1-preview`.
+- Verificaciones previstas: instalación `--frozen-lockfile`, revisión de workflow/fixture, secretos y archivos excluidos, diff/alcance y hashes de migraciones; luego push normal autorizado y revisión de Actions. No repetir la suite completa sin cambio de código; CI volverá a ejecutarla en el commit publicado.
+- Próximo paso: completar preflight local, hacer commit de esta actualización de seguimiento, publicar branch y esperar ambos jobs antes de abrir PR.
+- Estado: PS-005/PS-005.2 `EN_CURSO`; no push/PR aún.
