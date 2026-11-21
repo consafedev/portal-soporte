@@ -19,9 +19,18 @@ puerto_ssh=""
 ip_mysql=""
 huella_ssh=""
 
+# Limpia únicamente los recursos efímeros identificados por esta ejecución.
 limpiar_fixture() {
   local codigo_salida="$?"
   trap - EXIT
+  if [[ "${codigo_salida}" -ne 0 && -n "${contenedor_ssh}" ]] \
+    && docker container inspect "${contenedor_ssh}" >/dev/null 2>&1; then
+    echo 'SSH_FIXTURE_DIAGNOSTICS_BEGIN' >&2
+    docker logs --tail 120 "${contenedor_ssh}" 2>&1 \
+      | sed -E 's/(password|passphrase|secret|token|private.?key|authorization)([=:[:space:]]+)[^[:space:]]+/\1\2[REDACTED]/Ig' \
+      || true
+    echo 'SSH_FIXTURE_DIAGNOSTICS_END' >&2
+  fi
   if [[ -n "${contenedor_ssh}" ]]; then docker rm --force "${contenedor_ssh}" >/dev/null 2>&1 || true; fi
   if [[ -n "${contenedor_mysql}" ]]; then docker rm --force "${contenedor_mysql}" >/dev/null 2>&1 || true; fi
   if [[ -n "${red}" ]]; then docker network rm "${red}" >/dev/null 2>&1 || true; fi

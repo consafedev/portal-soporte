@@ -1517,3 +1517,20 @@ eload, se reinició únicamente cloudflared-consafedev.service; procesos web, AP
 - Pendientes inmediatos: push normal autorizado de esta rama y observar ambos jobs de Actions; corregir únicamente fallos concretos antes de abrir PR. No merge.
 - Riesgos: esbuild moderado de desarrollo; picomatch revisión `2026-12-10 UTC`, aceptación temporal hasta `2026-12-17 UTC`; PPK v3/DSA y custodia/recuperación en Debian siguen sin soporte/verificación; no credenciales o BD reales.
 - Estado: PS-005/PS-005.2 `EN_CURSO` hasta que el runner CI demuestre el handshake y se cree el PR para revisión del propietario.
+
+### [2026-11-21T02:08:11-06:00] PS-005.2 — BLOQUEO CONCRETO EN FIXTURE SSH DE CI
+- Agente/tarea/rama: Codex · PS-005.2 · `codex/ps-005-clients-connections` · commit publicado `29e3408586449b63b94e59ba212112419c94a1a1`.
+- Evidencia GitHub Actions: run `44882596053`; job `136780936900` «Conectores MySQL y SSH con fixture sintético» FAIL; job «Calidad y seguridad básica» SUCCESS. En el job fixture, conexión MySQL TCP/TLS directa, CA inválida, credenciales erróneas, huella no coincidente, destino no permitido y timeout pasan; las conexiones SSH PEM/PPK y reutilización devuelven `SSH_CONNECTION_FAILED` antes de verificar el forward. La prueba de puerto no permitido tampoco llega a `SSH_FORWARD_FAILED` por el mismo fallo previo.
+- Investigación: se leyeron las anotaciones y el log de Actions completo desde el runner, filtrando datos sensibles; la respuesta pública solo da el error normalizado y no incluye el motivo interno de sshd. La instrumentación actual no expone en qué etapa falla autenticación SSH. No hay Docker Engine local para reproducir.
+- Hipótesis aún no confirmada: fallo en autenticación de usuario/clave del OpenSSH efímero. La huella incorrecta se rechaza correctamente y confirma que se alcanza el handshake de host key. No se cambia aún la lógica productiva del conector.
+- Siguiente paso mínimo: añadir al trap de limpieza del fixture el log acotado del contenedor SSH únicamente cuando una prueba falla, con redacción defensiva; volver a ejecutar el job en GitHub, identificar la línea de sshd y corregir una sola causa. Los logs contienen solo fixture sintético efímero.
+- Alcance: no tocar bases de clientes, Debian, servicios, migraciones ni otros hostnames. No crear PR hasta que ambos jobs estén verdes.
+- Estado: PS-005/PS-005.2 `EN_CURSO`; push ya realizado, PR pendiente; no se hizo merge.
+
+### [2026-11-21T02:10:13-06:00] PS-005.2 — INSTRUMENTACIÓN ACOTADA DE SSH EN CI
+- Agente/tarea/rama: Codex · PS-005.2 · `codex/ps-005-clients-connections` · base local publicada `29e3408586449b63b94e59ba212112419c94a1a1`.
+- Cambio: `scripts/with-mysql-fixture.sh` ahora captura los últimos 120 renglones del contenedor SSH sintético solo cuando el job falla, antes de eliminar ese contenedor; se redaccionan valores con nombres de password/token/secret/private key. El trap sigue retirando únicamente los contenedores, red, imagen y carpeta temporal generados por el mismo identificador.
+- Validación: `bash -n` PASS tras normalizar CRLF a LF en el flujo enviado a bash; `git diff --check` PASS. Prueba funcional del fixture local: NO EJECUTADA porque este equipo no tiene Docker Engine. El root cause de SSH sigue NO CONFIRMADO; no se modificó código del conector.
+- Próximo paso: commit y push normal del cambio, luego leer las líneas sanitizadas del nuevo run para identificar rechazo de cuenta/clave, configuración o canal; corregir solo el motivo observado.
+- Riesgos/límites: los logs son únicamente del sshd efímero de CI con llaves y datos sintéticos; se acota salida y se limpia el recurso incluso ante fallo. Sin bases reales, servidores ni secretos reales.
+- Estado: PS-005/PS-005.2 `EN_CURSO`; PR no creado, merge no realizado.
