@@ -1,5 +1,7 @@
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
-import { inArray, or, sql, type SQL } from 'drizzle-orm';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { eq, inArray, or, sql, type SQL } from 'drizzle-orm';
 import { expect, test, type Page } from '@playwright/test';
 import { Argon2PasswordHasher } from '../../apps/api/src/auth/argon2-password-hasher.js';
 import { cargarConfiguracionConexionPrueba } from '../../apps/api/src/runtime-config.js';
@@ -7,6 +9,9 @@ import { crearClienteBaseDatosAuth, type BaseDatosAuth } from '../../apps/api/sr
 import {
   auditEvents,
   authThrottleWindows,
+  clientConnectionProfiles,
+  clientSapEnvironments,
+  clients,
   recoveryTokens,
   sessions,
   users,
@@ -31,6 +36,7 @@ let databaseMigrador: BaseDatosAuth | null = null;
 let credencialesAdmin: CredencialesE2e;
 let credencialesSoporte: CredencialesE2e;
 const idsCuentasE2e: string[] = [];
+const idsClientesE2e: string[] = [];
 const identificadoresLoginE2e = new Set<string>();
 
 /** Prepara el esquema y dos cuentas aleatorias en la base local creada por el harness. */
@@ -88,6 +94,16 @@ test.afterAll(async () => {
           .where(inArray(authThrottleWindows.keyHash, hashesIntentos));
       }
       await databaseMigrador.delete(users).where(inArray(users.id, idsCuentasE2e));
+    }
+
+    if (idsClientesE2e.length > 0 && databaseMigrador !== null) {
+      await databaseMigrador
+        .delete(clientConnectionProfiles)
+        .where(inArray(clientConnectionProfiles.clientId, idsClientesE2e));
+      await databaseMigrador
+        .delete(clientSapEnvironments)
+        .where(inArray(clientSapEnvironments.clientId, idsClientesE2e));
+      await databaseMigrador.delete(clients).where(inArray(clients.id, idsClientesE2e));
     }
 
     await databaseMigrador?.$client.end({ timeout: 5 });
@@ -163,8 +179,8 @@ function obtenerFiltroAuditoriaE2e(): SQL {
 async function iniciarSesionEnNavegador(
   pagina: Page,
   credenciales: CredencialesE2e,
-  rutaDestino: '/dashboard' | '/settings/users' | '/profile/password',
-  tituloDestino: 'Usuarios' | 'Mi perfil',
+  rutaDestino: '/dashboard' | '/settings/users' | '/settings/clients' | '/profile/password',
+  tituloDestino: 'Usuarios' | 'Clientes' | 'Mi perfil',
 ): Promise<void> {
   identificadoresLoginE2e.add(credenciales.username.toLowerCase());
   await pagina.goto('/login');
@@ -176,7 +192,12 @@ async function iniciarSesionEnNavegador(
     pagina.getByRole('heading', { name: /^Hola, Cuenta sintética (ADMIN|SUPPORT)$/u }),
   ).toBeVisible();
   if (rutaDestino !== '/dashboard') {
-    const etiquetaEnlace = rutaDestino === '/settings/users' ? 'Usuarios' : 'Mi perfil';
+    const etiquetaEnlace =
+      rutaDestino === '/settings/users'
+        ? 'Usuarios'
+        : rutaDestino === '/settings/clients'
+          ? 'Clientes'
+          : 'Mi perfil';
     await pagina.getByRole('link', { name: etiquetaEnlace, exact: true }).click();
   }
   await expect(pagina).toHaveURL(new RegExp(`${rutaDestino.replaceAll('/', '\\/')}$`, 'u'));
@@ -341,4 +362,67 @@ test('SUPPORT cambia su contraseña y el otro navegador queda revocado', async (
   } finally {
     await contextoParalelo.close();
   }
+});
+
+/** Comprueba el panel de perfiles y que el servidor falle cerrado sin destino allowlisted. */
+test('ADMIN ve los controles de conexión y el formulario elimina el secreto ante rechazo', async ({
+  page,
+}) => {
+  await iniciarSesionEnNavegador(page, credencialesAdmin, '/settings/clients', 'Clientes');
+  const nombreCliente = `Cliente conexión ${randomUUID().slice(0, 8)}`;
+  const secretoSintetico = randomBytes(32).toString('base64url');
+  await page.getByLabel('Nombre del cliente').fill(nombreCliente);
+  await page.getByRole('button', { name: 'Guardar cliente' }).click();
+  const tarjeta = page.getByRole('article', { name: nombreCliente });
+  await expect(tarjeta).toBeVisible();
+  if (database === null) {
+    throw new Error('La limpieza E2E requiere la conexión a PostgreSQL de pruebas.');
+  }
+  const clienteGuardado = await database
+    .select({ id: clients.id })
+    .from(clients)
+    .where(eq(clients.displayName, nombreCliente));
+  const clientId = clienteGuardado[0]?.id;
+  if (clientId === undefined) {
+    throw new Error('El formulario no dejó un cliente sintético para limpiar.');
+  }
+  idsClientesE2e.push(clientId);
+  await tarjeta.getByText('Editar y administrar ambientes SAP').click();
+  await tarjeta.getByText('Conexiones MySQL', { exact: true }).click();
+  await expect(tarjeta.getByLabel('ID de destino autorizado')).toBeVisible();
+  await expect(tarjeta.getByLabel('Usuario MySQL')).toBeVisible();
+  await tarjeta.getByLabel('Nombre del perfil').focus();
+  await expect(tarjeta.getByLabel('Nombre del perfil')).toBeFocused();
+
+  const botonTemaOscuro = page.getByRole('button', { name: 'Cambiar a tema oscuro' });
+  if (await botonTemaOscuro.count()) {
+    await botonTemaOscuro.click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.screenshot({
+    path: join(tmpdir(), 'portal-soporte-ps005-2-clientes-desktop-sintetico.png'),
+    animations: 'disabled',
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({
+    path: join(tmpdir(), 'portal-soporte-ps005-2-clientes-movil-sintetico.png'),
+    animations: 'disabled',
+  });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  await tarjeta.getByLabel('Nombre del perfil').fill('Perfil sintético');
+  await tarjeta.getByLabel('ID de destino autorizado').fill('destino-sin-configurar');
+  await tarjeta.getByLabel('Base MySQL').fill('base_sintetica');
+  await tarjeta.getByLabel('Usuario MySQL').fill('usuario_sintetico');
+  await tarjeta.getByLabel('Contraseña MySQL').fill(secretoSintetico);
+  await tarjeta.getByRole('button', { name: 'Guardar perfil' }).click();
+
+  await expect(tarjeta.getByRole('alert')).toContainText('destino no está habilitado');
+  await expect(tarjeta.getByLabel('Contraseña MySQL')).toHaveValue('');
+  expect(await page.locator('body').innerText()).not.toContain(secretoSintetico);
+  expect(await page.locator('body').innerText()).not.toContain('password-sintetico');
 });

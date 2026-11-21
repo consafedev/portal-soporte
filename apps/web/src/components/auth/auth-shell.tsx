@@ -148,12 +148,20 @@ export function MarcoAutenticado({
             Inicio
           </Link>
           {usuario.role === 'ADMIN' ? (
-            <Link
-              href="/settings/users"
-              aria-current={rutaActual === '/settings/users' ? 'page' : undefined}
-            >
-              Usuarios
-            </Link>
+            <>
+              <Link
+                href="/settings/users"
+                aria-current={rutaActual === '/settings/users' ? 'page' : undefined}
+              >
+                Usuarios
+              </Link>
+              <Link
+                href="/settings/clients"
+                aria-current={rutaActual === '/settings/clients' ? 'page' : undefined}
+              >
+                Clientes
+              </Link>
+            </>
           ) : null}
         </nav>
         <div className="navegacion-inferior">

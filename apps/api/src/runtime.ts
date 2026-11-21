@@ -18,6 +18,11 @@ import { PostgresAuthRepository } from './auth/postgres-auth-repository.js';
 import { crearClienteBaseDatosAuth } from './db/client.js';
 import { RepositorioPreferenciasUsuarioPostgres } from './preferences/postgres-user-preferences-repository.js';
 import { crearServidorAuth } from './server.js';
+import { ServicioClientesPortal } from './clients/client-management-service.js';
+import { PostgresClientRepository } from './clients/postgres-client-repository.js';
+import { ServicioPerfilesConexion } from './clients/connection-profile-service.js';
+import { RepositorioPerfilesConexionPostgres } from './clients/postgres-connection-profile-repository.js';
+import { cargarRuntimePerfilesConexion } from './clients/connection-runtime-config.js';
 
 /** Runtime compuesto que expone HTTP privado y un cierre coordinado de recursos. */
 export interface RuntimeAuth {
@@ -46,6 +51,7 @@ export async function crearRuntimeAuth(
   variables: NodeJS.ProcessEnv = process.env,
 ): Promise<RuntimeAuth> {
   const configuracion = cargarConfiguracionAuth(variables);
+  const runtimePerfiles = cargarRuntimePerfilesConexion(variables);
   const database = crearClienteBaseDatosAuth(variables);
 
   try {
@@ -76,6 +82,14 @@ export async function crearRuntimeAuth(
       publicAppOrigin: configuracion.publicAppOrigin,
     });
     const usuariosAdmin = new ServicioUsuariosAdmin(repositorio, reloj, hasheador);
+    const clientes = new ServicioClientesPortal(new PostgresClientRepository(database), reloj);
+    const perfilesConexion = new ServicioPerfilesConexion(
+      new RepositorioPerfilesConexionPostgres(database),
+      runtimePerfiles.custodia,
+      runtimePerfiles.broker,
+      runtimePerfiles.politica,
+      reloj,
+    );
     const preferencias = new ServicioPreferenciasUsuario(
       new RepositorioPreferenciasUsuarioPostgres(database),
     );
@@ -89,6 +103,8 @@ export async function crearRuntimeAuth(
       limitador,
       recuperacion,
       usuariosAdmin,
+      clientes,
+      perfilesConexion,
       preferencias,
       ...(generarIdSolicitud === undefined ? {} : { generarIdSolicitud }),
     });

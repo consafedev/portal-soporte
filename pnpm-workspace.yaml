@@ -5,7 +5,9 @@ packages:
 
 allowBuilds:
   argon2: true
+  cpu-features: false
   esbuild: true
+  ssh2: false
 
 catalog:
   '@types/node': 24.19.2

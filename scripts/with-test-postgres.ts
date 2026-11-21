@@ -322,10 +322,14 @@ async function verificarDestinoRemotoPrueba(
   urlMigrador: string,
 ): Promise<'vacio' | 'migracion-pendiente' | 'migrado'> {
   verificarTunelSshPrueba();
-  const identidadAplicacion = await verificarIdentidadBasePrueba(urlApp, 'portal_test_app');
   const identidadMigrador = await verificarIdentidadBasePrueba(urlMigrador, 'portal_test_migrator');
+  const estado = await verificarEstadoEsquemaBasePrueba(urlMigrador);
+  if (estado === 'migrado') {
+    await concederPermisosAplicacionRemota();
+  }
+  const identidadAplicacion = await verificarIdentidadBasePrueba(urlApp, 'portal_test_app');
   validarMismaInstanciaBasePrueba(identidadAplicacion, identidadMigrador);
-  return verificarEstadoEsquemaBasePrueba(urlMigrador);
+  return estado;
 }
 
 /** Impide reportar PASS si la base remota no quedó en su estado migrado y vacío. */
@@ -379,7 +383,7 @@ async function ejecutarMigracionCompilada(): Promise<void> {
   }
 }
 
-/** Concede al rol de ejecución solo el DML de autenticación previsto en la base aislada. */
+/** Concede al rol de ejecución solo el DML requerido por los módulos probados en la base aislada. */
 async function concederPermisosAplicacionRemota(): Promise<void> {
   const variables = { ...process.env, NODE_ENV: 'test' };
   const configuracion = cargarConfiguracionBasePrueba(variables);
@@ -420,6 +424,12 @@ async function concederPermisosAplicacionRemota(): Promise<void> {
       await transaccion.unsafe('GRANT INSERT ON TABLE portal.audit_events TO portal_test_app');
       await transaccion.unsafe(
         'GRANT SELECT, UPDATE ON TABLE portal.auth_invariants TO portal_test_app',
+      );
+      await transaccion.unsafe(
+        'GRANT SELECT, INSERT, UPDATE ON TABLE portal.clients, portal.client_sap_environments TO portal_test_app',
+      );
+      await transaccion.unsafe(
+        'GRANT SELECT, INSERT, UPDATE ON TABLE portal.client_connection_profiles TO portal_test_app',
       );
       await transaccion.unsafe(
         'REVOKE ALL ON TABLE portal.__drizzle_migrations FROM portal_test_app',

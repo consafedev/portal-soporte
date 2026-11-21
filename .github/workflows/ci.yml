@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - 'codex/**'
 
 permissions:
   contents: read
@@ -109,3 +110,29 @@ jobs:
 
       - name: Auditar dependencias y evaluar excepción aprobada de desarrollo
         run: corepack pnpm@12.21.0 run check:dependencies:ci
+
+  conectores-mysql-sinteticos:
+    name: Conectores MySQL y SSH con fixture sintético
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Obtener el repositorio
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+
+      - name: Preparar pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 12.21.0
+
+      - name: Instalar dependencias y herramientas efímeras
+        run: |
+          pnpm install --frozen-lockfile
+          sudo apt-get update
+          sudo apt-get install --yes openssl openssh-client putty-tools
+
+      - name: Ejecutar conectividad MySQL TLS/SSH contra servicios desechables
+        run: pnpm test:mysql-fixture

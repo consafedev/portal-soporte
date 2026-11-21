@@ -5,12 +5,13 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "build": "tsc --noEmit false -p tsconfig.build.json",
+    "build": "corepack pnpm@12.21.0 --filter @portal-soporte/connectors run build && tsc --noEmit false -p tsconfig.build.json",
     "start": "node dist/apps/api/src/main.js",
     "db:migrate:test": "corepack pnpm@12.21.0 run build && node dist/apps/api/src/db/migrate-cli.js",
     "bootstrap-admin": "corepack pnpm@12.21.0 run build && node dist/apps/api/src/auth/bootstrap-cli.js"
   },
   "dependencies": {
+    "@portal-soporte/connectors": "workspace:*",
     "@fastify/cookie": "11.1.5",
     "@sinclair/typebox": "0.34.52",
     "argon2": "0.45.1",

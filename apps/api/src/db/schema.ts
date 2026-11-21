@@ -15,6 +15,7 @@ import {
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import type { EstadoUsuario, RolUsuario } from '../../../../packages/core/src/auth/models.js';
 import type { TemaPreferenciaUsuario } from '../../../../packages/core/src/preferences/models.js';
+import type { SobreSecretoCifrado } from '../../../../packages/core/src/clients/secret-custody-ports.js';
 
 const esquemaPortal = pgSchema('portal');
 
@@ -56,6 +57,29 @@ type ColumnasAuditoriaRestricciones = {
 
 type ColumnasInvariantesRestricciones = {
   id: AnyPgColumn;
+};
+
+type ColumnasClienteRestricciones = {
+  displayName: AnyPgColumn;
+  status: AnyPgColumn;
+};
+
+type ColumnasAmbienteSapRestricciones = {
+  clientId: AnyPgColumn;
+  code: AnyPgColumn;
+  displayName: AnyPgColumn;
+  status: AnyPgColumn;
+};
+
+type ColumnasPerfilConexionRestricciones = {
+  databaseName: AnyPgColumn;
+  clientId: AnyPgColumn;
+  destinationId: AnyPgColumn;
+  displayName: AnyPgColumn;
+  gatewayId: AnyPgColumn;
+  profileType: AnyPgColumn;
+  environment: AnyPgColumn;
+  status: AnyPgColumn;
 };
 
 /** Define índices únicos y restricciones de coherencia para la identidad del portal. */
@@ -159,6 +183,80 @@ function definirRestriccionesInvariantes(columnas: ColumnasInvariantesRestriccio
   };
 }
 
+/** Limita nombre y estado de un cliente y facilita filtros del panel administrativo. */
+function definirRestriccionesCliente(columnas: ColumnasClienteRestricciones) {
+  return {
+    estadoValido: check('clients_status_check', sql`${columnas.status} IN ('ACTIVE', 'DISABLED')`),
+    nombreNoVacio: check('clients_name_check', sql`length(trim(${columnas.displayName})) >= 2`),
+    nombreIdx: index('clients_display_name_idx').on(columnas.displayName),
+    estadoIdx: index('clients_status_idx').on(columnas.status),
+  };
+}
+
+/** Restringe el código SAP dentro del cliente y prepara búsquedas por propietario. */
+function definirRestriccionesAmbienteSap(columnas: ColumnasAmbienteSapRestricciones) {
+  return {
+    codigoPorClienteUnico: uniqueIndex('client_sap_environments_client_code_unique').on(
+      columnas.clientId,
+      columnas.code,
+    ),
+    propietarioIdx: index('client_sap_environments_client_id_idx').on(columnas.clientId),
+    estadoIdx: index('client_sap_environments_status_idx').on(columnas.status),
+    codigoValido: check(
+      'client_sap_environments_code_check',
+      sql`${columnas.code} ~ '^[A-Z0-9][A-Z0-9_-]{0,31}$'`,
+    ),
+    estadoValido: check(
+      'client_sap_environments_status_check',
+      sql`${columnas.status} IN ('ACTIVE', 'DISABLED')`,
+    ),
+    nombreNoVacio: check(
+      'client_sap_environments_name_check',
+      sql`length(trim(${columnas.displayName})) >= 2`,
+    ),
+  };
+}
+
+/** Restringe perfiles MySQL a metadatos allowlisted y oculta nombres/credenciales del catálogo. */
+function definirRestriccionesPerfilConexion(columnas: ColumnasPerfilConexionRestricciones) {
+  return {
+    nombrePorClienteUnico: uniqueIndex('client_connection_profiles_client_name_unique').on(
+      columnas.clientId,
+      sql`lower(${columnas.displayName})`,
+    ),
+    propietarioIdx: index('client_connection_profiles_client_id_idx').on(columnas.clientId),
+    estadoIdx: index('client_connection_profiles_status_idx').on(columnas.status),
+    tipoValido: check(
+      'client_connection_profiles_type_check',
+      sql`${columnas.profileType} IN ('MYSQL_TCP', 'MYSQL_SSH')`,
+    ),
+    ambienteValido: check(
+      'client_connection_profiles_environment_check',
+      sql`${columnas.environment} IN ('PRODUCTION', 'TEST')`,
+    ),
+    estadoValido: check(
+      'client_connection_profiles_status_check',
+      sql`${columnas.status} IN ('ACTIVE', 'DISABLED')`,
+    ),
+    nombreNoVacio: check(
+      'client_connection_profiles_name_check',
+      sql`length(trim(${columnas.displayName})) >= 2`,
+    ),
+    destinoValido: check(
+      'client_connection_profiles_destination_check',
+      sql`${columnas.destinationId} ~ '^[a-z0-9][a-z0-9_-]{0,63}$'`,
+    ),
+    baseValida: check(
+      'client_connection_profiles_database_check',
+      sql`${columnas.databaseName} ~ '^[A-Za-z0-9_$-]{1,64}$'`,
+    ),
+    gatewayCoherente: check(
+      'client_connection_profiles_gateway_check',
+      sql`(${columnas.profileType} = 'MYSQL_SSH' AND ${columnas.gatewayId} ~ '^[a-z0-9][a-z0-9_-]{0,63}$') OR (${columnas.profileType} = 'MYSQL_TCP' AND ${columnas.gatewayId} IS NULL)`,
+    ),
+  };
+}
+
 /** Devuelve la clave referencial de usuario para sesiones. */
 function referenciarUsuarioDeSesion(): AnyPgColumn {
   return users.id;
@@ -201,6 +299,64 @@ export const users = esquemaPortal.table(
     updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   },
   definirRestriccionesUsuario,
+);
+
+/** Conserva el catálogo de clientes sin incluir endpoints ni credenciales externas. */
+export const clients = esquemaPortal.table(
+  'clients',
+  {
+    id: uuid('id').primaryKey(),
+    displayName: varchar('display_name', { length: 120 }).notNull(),
+    status: text('status').$type<'ACTIVE' | 'DISABLED'>().notNull().default('ACTIVE'),
+    createdByUserId: uuid('created_by_user_id').references(referenciarActorDeAuditoria, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  definirRestriccionesCliente,
+);
+
+/** Separa el código de ambiente SAP del entorno operativo de cada perfil de conexión. */
+export const clientSapEnvironments = esquemaPortal.table(
+  'client_sap_environments',
+  {
+    id: uuid('id').primaryKey(),
+    clientId: uuid('client_id')
+      .notNull()
+      .references(() => clients.id, { onDelete: 'restrict' }),
+    code: varchar('code', { length: 32 }).notNull(),
+    displayName: varchar('display_name', { length: 120 }).notNull(),
+    status: text('status').$type<'ACTIVE' | 'DISABLED'>().notNull().default('ACTIVE'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  definirRestriccionesAmbienteSap,
+);
+
+/** Persiste metadatos de conexión y un sobre cifrado; nunca guarda credenciales en claro. */
+export const clientConnectionProfiles = esquemaPortal.table(
+  'client_connection_profiles',
+  {
+    id: uuid('id').primaryKey(),
+    clientId: uuid('client_id')
+      .notNull()
+      .references(() => clients.id, { onDelete: 'restrict' }),
+    displayName: varchar('display_name', { length: 120 }).notNull(),
+    profileType: text('profile_type').$type<'MYSQL_TCP' | 'MYSQL_SSH'>().notNull(),
+    environment: text('environment').$type<'PRODUCTION' | 'TEST'>().notNull(),
+    destinationId: varchar('destination_id', { length: 64 }).notNull(),
+    gatewayId: varchar('gateway_id', { length: 64 }),
+    databaseName: varchar('database_name', { length: 64 }).notNull(),
+    secretEnvelope: jsonb('secret_envelope').$type<SobreSecretoCifrado>().notNull(),
+    status: text('status').$type<'ACTIVE' | 'DISABLED'>().notNull().default('ACTIVE'),
+    createdByUserId: uuid('created_by_user_id').references(referenciarActorDeAuditoria, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  definirRestriccionesPerfilConexion,
 );
 
 /** Persiste sesiones opacas con expiración inactiva y absoluta comprobables. */

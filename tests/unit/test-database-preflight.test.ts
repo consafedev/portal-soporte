@@ -19,6 +19,25 @@ const restriccionesEsperadasPrueba = [
   ['auth_throttle_windows', 'auth_throttle_expiration_check', 'c'],
   ['auth_throttle_windows', 'auth_throttle_scope_check', 'c'],
   ['auth_throttle_windows', 'auth_throttle_windows_pkey', 'p'],
+  ['client_sap_environments', 'client_sap_environments_client_id_clients_id_fk', 'f'],
+  ['client_sap_environments', 'client_sap_environments_code_check', 'c'],
+  ['client_sap_environments', 'client_sap_environments_name_check', 'c'],
+  ['client_sap_environments', 'client_sap_environments_pkey', 'p'],
+  ['client_sap_environments', 'client_sap_environments_status_check', 'c'],
+  ['client_connection_profiles', 'client_connection_profiles_client_id_clients_id_fk', 'f'],
+  ['client_connection_profiles', 'client_connection_profiles_created_by_user_id_users_id_fk', 'f'],
+  ['client_connection_profiles', 'client_connection_profiles_pkey', 'p'],
+  ['client_connection_profiles', 'client_connection_profiles_type_check', 'c'],
+  ['client_connection_profiles', 'client_connection_profiles_environment_check', 'c'],
+  ['client_connection_profiles', 'client_connection_profiles_status_check', 'c'],
+  ['client_connection_profiles', 'client_connection_profiles_name_check', 'c'],
+  ['client_connection_profiles', 'client_connection_profiles_destination_check', 'c'],
+  ['client_connection_profiles', 'client_connection_profiles_database_check', 'c'],
+  ['client_connection_profiles', 'client_connection_profiles_gateway_check', 'c'],
+  ['clients', 'clients_created_by_user_id_users_id_fk', 'f'],
+  ['clients', 'clients_name_check', 'c'],
+  ['clients', 'clients_pkey', 'p'],
+  ['clients', 'clients_status_check', 'c'],
   ['recovery_tokens', 'recovery_tokens_expiration_check', 'c'],
   ['recovery_tokens', 'recovery_tokens_pkey', 'p'],
   ['recovery_tokens', 'recovery_tokens_purpose_check', 'c'],
@@ -102,6 +121,9 @@ function crearEstadoVacio(): EstadoEsquemaBasePrueba {
       limitadores: 0,
       auditoria: 0,
       invariantes: 0,
+      clientes: 0,
+      ambientesSap: 0,
+      perfilesConexion: 0,
     },
   };
 }
@@ -109,50 +131,87 @@ function crearEstadoVacio(): EstadoEsquemaBasePrueba {
 /** Construye el único esquema migrado que admite una ejecución remota repetible. */
 function crearEstadoMigrado(
   variantesHashesMigracion: readonly (readonly string[])[],
+  incluirClientes = true,
+  incluirPerfiles = true,
 ): EstadoEsquemaBasePrueba {
+  const tablas = [
+    '__drizzle_migrations',
+    'audit_events',
+    'auth_invariants',
+    'auth_throttle_windows',
+    ...(incluirClientes ? ['client_sap_environments', 'clients'] : []),
+    ...(incluirPerfiles ? ['client_connection_profiles'] : []),
+    'recovery_tokens',
+    'sessions',
+    'users',
+  ];
+  const relaciones = [
+    ['__drizzle_migrations', 'r'],
+    ['__drizzle_migrations_id_seq', 'S'],
+    ['__drizzle_migrations_pkey', 'i'],
+    ['audit_events', 'r'],
+    ['audit_events_actor_created_idx', 'i'],
+    ['audit_events_created_at_idx', 'i'],
+    ['audit_events_pkey', 'i'],
+    ['audit_events_target_created_idx', 'i'],
+    ['auth_invariants', 'r'],
+    ['auth_invariants_pkey', 'i'],
+    ['auth_throttle_expires_at_idx', 'i'],
+    ['auth_throttle_windows', 'r'],
+    ['auth_throttle_windows_pkey', 'i'],
+    ...(incluirClientes
+      ? [
+          ['client_sap_environments', 'r'],
+          ['client_sap_environments_client_code_unique', 'i'],
+          ['client_sap_environments_client_id_idx', 'i'],
+          ['client_sap_environments_pkey', 'i'],
+          ['client_sap_environments_status_idx', 'i'],
+          ['clients', 'r'],
+          ['clients_display_name_idx', 'i'],
+          ['clients_pkey', 'i'],
+          ['clients_status_idx', 'i'],
+        ]
+      : []),
+    ...(incluirPerfiles
+      ? [
+          ['client_connection_profiles', 'r'],
+          ['client_connection_profiles_client_name_unique', 'i'],
+          ['client_connection_profiles_client_id_idx', 'i'],
+          ['client_connection_profiles_pkey', 'i'],
+          ['client_connection_profiles_status_idx', 'i'],
+        ]
+      : []),
+    ['recovery_tokens', 'r'],
+    ['recovery_tokens_expires_at_idx', 'i'],
+    ['recovery_tokens_pkey', 'i'],
+    ['recovery_tokens_token_hash_unique', 'i'],
+    ['recovery_tokens_user_id_idx', 'i'],
+    ['sessions', 'r'],
+    ['sessions_absolute_expires_at_idx', 'i'],
+    ['sessions_idle_expires_at_idx', 'i'],
+    ['sessions_pkey', 'i'],
+    ['sessions_token_hash_unique', 'i'],
+    ['sessions_user_id_idx', 'i'],
+    ['users', 'r'],
+    ['users_email_normalized_unique', 'i'],
+    ['users_pkey', 'i'],
+    ['users_username_normalized_unique', 'i'],
+  ];
   return {
     esquemas: ['portal', 'public'],
-    tablas: [
-      '__drizzle_migrations',
-      'audit_events',
-      'auth_invariants',
-      'auth_throttle_windows',
-      'recovery_tokens',
-      'sessions',
-      'users',
-    ].map((nombre) => ({ esquema: 'portal', nombre, tipo: 'BASE TABLE' })),
+    tablas: tablas.map((nombre) => ({ esquema: 'portal', nombre, tipo: 'BASE TABLE' })),
     secuencias: [{ esquema: 'portal', nombre: '__drizzle_migrations_id_seq' }],
-    restricciones: restriccionesEsperadasPrueba,
-    relaciones: [
-      ['__drizzle_migrations', 'r'],
-      ['__drizzle_migrations_id_seq', 'S'],
-      ['__drizzle_migrations_pkey', 'i'],
-      ['audit_events', 'r'],
-      ['audit_events_actor_created_idx', 'i'],
-      ['audit_events_created_at_idx', 'i'],
-      ['audit_events_pkey', 'i'],
-      ['audit_events_target_created_idx', 'i'],
-      ['auth_invariants', 'r'],
-      ['auth_invariants_pkey', 'i'],
-      ['auth_throttle_expires_at_idx', 'i'],
-      ['auth_throttle_windows', 'r'],
-      ['auth_throttle_windows_pkey', 'i'],
-      ['recovery_tokens', 'r'],
-      ['recovery_tokens_expires_at_idx', 'i'],
-      ['recovery_tokens_pkey', 'i'],
-      ['recovery_tokens_token_hash_unique', 'i'],
-      ['recovery_tokens_user_id_idx', 'i'],
-      ['sessions', 'r'],
-      ['sessions_absolute_expires_at_idx', 'i'],
-      ['sessions_idle_expires_at_idx', 'i'],
-      ['sessions_pkey', 'i'],
-      ['sessions_token_hash_unique', 'i'],
-      ['sessions_user_id_idx', 'i'],
-      ['users', 'r'],
-      ['users_email_normalized_unique', 'i'],
-      ['users_pkey', 'i'],
-      ['users_username_normalized_unique', 'i'],
-    ].map(([nombre, tipo]) => ({ esquema: 'portal', nombre: nombre!, tipo: tipo! })),
+    restricciones: restriccionesEsperadasPrueba.filter(
+      (restriccion) =>
+        (incluirClientes ||
+          (restriccion.tabla !== 'client_sap_environments' && restriccion.tabla !== 'clients')) &&
+        (incluirPerfiles || restriccion.tabla !== 'client_connection_profiles'),
+    ),
+    relaciones: relaciones.map(([nombre, tipo]) => ({
+      esquema: 'portal',
+      nombre: nombre!,
+      tipo: tipo!,
+    })),
     hashesMigraciones: variantesHashesMigracion.map((variantes) => variantes[0] ?? ''),
     objetosAdicionales: {
       rutinas: 0,
@@ -170,6 +229,9 @@ function crearEstadoMigrado(
       limitadores: 0,
       auditoria: 0,
       invariantes: 1,
+      clientes: 0,
+      ambientesSap: 0,
+      perfilesConexion: 0,
     },
   };
 }
@@ -239,9 +301,15 @@ describe('validación de identidad PostgreSQL de prueba', () => {
 });
 
 describe('validación del estado persistente de la base de pruebas', () => {
-  const hashesEsperados = ['hash-0000', 'hash-0001', 'hash-0002', 'hash-0003', 'hash-0004'].map(
-    (hash) => [hash],
-  );
+  const hashesEsperados = [
+    'hash-0000',
+    'hash-0001',
+    'hash-0002',
+    'hash-0003',
+    'hash-0004',
+    'hash-0005',
+    'hash-0006',
+  ].map((hash) => [hash]);
 
   it('acepta una base nueva antes de aplicar migraciones', () => {
     expect(validarEstadoEsquemaBasePrueba(crearEstadoVacio(), hashesEsperados)).toBe('vacio');
@@ -263,23 +331,23 @@ describe('validación del estado persistente de la base de pruebas', () => {
   });
 
   it('acepta únicamente el esquema vacío inmediatamente anterior a la última migración', () => {
-    const estadoAnterior = crearEstadoMigrado(hashesEsperados.slice(0, -1));
-    const restriccionesAnteriores = estadoAnterior.restricciones.filter(
-      (restriccion) => restriccion.nombre !== 'users_theme_preference_check',
-    );
+    const estadoAnterior = crearEstadoMigrado(hashesEsperados.slice(0, -1), true, false);
 
-    expect(
-      validarEstadoEsquemaBasePrueba(
-        { ...estadoAnterior, restricciones: restriccionesAnteriores },
-        hashesEsperados,
-      ),
-    ).toBe('migracion-pendiente');
+    expect(validarEstadoEsquemaBasePrueba(estadoAnterior, hashesEsperados)).toBe(
+      'migracion-pendiente',
+    );
   });
 
   it('acepta hashes equivalentes de archivos con finales de línea Windows o Unix', () => {
-    const variantes = ['hash-0000', 'hash-0001', 'hash-0002', 'hash-0003', 'hash-0004'].map(
-      (hash) => [`${hash}-windows`, `${hash}-unix`],
-    );
+    const variantes = [
+      'hash-0000',
+      'hash-0001',
+      'hash-0002',
+      'hash-0003',
+      'hash-0004',
+      'hash-0005',
+      'hash-0006',
+    ].map((hash) => [`${hash}-windows`, `${hash}-unix`]);
     const estado = crearEstadoMigrado(variantes);
 
     expect(
@@ -353,6 +421,20 @@ describe('validación del estado persistente de la base de pruebas', () => {
       {
         ...crearEstadoMigrado(hashesEsperados),
         filas: { ...crearEstadoMigrado(hashesEsperados).filas, auditoria: 1 },
+      },
+    ],
+    [
+      'cliente residual',
+      {
+        ...crearEstadoMigrado(hashesEsperados),
+        filas: { ...crearEstadoMigrado(hashesEsperados).filas, clientes: 1 },
+      },
+    ],
+    [
+      'ambiente SAP residual',
+      {
+        ...crearEstadoMigrado(hashesEsperados),
+        filas: { ...crearEstadoMigrado(hashesEsperados).filas, ambientesSap: 1 },
       },
     ],
     [

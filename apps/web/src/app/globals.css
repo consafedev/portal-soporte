@@ -259,7 +259,8 @@ h3 {
 }
 
 .campo input,
-.campo select {
+.campo select,
+.campo textarea {
   width: 100%;
   min-height: 3rem;
   padding: 0.68rem 0.8rem;
@@ -271,12 +272,14 @@ h3 {
 }
 
 .campo input:hover,
-.campo select:hover {
+.campo select:hover,
+.campo textarea:hover {
   border-color: #79899d;
 }
 
 .campo input:focus-visible,
-.campo select:focus-visible {
+.campo select:focus-visible,
+.campo textarea:focus-visible {
   border-color: var(--foco);
 }
 
@@ -684,10 +687,263 @@ button:disabled {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.formulario-cliente {
+  align-items: end;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.formulario-ambiente,
+.formulario-editar-ambiente {
+  align-items: end;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.formulario-ambiente button,
+.formulario-editar-ambiente button {
+  justify-self: start;
+}
+
 .listado-usuarios {
   display: grid;
   gap: 1rem;
   margin-top: 0.7rem;
+}
+
+.listado-clientes,
+.lista-clientes,
+.seccion-ambientes,
+.lista-ambientes,
+.detalle-cliente-contenido {
+  display: grid;
+  gap: 1rem;
+}
+
+.listado-clientes {
+  margin-top: 0.7rem;
+}
+
+.tarjeta-cliente {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+  padding: clamp(1rem, 2.5vw, 1.3rem);
+  border: 1px solid var(--borde);
+  border-radius: 1rem;
+  background: var(--superficie);
+  box-shadow: 0 0.25rem 1rem rgb(23 34 53 / 4%);
+}
+
+.cabecera-cliente {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.cabecera-cliente .texto-secundario {
+  margin-top: 0.3rem;
+}
+
+.detalle-cliente {
+  border-top: 1px solid var(--borde);
+  padding-top: 0.85rem;
+}
+
+.detalle-cliente summary,
+.fila-ambiente details summary {
+  width: fit-content;
+  color: var(--enlace);
+  cursor: pointer;
+  font-size: 0.91rem;
+  font-weight: 650;
+}
+
+.detalle-cliente-contenido {
+  padding-top: 1rem;
+}
+
+.seccion-ambientes {
+  border-top: 1px solid var(--borde);
+  padding-top: 1rem;
+}
+
+.seccion-perfiles-conexion {
+  border-top: 1px solid var(--borde);
+  padding-top: 1rem;
+}
+
+.seccion-perfiles-conexion > details > summary,
+.fila-perfil-conexion > details > summary {
+  width: fit-content;
+  color: var(--enlace);
+  cursor: pointer;
+  font-size: 0.94rem;
+  font-weight: 650;
+}
+
+.contenido-perfiles-conexion,
+.lista-perfiles-conexion {
+  display: grid;
+  gap: 1rem;
+  padding-top: 1rem;
+}
+
+.formulario-perfil-conexion {
+  align-items: end;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 1rem;
+  border: 1px solid var(--borde);
+  border-radius: 0.85rem;
+  background: var(--superficie-secundaria);
+}
+
+.formulario-perfil-conexion > h5,
+.formulario-perfil-conexion > h6,
+.formulario-perfil-conexion > p,
+.formulario-perfil-conexion > button,
+.grupo-credenciales {
+  grid-column: 1 / -1;
+}
+
+.formulario-perfil-conexion h5,
+.formulario-perfil-conexion h6,
+.lista-perfiles-conexion h5 {
+  margin: 0;
+  color: var(--texto);
+  font-size: 1rem;
+}
+
+.grupo-credenciales {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 0;
+  padding: 0.9rem;
+  border: 1px solid var(--borde);
+  border-radius: 0.75rem;
+}
+
+.grupo-credenciales legend {
+  padding: 0 0.3rem;
+  color: var(--texto);
+  font-weight: 650;
+}
+
+.campo textarea {
+  width: 100%;
+  min-height: 5rem;
+  padding: 0.68rem 0.8rem;
+  border: 1px solid var(--borde-control);
+  border-radius: 0.62rem;
+  color: var(--texto);
+  background: var(--superficie);
+  font:
+    0.88rem/1.45 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  resize: vertical;
+}
+
+.fila-perfil-conexion {
+  display: grid;
+  gap: 0.85rem;
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--borde);
+  border-radius: 0.85rem;
+  background: var(--superficie);
+}
+
+.fila-perfil-conexion > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.fila-perfil-conexion h6 {
+  margin: 0;
+  color: var(--texto);
+  font-size: 0.98rem;
+}
+
+.fila-perfil-conexion .texto-secundario {
+  margin: 0.25rem 0 0.5rem;
+}
+
+.acciones-perfil {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.etiqueta-estado {
+  display: inline-flex;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--borde);
+  border-radius: 999px;
+  color: var(--texto-secundario);
+  font-size: 0.78rem;
+}
+
+.etiqueta-estado.estado-active {
+  border-color: #47745a;
+  color: var(--texto);
+}
+
+.seccion-ambientes h4 {
+  margin: 0;
+  color: var(--texto);
+  font-size: 1rem;
+}
+
+.estado-vacio,
+.nota-conectividad {
+  margin: 0;
+  padding: 0.9rem 1rem;
+  border: 1px dashed var(--borde-control);
+  border-radius: 0.75rem;
+  color: var(--texto-secundario);
+  background: var(--superficie-secundaria);
+}
+
+.nota-conectividad {
+  font-size: 0.87rem;
+}
+
+.fila-ambiente {
+  display: grid;
+  align-items: center;
+  gap: 0.8rem 1rem;
+  padding: 0.85rem 0;
+  border-top: 1px solid var(--borde);
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.fila-ambiente > div {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.8rem;
+}
+
+.fila-ambiente > div span:not(.etiqueta-estado) {
+  color: var(--texto-secundario);
+  overflow-wrap: anywhere;
+}
+
+.fila-ambiente details {
+  min-width: 0;
+}
+
+.fila-ambiente details[open] {
+  grid-column: 1 / -1;
+}
+
+.fila-ambiente details form {
+  padding-top: 0.8rem;
 }
 
 .encabezado-listado,
@@ -909,6 +1165,9 @@ button:disabled {
   .auth-panel,
   .panel-contenido,
   .tarjeta-usuario,
+  .tarjeta-cliente,
+  .estado-vacio,
+  .nota-conectividad,
   .barra-lateral,
   .identidad-lateral,
   .enlace-acceso {
@@ -926,6 +1185,7 @@ button:disabled {
   .auth-panel,
   .panel-contenido,
   .tarjeta-usuario,
+  .tarjeta-cliente,
   .campo input,
   .campo select,
   .boton-secundario {
@@ -993,6 +1253,11 @@ button:disabled {
 
   .columnas-perfil,
   .formulario-invitacion,
+  .formulario-cliente,
+  .formulario-ambiente,
+  .formulario-editar-ambiente,
+  .formulario-perfil-conexion,
+  .grupo-credenciales,
   .datos-usuario {
     grid-template-columns: 1fr;
   }
@@ -1004,6 +1269,38 @@ button:disabled {
   .encabezado-listado {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .cabecera-cliente {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .formulario-cliente button,
+  .formulario-ambiente button,
+  .formulario-editar-ambiente button {
+    width: 100%;
+  }
+
+  .fila-ambiente {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .fila-perfil-conexion > header {
+    flex-direction: column;
+  }
+
+  .acciones-perfil {
+    width: 100%;
+  }
+
+  .acciones-perfil button {
+    flex: 1 1 100%;
+  }
+
+  .fila-ambiente > button {
+    width: 100%;
   }
 }
 

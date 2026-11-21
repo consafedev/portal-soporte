@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { and, eq, inArray, or, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ServicioAutenticacionCore } from '../../apps/api/src/auth/auth-service.js';
@@ -11,17 +11,30 @@ import { RepositorioPreferenciasUsuarioPostgres } from '../../apps/api/src/prefe
 import { ServicioPreferenciasUsuario } from '../../packages/core/src/preferences/service.js';
 import { ServicioSesion } from '../../apps/api/src/auth/session-service.js';
 import { ServicioRecuperacionAuth } from '../../apps/api/src/auth/recovery-service.js';
+import { ServicioClientesPortal } from '../../apps/api/src/clients/client-management-service.js';
+import { PostgresClientRepository } from '../../apps/api/src/clients/postgres-client-repository.js';
+import { RepositorioPerfilesConexionPostgres } from '../../apps/api/src/clients/postgres-connection-profile-repository.js';
+import { ServicioPerfilesConexion } from '../../apps/api/src/clients/connection-profile-service.js';
 import { cargarConfiguracionAuth } from '../../apps/api/src/config.js';
 import { crearServidorAuth } from '../../apps/api/src/server.js';
 import { crearClienteBaseDatosAuth } from '../../apps/api/src/db/client.js';
 import {
   auditEvents,
   authThrottleWindows,
+  clientSapEnvironments,
+  clientConnectionProfiles,
+  clients,
   recoveryTokens,
   sessions,
   users,
 } from '../../apps/api/src/db/schema.js';
 import type { MensajeCorreoAuth, RelojAuth } from '../../packages/core/src/auth/ports.js';
+import type {
+  ClientConnectionBroker,
+  SobreSecretoCifrado,
+} from '../../packages/core/src/clients/secret-custody-ports.js';
+import { PoliticaDestinosConexion } from '../../packages/connectors/src/mysql-connection-broker.js';
+import { ServicioCifradoSecretos } from '../../packages/connectors/src/secret-envelope.js';
 import {
   crearClienteMigradorPruebas,
   crearIdentificadoresSolicitudPrueba,
@@ -61,10 +74,32 @@ let servicioAdmin: ServicioUsuariosAdmin | null = null;
 let cookieAdmin: string | null = null;
 let cookieSupport: string | null = null;
 let idNuevoUsuario: string | null = null;
+let idClientePrueba: string | null = null;
+let idClientePerfilPrueba: string | null = null;
+let idPerfilPrueba: string | null = null;
 let limitadorAdmin: LimitadorIntentosPostgres | null = null;
 let fallarCorreoAdmin = false;
 const idsUsuariosCreados: string[] = [];
+const idsClientesCreados: string[] = [];
 const mensajesAdmin: MensajeCorreoAuth[] = [];
+const claveCustodiaSintetica = randomBytes(32);
+
+/** Crea un cifrador de integración con material aleatorio que vive solo en memoria. */
+function crearCifradorIntegracion(): ServicioCifradoSecretos {
+  return new ServicioCifradoSecretos({
+    /** Entrega una copia de la llave sintética activa para cifrar en la prueba. */
+    async obtenerActiva() {
+      return { id: 'integration-v1', material: Buffer.from(claveCustodiaSintetica) };
+    },
+    /** Recupera solo la versión efímera conocida por esta ejecución. */
+    async obtener(id: string) {
+      if (id !== 'integration-v1') {
+        throw new Error('KEY_VERSION_UNAVAILABLE');
+      }
+      return { id, material: Buffer.from(claveCustodiaSintetica) };
+    },
+  });
+}
 
 /** Recupera el único PostgreSQL efímero de la suite o falla de forma explícita. */
 function exigirBasePrueba(): NonNullable<typeof database> {
@@ -209,6 +244,35 @@ async function prepararAdministracion(): Promise<void> {
     reloj,
   );
   const usuariosAdmin = new ServicioUsuariosAdmin(repositorio, reloj, hasheador);
+  const clientes = new ServicioClientesPortal(
+    new PostgresClientRepository(exigirBasePrueba()),
+    reloj,
+  );
+  const custodia = crearCifradorIntegracion();
+  const brokerSintetico: ClientConnectionBroker = {
+    /** Borra el paquete de credenciales sin abrir red y devuelve fallo explícitamente simulado. */
+    async probar(_perfil, secretos) {
+      secretos.fill(0);
+      return { code: 'MYSQL_CONNECTION_FAILED', completedAt: reloj.ahora() };
+    },
+  };
+  const perfilesConexion = new ServicioPerfilesConexion(
+    new RepositorioPerfilesConexionPostgres(exigirBasePrueba()),
+    custodia,
+    brokerSintetico,
+    new PoliticaDestinosConexion(
+      [
+        {
+          id: 'mysql-sintetico',
+          hostname: 'mysql.test.invalid',
+          address: '192.0.2.33',
+          port: 3306,
+        },
+      ],
+      [],
+    ),
+    reloj,
+  );
   const limitador = new LimitadorIntentosPostgres(exigirBasePrueba(), Buffer.alloc(32, 29));
   limitadorAdmin = limitador;
   const recuperacion = new ServicioRecuperacionAuth({
@@ -244,6 +308,8 @@ async function prepararAdministracion(): Promise<void> {
     limitador,
     recuperacion,
     usuariosAdmin,
+    clientes,
+    perfilesConexion,
     preferencias: new ServicioPreferenciasUsuario(
       new RepositorioPreferenciasUsuarioPostgres(exigirBasePrueba()),
     ),
@@ -256,6 +322,7 @@ async function prepararAdministracion(): Promise<void> {
 /** Cierra el servidor y borra únicamente las filas de usuario de esta suite. */
 async function cerrarAdministracion(): Promise<void> {
   await aplicacion?.close();
+  claveCustodiaSintetica.fill(0);
   const usuariosTemporales: string[] = [idAdmin, idSupport];
   usuariosTemporales.push(...idsUsuariosCreados);
   const migrador = databaseMigrador;
@@ -275,6 +342,15 @@ async function cerrarAdministracion(): Promise<void> {
         inArray(auditEvents.targetUserId, usuariosTemporales),
       ),
     );
+  if (idsClientesCreados.length > 0) {
+    await migrador
+      .delete(clientConnectionProfiles)
+      .where(inArray(clientConnectionProfiles.clientId, idsClientesCreados));
+    await migrador
+      .delete(clientSapEnvironments)
+      .where(inArray(clientSapEnvironments.clientId, idsClientesCreados));
+    await migrador.delete(clients).where(inArray(clients.id, idsClientesCreados));
+  }
   await migrador.delete(users).where(inArray(users.id, usuariosTemporales));
   // El preflight exige que la base aislada empiece sin filas de throttling; se retira el conjunto sintético propio.
   await migrador.delete(authThrottleWindows);
@@ -941,9 +1017,327 @@ function definirPruebasAdmin(): void {
       headers: { cookie: sessionToInvalidate },
     });
 
-    expect(respuesta.statusCode).toBe(200);
-    expect(respuesta.json()).toMatchObject({ role: 'ADMIN' });
-    expect(consulta.statusCode).toBe(401);
+    try {
+      expect(respuesta.statusCode).toBe(200);
+      expect(respuesta.json()).toMatchObject({ role: 'ADMIN' });
+      expect(consulta.statusCode).toBe(401);
+    } finally {
+      await exigirBaseMigrador()
+        .update(users)
+        .set({ role: 'SUPPORT' })
+        .where(eq(users.id, idSupport));
+      cookieSupport = await iniciarSesion(usuarioSupport, contrasenaActualSupport);
+    }
+  });
+
+  it('permite a ADMIN administrar clientes y ambientes SAP con auditoría transaccional', async () => {
+    const admin = cookieAdmin;
+    if (admin === null) {
+      throw new Error('La prueba requiere la sesión ADMIN preparada.');
+    }
+    const nombreCliente = `Cliente sintético ${sufijo}`;
+    const respuestaAlta = await exigirAplicacion().inject({
+      method: 'POST',
+      url: '/api/v1/admin/clients',
+      headers: await headersDeEscritura(admin),
+      payload: { nombre: nombreCliente },
+    });
+    const cliente = respuestaAlta.json<{ id?: string; nombre?: string; estado?: string }>();
+    if (typeof cliente.id !== 'string') {
+      throw new Error('El alta sintética no devolvió un identificador de cliente.');
+    }
+    idClientePrueba = cliente.id;
+    idsClientesCreados.push(cliente.id);
+
+    const sinCsrf = await exigirAplicacion().inject({
+      method: 'POST',
+      url: '/api/v1/admin/clients',
+      headers: { origin: origen, 'sec-fetch-site': 'same-origin', cookie: admin },
+      payload: { nombre: `Sin CSRF ${sufijo}` },
+    });
+    const codigoAmbiente = `PRD_${sufijo.toUpperCase()}`;
+    const respuestaAmbiente = await exigirAplicacion().inject({
+      method: 'POST',
+      url: `/api/v1/admin/clients/${cliente.id}/sap-environments`,
+      headers: await headersDeEscritura(admin),
+      payload: { codigo: codigoAmbiente.toLowerCase(), nombre: 'Producción sintética' },
+    });
+    const ambiente = respuestaAmbiente.json<{ id: string; codigo: string; estado: string }>();
+    const duplicado = await exigirAplicacion().inject({
+      method: 'POST',
+      url: `/api/v1/admin/clients/${cliente.id}/sap-environments`,
+      headers: await headersDeEscritura(admin),
+      payload: { codigo: codigoAmbiente, nombre: 'Duplicado sintético' },
+    });
+    const actualizarCliente = await exigirAplicacion().inject({
+      method: 'PATCH',
+      url: `/api/v1/admin/clients/${cliente.id}`,
+      headers: await headersDeEscritura(admin),
+      payload: { nombre: `${nombreCliente} editado` },
+    });
+    const actualizarAmbiente = await exigirAplicacion().inject({
+      method: 'PATCH',
+      url: `/api/v1/admin/clients/${cliente.id}/sap-environments/${ambiente.id}`,
+      headers: await headersDeEscritura(admin),
+      payload: { codigo: `QAS_${sufijo.toUpperCase()}`, nombre: 'Calidad sintética' },
+    });
+    const desactivarAmbiente = await exigirAplicacion().inject({
+      method: 'PATCH',
+      url: `/api/v1/admin/clients/${cliente.id}/sap-environments/${ambiente.id}`,
+      headers: await headersDeEscritura(admin),
+      payload: { estado: 'DISABLED' },
+    });
+    const desactivarCliente = await exigirAplicacion().inject({
+      method: 'PATCH',
+      url: `/api/v1/admin/clients/${cliente.id}`,
+      headers: await headersDeEscritura(admin),
+      payload: { estado: 'DISABLED' },
+    });
+    const clientesRespuesta = await exigirAplicacion().inject({
+      method: 'GET',
+      url: '/api/v1/admin/clients',
+      headers: { cookie: admin },
+    });
+    const auditoria = await exigirBaseMigrador()
+      .select({ action: auditEvents.action, metadata: auditEvents.metadata })
+      .from(auditEvents)
+      .where(sql`${auditEvents.metadata}->>'clientId' = ${cliente.id}`);
+
+    expect(respuestaAlta.statusCode).toBe(201);
+    expect(cliente).toMatchObject({ nombre: nombreCliente, estado: 'ACTIVE' });
+    expect(respuestaAlta.body).not.toContain('passwordHash');
+    expect(respuestaAlta.body).not.toContain('credential');
+    expect(sinCsrf.statusCode).toBe(403);
+    expect(respuestaAmbiente.statusCode).toBe(201);
+    expect(ambiente.codigo).toBe(codigoAmbiente);
+    expect(duplicado.statusCode).toBe(409);
+    expect(duplicado.json()).toMatchObject({ code: 'SAP_ENVIRONMENT_DUPLICATE' });
+    expect(actualizarCliente.json()).toMatchObject({ nombre: `${nombreCliente} editado` });
+    expect(actualizarAmbiente.json()).toMatchObject({
+      codigo: `QAS_${sufijo.toUpperCase()}`,
+      nombre: 'Calidad sintética',
+    });
+    expect(desactivarAmbiente.json()).toMatchObject({ estado: 'DISABLED' });
+    expect(desactivarCliente.json()).toMatchObject({ estado: 'DISABLED' });
+    expect(clientesRespuesta.json()).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: cliente.id, estado: 'DISABLED' })]),
+    );
+    expect(auditoria.map((evento) => evento.action)).toEqual(
+      expect.arrayContaining([
+        'CLIENT_CREATED',
+        'CLIENT_UPDATED',
+        'CLIENT_DISABLED',
+        'CLIENT_SAP_ENVIRONMENT_CREATED',
+        'CLIENT_SAP_ENVIRONMENT_UPDATED',
+        'CLIENT_SAP_ENVIRONMENT_DISABLED',
+      ]),
+    );
+    expect(JSON.stringify(auditoria)).not.toContain(nombreCliente);
+  });
+
+  it('deniega a SUPPORT todos los endpoints de clientes incluso con sesión y CSRF', async () => {
+    const support = cookieSupport;
+    const clientId = idClientePrueba;
+    if (support === null || clientId === null) {
+      throw new Error('La prueba requiere las sesiones y el cliente sintético previos.');
+    }
+    const escritura = await headersDeEscritura(support);
+    const respuestas = await Promise.all([
+      exigirAplicacion().inject({
+        method: 'GET',
+        url: '/api/v1/admin/clients',
+        headers: { cookie: support },
+      }),
+      exigirAplicacion().inject({
+        method: 'POST',
+        url: '/api/v1/admin/clients',
+        headers: escritura,
+        payload: { nombre: `Denegado ${sufijo}` },
+      }),
+      exigirAplicacion().inject({
+        method: 'PATCH',
+        url: `/api/v1/admin/clients/${clientId}`,
+        headers: escritura,
+        payload: { estado: 'DISABLED' },
+      }),
+      exigirAplicacion().inject({
+        method: 'GET',
+        url: `/api/v1/admin/clients/${clientId}/sap-environments`,
+        headers: { cookie: support },
+      }),
+      exigirAplicacion().inject({
+        method: 'POST',
+        url: `/api/v1/admin/clients/${clientId}/sap-environments`,
+        headers: escritura,
+        payload: { codigo: 'DENIED', nombre: 'No autorizado' },
+      }),
+    ]);
+    const cliente = await exigirBasePrueba()
+      .select({ status: clients.status })
+      .from(clients)
+      .where(eq(clients.id, clientId));
+
+    expect(respuestas.map((respuesta) => respuesta.statusCode)).toEqual([403, 403, 403, 403, 403]);
+    expect(cliente[0]?.status).toBe('DISABLED');
+  });
+
+  it('permite a ADMIN guardar perfiles cifrados y devuelve respuestas redactadas', async () => {
+    const admin = cookieAdmin;
+    if (admin === null) {
+      throw new Error('La prueba requiere una sesión ADMIN sintética.');
+    }
+    const altaCliente = await exigirAplicacion().inject({
+      method: 'POST',
+      url: '/api/v1/admin/clients',
+      headers: await headersDeEscritura(admin),
+      payload: { nombre: `Cliente de conexión ${sufijo}` },
+    });
+    const cliente = altaCliente.json<{ id?: string }>();
+    if (altaCliente.statusCode !== 201 || cliente.id === undefined) {
+      throw new Error('No se creó el cliente sintético para perfiles.');
+    }
+    idClientePerfilPrueba = cliente.id;
+    idsClientesCreados.push(cliente.id);
+    const secretoPrimario = 'password-sintetico-no-publicar';
+    const secretoReemplazo = 'password-reemplazo-sintetico';
+    const altaPerfil = await exigirAplicacion().inject({
+      method: 'POST',
+      url: `/api/v1/admin/clients/${cliente.id}/connection-profiles`,
+      headers: await headersDeEscritura(admin),
+      payload: {
+        nombre: 'MySQL de pruebas',
+        tipo: 'MYSQL_TCP',
+        entorno: 'TEST',
+        destinoMySqlId: 'mysql-sintetico',
+        baseDatos: 'base_sintetica',
+        credenciales: { mysqlUsername: 'usuario_sintetico', mysqlPassword: secretoPrimario },
+      },
+    });
+    const perfil = altaPerfil.json<{ id?: string; destinoMySqlId?: string }>();
+    if (altaPerfil.statusCode !== 201 || perfil.id === undefined) {
+      throw new Error('No se creó el perfil sintético de conexión.');
+    }
+    idPerfilPrueba = perfil.id;
+    const perfilPersistido = await exigirBasePrueba()
+      .select({ secretEnvelope: clientConnectionProfiles.secretEnvelope })
+      .from(clientConnectionProfiles)
+      .where(eq(clientConnectionProfiles.id, perfil.id));
+    const listado = await exigirAplicacion().inject({
+      method: 'GET',
+      url: `/api/v1/admin/clients/${cliente.id}/connection-profiles`,
+      headers: { cookie: admin },
+    });
+    const reemplazo = await exigirAplicacion().inject({
+      method: 'PUT',
+      url: `/api/v1/admin/clients/${cliente.id}/connection-profiles/${perfil.id}/credentials`,
+      headers: await headersDeEscritura(admin),
+      payload: {
+        credenciales: { mysqlUsername: 'usuario_sintetico', mysqlPassword: secretoReemplazo },
+      },
+    });
+    const sobreDespuesDeReemplazo = await exigirBasePrueba()
+      .select({ secretEnvelope: clientConnectionProfiles.secretEnvelope })
+      .from(clientConnectionProfiles)
+      .where(eq(clientConnectionProfiles.id, perfil.id));
+    const pruebaSimulada = await exigirAplicacion().inject({
+      method: 'POST',
+      url: `/api/v1/admin/clients/${cliente.id}/connection-profiles/${perfil.id}/test`,
+      headers: await headersDeEscritura(admin),
+    });
+    const auditoria = await exigirBaseMigrador()
+      .select({ action: auditEvents.action, metadata: auditEvents.metadata })
+      .from(auditEvents)
+      .where(sql`${auditEvents.metadata}->>'profileId' = ${perfil.id}`);
+
+    expect(perfil.destinoMySqlId).toBe('mysql-sintetico');
+    expect(altaPerfil.body).not.toContain(secretoPrimario);
+    expect(altaPerfil.body).not.toContain('secretEnvelope');
+    expect(altaPerfil.body).not.toContain('mysqlUsername');
+    expect(JSON.stringify(perfilPersistido[0]?.secretEnvelope)).not.toContain(secretoPrimario);
+    expect(listado.statusCode).toBe(200);
+    expect(listado.body).not.toContain(secretoPrimario);
+    expect(reemplazo.statusCode).toBe(200);
+    expect(reemplazo.body).not.toContain(secretoReemplazo);
+    expect(sobreDespuesDeReemplazo[0]?.secretEnvelope).not.toEqual(
+      perfilPersistido[0]?.secretEnvelope,
+    );
+    const paqueteDescifrado = await crearCifradorIntegracion().descifrar(
+      sobreDespuesDeReemplazo[0]?.secretEnvelope as SobreSecretoCifrado,
+      { clientId: cliente.id, profileId: perfil.id, purpose: 'MYSQL_CREDENTIALS' },
+    );
+    let reemplazoPersistidoCorrectamente = false;
+    try {
+      const credencialesGuardadas: unknown = JSON.parse(paqueteDescifrado.toString('utf8'));
+      reemplazoPersistidoCorrectamente =
+        typeof credencialesGuardadas === 'object' &&
+        credencialesGuardadas !== null &&
+        'mysqlPassword' in credencialesGuardadas &&
+        credencialesGuardadas.mysqlPassword === secretoReemplazo;
+    } finally {
+      paqueteDescifrado.fill(0);
+    }
+    expect(reemplazoPersistidoCorrectamente).toBe(true);
+    expect(pruebaSimulada.statusCode).toBe(200);
+    expect(pruebaSimulada.json()).toMatchObject({ code: 'MYSQL_CONNECTION_FAILED' });
+    expect(JSON.stringify(auditoria)).not.toContain(secretoPrimario);
+    expect(JSON.stringify(auditoria)).not.toContain(secretoReemplazo);
+    expect(auditoria.map((evento) => evento.action)).toEqual(
+      expect.arrayContaining([
+        'CLIENT_CONNECTION_PROFILE_CREATED',
+        'CLIENT_CONNECTION_CREDENTIALS_REPLACED',
+        'CLIENT_CONNECTION_TESTED',
+      ]),
+    );
+  });
+
+  it('deniega a SUPPORT leer o modificar perfiles de conexión y credenciales', async () => {
+    const support = cookieSupport;
+    const clientId = idClientePerfilPrueba;
+    const profileId = idPerfilPrueba;
+    if (support === null || clientId === null || profileId === null) {
+      throw new Error('La prueba requiere el perfil sintético ADMIN creado previamente.');
+    }
+    const operaciones = [
+      { method: 'GET' as const, url: `/api/v1/admin/clients/${clientId}/connection-profiles` },
+      {
+        method: 'POST' as const,
+        url: `/api/v1/admin/clients/${clientId}/connection-profiles`,
+        payload: {
+          nombre: 'Intento denegado',
+          tipo: 'MYSQL_TCP',
+          entorno: 'TEST',
+          destinoMySqlId: 'mysql-sintetico',
+          baseDatos: 'base_sintetica',
+          credenciales: { mysqlUsername: 'usuario_sintetico', mysqlPassword: 'secreto-sintetico' },
+        },
+      },
+      {
+        method: 'PATCH' as const,
+        url: `/api/v1/admin/clients/${clientId}/connection-profiles/${profileId}`,
+        payload: { nombre: 'Cambio denegado' },
+      },
+      {
+        method: 'PUT' as const,
+        url: `/api/v1/admin/clients/${clientId}/connection-profiles/${profileId}/credentials`,
+        payload: {
+          credenciales: { mysqlUsername: 'usuario_sintetico', mysqlPassword: 'secreto-sintetico' },
+        },
+      },
+      {
+        method: 'POST' as const,
+        url: `/api/v1/admin/clients/${clientId}/connection-profiles/${profileId}/test`,
+      },
+    ];
+    const estados: number[] = [];
+    for (const operacion of operaciones) {
+      const respuesta = await exigirAplicacion().inject({
+        ...operacion,
+        headers: await headersDeEscritura(support),
+      });
+      estados.push(respuesta.statusCode);
+    }
+
+    expect(estados).toEqual([403, 403, 403, 403, 403]);
   });
 }
 
@@ -1133,6 +1527,6 @@ async function pruebaCancelarYReactivarInvitacion(): Promise<void> {
   expect(reenvioFallido.json()).toMatchObject({ code: 'SMTP_DELIVERY_FAILED' });
 }
 
-describe('rutas de administración de usuarios sobre PostgreSQL aislado', definirPruebasAdmin);
+describe('rutas de administración sobre PostgreSQL aislado', definirPruebasAdmin);
 beforeAll(prepararAdministracion);
 afterAll(cerrarAdministracion);
