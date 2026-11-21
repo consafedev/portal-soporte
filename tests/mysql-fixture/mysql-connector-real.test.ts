@@ -83,12 +83,14 @@ function crearBroker(
     readonly gateway?: DestinoGatewaySsh;
     readonly tiempoMaximoMs?: number;
   } = {},
+  perfil: PerfilConexionPrueba = perfilBase,
 ): ClientConnectionBrokerMySql {
+  const usaTunelSsh = perfil.tipo === 'MYSQL_SSH';
   const destino: DestinoMySqlAutorizado = opciones.destino ?? {
     id: idDestino,
     hostname: hostMysql,
-    address: '127.0.0.1',
-    port: configuracion.mysqlHostPort,
+    address: usaTunelSsh ? configuracion.mysqlContainerAddress : '127.0.0.1',
+    port: usaTunelSsh ? 3306 : configuracion.mysqlHostPort,
   };
   const gateway: DestinoGatewaySsh = opciones.gateway ?? gatewayFixture;
   return new ClientConnectionBrokerMySql(
@@ -130,7 +132,7 @@ function crearCredenciales(
 async function probarConexion(
   perfil: PerfilConexionPrueba = perfilBase,
   credenciales: Buffer = crearCredenciales(),
-  broker: ClientConnectionBrokerMySql = crearBroker(),
+  broker: ClientConnectionBrokerMySql = crearBroker({}, perfil),
 ): Promise<{ readonly code: CodigoResultadoPruebaConexion; readonly secretos: Buffer }> {
   const resultado = await broker.probar(perfil, credenciales);
   return { code: resultado.code, secretos: credenciales };
@@ -199,7 +201,7 @@ async function rechazarHuellaYDestino(): Promise<void> {
   const resultadoHuella = await probarConexion(
     perfil,
     crearCredenciales({ ssh: true }),
-    crearBroker({ gateway: { ...gatewayFixture, fingerprint: huellaIncorrecta } }),
+    crearBroker({ gateway: { ...gatewayFixture, fingerprint: huellaIncorrecta } }, perfil),
   );
   expect(resultadoHuella.code).toBe('SSH_HOST_KEY_REJECTED');
 
