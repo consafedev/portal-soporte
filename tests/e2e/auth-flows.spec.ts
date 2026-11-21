@@ -565,7 +565,7 @@ async function probarPreferenciasPersonales({ page }: { page: Page }): Promise<v
   });
 
   await page.reload();
-  await expect(page.getByLabel('Oscuro')).toBeChecked();
+  await expect(page.getByRole('radio', { name: /^Oscuro/u })).toBeChecked();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   expect(await page.evaluate(() => localStorage.getItem('portal-soporte-theme'))).toBe('dark');
   await page.setViewportSize({ width: 360, height: 780 });
