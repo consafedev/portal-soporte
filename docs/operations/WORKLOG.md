@@ -1562,3 +1562,13 @@ eload, se reinició únicamente cloudflared-consafedev.service; procesos web, AP
 - Próximo paso: revisar diff y secretos, crear commit focalizado, push normal autorizado y esperar ambos jobs de Actions para este SHA. No crear PR hasta que fixture y calidad pasen; no merge.
 - Riesgos abiertos: `esbuild` moderado de desarrollo; `picomatch` revisión `2026-12-10 UTC` y aceptación temporal vence `2026-12-17 UTC`; keyring/recuperación de credenciales en Debian sin provisionar; PPK v3/DSA no soportados.
 - Estado: PS-005/PS-005.2 `EN_CURSO`, corrección local en verificación, sin PR/merge.
+
+### [2026-11-21T02:32:49-06:00] PS-005.2 — CI VERDE EN EL DESTINO SSH CORREGIDO
+- Agente/tarea/rama/commit: Codex · PS-005.2 · `codex/ps-005-clients-connections` · `a3edf4c2a1ed98ba582afe7e54605934dcd9eb58`.
+- Objetivo: validar el arreglo del destino de forward antes de abrir PR.
+- Acciones: run `44885084571` para el SHA esperado; «Calidad y seguridad básica» `SUCCESS` y «Conectores MySQL y SSH con fixture sintético» `SUCCESS`. La suite efímera Docker de CI pasó después de fijar los SSH forwards al IP privado del MySQL de prueba en puerto 3306.
+- Verificaciones locales del commit: lint y typecheck PASS; Prettier de los tres archivos modificados PASS; Secretlint PASS; `git diff --check` PASS; pruebas unitarias con límite de dos workers 265/265 PASS, cero omitidas. Fixture Docker real no se ejecutó en esta PC porque no hay daemon local; sí fue ejecutado y aprobado por el job dedicado de Actions.
+- Alcance y seguridad: commit `a3edf4c` modifica solo el helper del fixture y `WORKLOG.md`/`TASK_BOARD.md`. Sin secretos detectados, `.env.infra-001.local` continúa ignorado y fuera del índice. Sin cambios en migraciones, conectores productivos, datos de clientes, infraestructura o PS-007/RF-1.
+- Riesgos abiertos: auditoría general conserva `esbuild` moderado en desarrollo; riesgo temporal de `picomatch` revisar `2026-12-10 UTC`, aceptación vence `2026-12-17 UTC`; custodia/recuperación del llavero en Debian pendiente; PPK v3/DSA sin soporte.
+- Próximo paso: actualizar seguimiento, comprobar si ya existe PR para esta rama y crear PR revisable contra `main` una vez verde el head documental actualizado. Sin merge.
+- Estado: PS-005/PS-005.2 `EN_CURSO`; Actions verde en el SHA `a3edf4c`, PR pendiente.
