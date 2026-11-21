@@ -57,9 +57,14 @@ const MENSAJES_CLIENTES: Readonly<Record<string, string>> = {
   PROFILE_NAME_INVALID: 'El nombre del perfil debe tener entre 2 y 120 caracteres.',
 };
 
-/** Error administrativo localizado sin conservar el cuerpo o causa de la respuesta HTTP. */
+/** Error HTTP localizado sin conservar el cuerpo o la causa remota de la respuesta. */
 export class ErrorApiClientes extends Error {
-  /** Crea un error estable para reglas de presentación y reintento. */
+  /**
+   * Crea un error estable para reglas de presentación y reintento.
+   *
+   * @param code - Código público estable sin datos internos del servidor.
+   * @param status - Estado HTTP observado o cero si falló la red.
+   */
   public constructor(
     public readonly code: string,
     public readonly status: number,
@@ -202,8 +207,15 @@ export function probarPerfilConexionAdmin(
   );
 }
 
-/** Ejecuta un GET same-origin y valida la respuesta antes de entregarla a React. */
-async function solicitarApi<TEsquema extends TSchema>(
+/**
+ * Ejecuta un GET same-origin y valida la respuesta antes de entregarla a React.
+ *
+ * @param ruta - Ruta relativa al mismo origen; nunca recibe una URL de destino externo.
+ * @param esquema - Contrato TypeBox que limita los campos aceptados.
+ * @returns Respuesta validada según el esquema solicitado.
+ * @throws ErrorApiClientes si falla la red, el estado HTTP o la validación de salida.
+ */
+export async function solicitarApi<TEsquema extends TSchema>(
   ruta: string,
   esquema: TEsquema,
 ): Promise<Static<TEsquema>> {
@@ -243,8 +255,13 @@ async function enviarJson<TEsquema extends TSchema, TCuerpo>(
   return leerRespuesta(respuesta, esquema);
 }
 
-/** Obtiene el CSRF efímero antes de cada mutación y descarta fallos de respuesta. */
-async function obtenerTokenCsrf(): Promise<string> {
+/**
+ * Obtiene el CSRF efímero antes de cada mutación y descarta fallos de respuesta.
+ *
+ * @returns Token de doble envío que vive solo en memoria del cliente web.
+ * @throws ErrorApiClientes si el endpoint CSRF no está disponible o incumple su contrato.
+ */
+export async function obtenerTokenCsrf(): Promise<string> {
   const respuesta = await fetch('/api/v1/auth/csrf', {
     method: 'GET',
     credentials: 'same-origin',
@@ -256,8 +273,15 @@ async function obtenerTokenCsrf(): Promise<string> {
   return (await leerRespuesta(respuesta, csrfResponseSchema)).token;
 }
 
-/** Valida JSON de éxito contra el contrato TypeBox indicado. */
-async function leerRespuesta<TEsquema extends TSchema>(
+/**
+ * Valida JSON de éxito contra el contrato TypeBox indicado.
+ *
+ * @param respuesta - Respuesta HTTP same-origin recibida.
+ * @param esquema - Contrato que limita los datos entregados a la aplicación.
+ * @returns Objeto validado en tiempo de ejecución y tipado por el esquema.
+ * @throws ErrorApiClientes ante estado no exitoso, JSON inválido o campos inesperados.
+ */
+export async function leerRespuesta<TEsquema extends TSchema>(
   respuesta: Response,
   esquema: TEsquema,
 ): Promise<Static<TEsquema>> {
@@ -278,8 +302,13 @@ async function leerRespuesta<TEsquema extends TSchema>(
   return cuerpo;
 }
 
-/** Traduce el error utilizando solo su código público, nunca el texto arbitrario del servidor. */
-async function traducirErrorHttp(respuesta: Response): Promise<ErrorApiClientes> {
+/**
+ * Traduce el error utilizando solo su código público, nunca el texto arbitrario del servidor.
+ *
+ * @param respuesta - Respuesta HTTP no exitosa que contiene un código público opcional.
+ * @returns Error localizado sin conservar el mensaje o cuerpo remoto.
+ */
+export async function traducirErrorHttp(respuesta: Response): Promise<ErrorApiClientes> {
   let codigo = 'REQUEST_FAILED';
   try {
     const cuerpo: unknown = await respuesta.json();
