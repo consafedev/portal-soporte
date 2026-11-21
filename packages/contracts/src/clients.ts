@@ -331,3 +331,91 @@ export type ResultadoPruebaPerfilAdminContrato = Static<typeof resultadoPruebaPe
 
 /** Lista redactada de perfiles asociados a un cliente. */
 export const listaPerfilesConexionAdminSchema = Type.Array(perfilConexionAdminSchema);
+
+/** Identificadores funcionales permitidos para acceso por cliente. */
+export const capacidadClienteSchema = Type.Union(
+  [Type.Literal('rf-1:read'), Type.Literal('rf-1:execute')],
+  { description: 'Capacidad allowlisted; execute permanece deshabilitada en esta entrega.' },
+);
+
+/** Tipo de capacidad de cliente compartido entre API y aplicaciones. */
+export type CapacidadClienteContrato = Static<typeof capacidadClienteSchema>;
+
+/** Cliente operativo seleccionable, sin perfiles ni secretos de conexión. */
+export const clienteAccesibleSchema = clienteAdminSchema;
+
+/** Tipo público de cliente autorizado que puede seleccionar un usuario. */
+export type ClienteAccesibleContrato = Static<typeof clienteAccesibleSchema>;
+
+/** Colección de clientes accesibles sin ampliar datos respecto al DTO administrativo redactado. */
+export const listaClientesAccesiblesSchema = Type.Array(clienteAccesibleSchema);
+
+/** Resumen de asignación de SUPPORT limitado a identidad visible y fechas de vigencia. */
+export const asignacionClienteAdminSchema = Type.Object(
+  {
+    userId: Type.String({ pattern: PATRON_UUID_CLIENTE }),
+    displayName: Type.String({ minLength: 1, maxLength: 120 }),
+    userActive: Type.Boolean(),
+    grantedAt: Type.String({ pattern: PATRON_FECHA_CLIENTE }),
+    revokedAt: Type.Union([Type.String({ pattern: PATRON_FECHA_CLIENTE }), Type.Null()]),
+  },
+  {
+    additionalProperties: false,
+    description: 'Asignación redactada; no incluye correo, credenciales ni actores internos.',
+  },
+);
+
+/** Tipo de respuesta administrativa de una asignación usuario-cliente. */
+export type AsignacionClienteAdminContrato = Static<typeof asignacionClienteAdminSchema>;
+
+/** Lista de asignaciones visibles para el rol ADMIN. */
+export const listaAsignacionesClienteAdminSchema = Type.Array(asignacionClienteAdminSchema);
+
+/** Estado de una capacidad por cliente sin identificadores de sus actores internos. */
+export const estadoCapacidadClienteAdminSchema = Type.Union(
+  [
+    Type.Object(
+      {
+        clientId: Type.String({ pattern: PATRON_UUID_CLIENTE }),
+        capabilityId: Type.Literal('rf-1:read'),
+        enabled: Type.Boolean(),
+        changedAt: Type.String({ pattern: PATRON_FECHA_CLIENTE }),
+      },
+      { additionalProperties: false },
+    ),
+    Type.Object(
+      {
+        clientId: Type.String({ pattern: PATRON_UUID_CLIENTE }),
+        capabilityId: Type.Literal('rf-1:execute'),
+        enabled: Type.Literal(false),
+        changedAt: Type.String({ pattern: PATRON_FECHA_CLIENTE }),
+      },
+      { additionalProperties: false },
+    ),
+  ],
+  { description: 'Capacidad persistida; rf-1:execute solo puede aparecer deshabilitada.' },
+);
+
+/** Tipo de respuesta con el estado actual de una capacidad por cliente. */
+export type EstadoCapacidadClienteContrato = Static<typeof estadoCapacidadClienteAdminSchema>;
+
+/** Solicitud estricta para habilitar o deshabilitar una capacidad allowlisted. */
+export const establecerCapacidadClienteSchema = Type.Object(
+  { enabled: Type.Boolean() },
+  { additionalProperties: false, description: 'Nuevo estado explícito de la capacidad.' },
+);
+
+/** Tipo de entrada de escritura de una capacidad por cliente. */
+export type SolicitudEstablecerCapacidadCliente = Static<typeof establecerCapacidadClienteSchema>;
+
+/** Parámetros validados de una operación sobre capacidades del cliente. */
+export const capacidadClienteParamsSchema = Type.Object(
+  {
+    clientId: Type.String({ pattern: PATRON_UUID_CLIENTE }),
+    capabilityId: capacidadClienteSchema,
+  },
+  { additionalProperties: false },
+);
+
+/** Tipo de parámetros de ruta para una capacidad de cliente. */
+export type ParametrosCapacidadCliente = Static<typeof capacidadClienteParamsSchema>;
