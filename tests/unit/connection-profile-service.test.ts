@@ -10,6 +10,7 @@ import type {
   ContextoSobreSecreto,
   PerfilConexionPrueba,
   ResultadoPruebaConexion,
+  SesionLecturaRf1,
 } from '../../packages/core/src/clients/secret-custody-ports.js';
 import { PoliticaDestinosConexion } from '../../packages/connectors/src/mysql-connection-broker.js';
 import { ServicioCifradoSecretos } from '../../packages/connectors/src/secret-envelope.js';
@@ -108,6 +109,9 @@ describe('ServicioPerfilesConexion', () => {
         bufferRecibido = secretos;
         throw new Error('mysqlPassword=secreto-sintetico; driver detail');
       },
+      async abrirLecturaRf1(): Promise<never> {
+        throw new Error('RF1_CONNECTOR_NOT_CONFIGURED');
+      },
     };
     const servicio = new ServicioPerfilesConexion(
       repositorio,
@@ -144,6 +148,9 @@ describe('ServicioPerfilesConexion', () => {
         async probar() {
           return { code: 'CONNECTED', completedAt: now };
         },
+        async abrirLecturaRf1(): Promise<never> {
+          throw new Error('RF1_CONNECTOR_NOT_CONFIGURED');
+        },
       },
       new PoliticaDestinosConexion([destino], []),
       { ahora: () => now },
@@ -176,6 +183,9 @@ describe('ServicioPerfilesConexion', () => {
         async probar() {
           return { code: 'CONNECTED', completedAt: now };
         },
+        async abrirLecturaRf1(): Promise<never> {
+          throw new Error('RF1_CONNECTOR_NOT_CONFIGURED');
+        },
       },
       new PoliticaDestinosConexion([destino], []),
       { ahora: () => now },
@@ -187,6 +197,89 @@ describe('ServicioPerfilesConexion', () => {
     >({
       code: 'SECRET_CUSTODY_DISABLED',
       statusCode: 503,
+    });
+  });
+
+  it('abre lectura RF-1 solo tras perfil activo y borra el buffer descifrado', async () => {
+    const cifrador = crearCifrador();
+    const material = Buffer.from(
+      '{"mysqlUsername":"usuario-sintetico","mysqlPassword":"secreto-sintetico"}',
+    );
+    const sobre = await cifrador.cifrar(material, contexto);
+    material.fill(0);
+    const perfil: PerfilConexionPersistido = { ...crearPerfil(), sobre };
+    const repositorio = crearRepositorio(perfil);
+    const sesion: SesionLecturaRf1 = {
+      async buscarSociedadesPorRfc() {
+        return [];
+      },
+      async buscarProveedoresPorContexto() {
+        return [];
+      },
+      async existeUuid() {
+        return false;
+      },
+      async cerrar() {},
+    };
+    let secretosRecibidos: Uint8Array | undefined;
+    const abrirLecturaRf1 = vi.fn(async (_perfil: PerfilConexionPrueba, secretos: Uint8Array) => {
+      secretosRecibidos = secretos;
+      return sesion;
+    });
+    const servicio = new ServicioPerfilesConexion(
+      repositorio,
+      cifrador,
+      {
+        async probar() {
+          return { code: 'CONNECTED', completedAt: now };
+        },
+        abrirLecturaRf1,
+      },
+      new PoliticaDestinosConexion([destino], []),
+      { ahora: () => now },
+    );
+
+    await expect(
+      servicio.abrirLecturaRf1(clientId, profileId, new AbortController().signal),
+    ).resolves.toBe(sesion);
+
+    expect(abrirLecturaRf1).toHaveBeenCalledWith(
+      expect.objectContaining({ id: profileId, clientId, baseDatos: 'portal_test_fixture' }),
+      expect.any(Uint8Array),
+      expect.any(AbortSignal),
+    );
+    expect(Buffer.from(secretosRecibidos ?? []).every((byte) => byte === 0)).toBe(true);
+  });
+
+  it('redacta fallos del broker RF-1 antes de exponerlos a la API', async () => {
+    const cifrador = crearCifrador();
+    const material = Buffer.from(
+      '{"mysqlUsername":"usuario-sintetico","mysqlPassword":"secreto-sintetico"}',
+    );
+    const sobre = await cifrador.cifrar(material, contexto);
+    material.fill(0);
+    const perfil: PerfilConexionPersistido = { ...crearPerfil(), sobre };
+    const servicio = new ServicioPerfilesConexion(
+      crearRepositorio(perfil),
+      cifrador,
+      {
+        async probar() {
+          return { code: 'CONNECTED', completedAt: now };
+        },
+        async abrirLecturaRf1() {
+          throw new Error('password=secreto-sintetico; driver detail');
+        },
+      },
+      new PoliticaDestinosConexion([destino], []),
+      { ahora: () => now },
+    );
+
+    await expect(
+      servicio.abrirLecturaRf1(clientId, profileId, new AbortController().signal),
+    ).rejects.toMatchObject<Partial<ErrorPerfilesConexion>>({
+      code: 'CONNECTION_FAILED',
+      statusCode: 502,
+      message: 'CONNECTION_FAILED',
     });
   });
 });

@@ -10,8 +10,6 @@ contenedor_ssh="portal-mysql-fixture-ssh-${identificador}"
 imagen_ssh="portal-mysql-fixture-ssh:${identificador}"
 directorio_temporal="$(mktemp -d "${TMPDIR:-/tmp}/portal-mysql-fixture.XXXXXXXX")"
 directorio_tls="${directorio_temporal}/mysql-tls"
-mkdir -m 0700 "${directorio_tls}"
-chmod 0755 "${directorio_tls}"
 password_app="$(openssl rand -hex 24)"
 password_root="$(openssl rand -hex 24)"
 puerto_mysql=""
@@ -41,6 +39,39 @@ limpiar_fixture() {
 
 trap limpiar_fixture EXIT
 
+# Aplica permisos POSIX o, en Git Bash sobre NTFS, una ACL exclusiva del usuario actual.
+aplicar_permisos_restrictivos() {
+  local modo="$1"
+  local ruta="$2"
+  local tipo="$3"
+  if chmod "${modo}" "${ruta}" 2>/dev/null; then
+    return
+  fi
+  if ! command -v icacls.exe >/dev/null 2>&1 || ! command -v cygpath >/dev/null 2>&1; then
+    echo 'MYSQL_FIXTURE_RESTRICTIVE_PERMISSIONS_UNAVAILABLE' >&2
+    return 1
+  fi
+
+  local ruta_windows
+  local cuenta_windows
+  local permiso_windows
+  ruta_windows="$(cygpath -w "${ruta}")"
+  cuenta_windows="$(whoami.exe)"
+  permiso_windows="${cuenta_windows}:F"
+  if [[ "${tipo}" == 'directorio' ]]; then
+    permiso_windows="${cuenta_windows}:(OI)(CI)F"
+  fi
+  icacls.exe "${ruta_windows}" /inheritance:r /grant:r "${permiso_windows}" \
+    >/dev/null 2>&1 || {
+    echo 'MYSQL_FIXTURE_RESTRICTIVE_PERMISSIONS_FAILED' >&2
+    return 1
+  }
+}
+
+aplicar_permisos_restrictivos 0700 "${directorio_temporal}" directorio
+mkdir "${directorio_tls}"
+aplicar_permisos_restrictivos 0700 "${directorio_tls}" directorio
+
 if ! docker info >/dev/null 2>&1; then
   echo 'MYSQL_FIXTURE_REQUIRES_DOCKER_ENGINE' >&2
   exit 2
@@ -68,8 +99,10 @@ EOF
     -CA "${directorio_tls}/ca.pem" -CAkey "${directorio_tls}/ca-key.pem" -CAcreateserial \
     -extfile "${directorio_tls}/server.ext" \
     -out "${directorio_tls}/server-cert.pem" >/dev/null 2>&1
-  chmod 0600 "${directorio_tls}/ca-key.pem" "${directorio_tls}/server-key.pem"
-  chmod 0644 "${directorio_tls}/ca.pem" "${directorio_tls}/server-cert.pem" "${directorio_tls}/server-key.pem"
+  aplicar_permisos_restrictivos 0600 "${directorio_tls}/ca-key.pem" archivo
+  aplicar_permisos_restrictivos 0644 "${directorio_tls}/server-key.pem" archivo
+  aplicar_permisos_restrictivos 0644 "${directorio_tls}/ca.pem" archivo
+  aplicar_permisos_restrictivos 0644 "${directorio_tls}/server-cert.pem" archivo
 }
 
 # Crea una clave de cliente desechable y su conversión PPK v2 RSA para las pruebas.
@@ -80,7 +113,8 @@ generar_llaves_ssh_sinteticas() {
   puttygen "${directorio_temporal}/ssh-client.pem" \
     --new-passphrase "${directorio_temporal}/empty-passphrase" \
     --ppk-param version=2 -o "${directorio_temporal}/ssh-client.ppk" >/dev/null 2>&1
-  chmod 0600 "${directorio_temporal}/ssh-client.pem" "${directorio_temporal}/ssh-client.ppk"
+  aplicar_permisos_restrictivos 0600 "${directorio_temporal}/ssh-client.pem" archivo
+  aplicar_permisos_restrictivos 0600 "${directorio_temporal}/ssh-client.ppk" archivo
 }
 
 # Crea solo la red, base, gateway y certificados efímeros identificados por esta ejecución.
@@ -90,8 +124,6 @@ iniciar_contenedores_aislados() {
     --network-alias mysql.fixture.invalid --publish 127.0.0.1::3306 \
     --mount "type=bind,source=${directorio_tls},target=/run/mysql-tls,readonly" \
     --env MYSQL_DATABASE=portal_fixture \
-    --env MYSQL_USER=portal_fixture_app \
-    --env "MYSQL_PASSWORD=${password_app}" \
     --env "MYSQL_ROOT_PASSWORD=${password_root}" \
     mysql:8.4 \
     --require_secure_transport=ON \
@@ -110,6 +142,31 @@ iniciar_contenedores_aislados() {
   done
   if [[ "${listo}" != 'true' ]]; then
     echo 'MYSQL_FIXTURE_DATABASE_START_TIMEOUT' >&2
+    exit 3
+  fi
+
+  docker exec --env "MYSQL_PWD=${password_root}" -i "${contenedor_mysql}" \
+    mysql --host=127.0.0.1 --user=root --database=portal_fixture \
+    < "${raiz_repositorio}/tests/fixtures/mysql-rf1/schema.sql"
+  docker exec --env "MYSQL_PWD=${password_root}" -i "${contenedor_mysql}" \
+    mysql --host=127.0.0.1 --user=root --database=portal_fixture \
+    < "${raiz_repositorio}/tests/fixtures/mysql-rf1/seed.sql"
+  {
+    printf "CREATE USER 'portal_fixture_app'@'%%' IDENTIFIED BY '%s';\n" "${password_app}"
+    printf "GRANT SELECT ON portal_fixture.* TO 'portal_fixture_app'@'%%';\n"
+  } > "${directorio_temporal}/fixture-user.sql"
+  aplicar_permisos_restrictivos 0600 "${directorio_temporal}/fixture-user.sql" archivo
+  docker exec --env "MYSQL_PWD=${password_root}" -i "${contenedor_mysql}" \
+    mysql --host=127.0.0.1 --user=root < "${directorio_temporal}/fixture-user.sql"
+  local privilegios
+  privilegios="$(docker exec --env "MYSQL_PWD=${password_root}" "${contenedor_mysql}" \
+    mysql --batch --skip-column-names --host=127.0.0.1 --user=root \
+    --execute="SHOW GRANTS FOR 'portal_fixture_app'@'%'" 2>/dev/null)"
+  if [[ "$(grep -c 'GRANT SELECT ON' <<< "${privilegios}")" -ne 1 ]] \
+    || [[ "${privilegios}" != *'portal_fixture'* ]] \
+    || grep -Eiq 'ALL PRIVILEGES|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|GRANT OPTION|FILE|SUPER' \
+      <<< "${privilegios}"; then
+    echo 'MYSQL_FIXTURE_READ_ONLY_GRANT_INVALID' >&2
     exit 3
   fi
 

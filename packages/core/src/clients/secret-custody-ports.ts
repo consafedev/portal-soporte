@@ -110,10 +110,68 @@ export interface ResultadoPruebaConexion {
   readonly completedAt: Date;
 }
 
+/** Sociedad y ambiente SAP de un resultado de lectura limitado de RF-1. */
+export interface SociedadLecturaRf1 {
+  /** Código de sociedad obtenido desde el catálogo aprobado. */
+  readonly sociedad: string;
+  /** Ambiente SAP vinculado a la sociedad, no al perfil de conexión. */
+  readonly ambienteSap: string;
+}
+
+/** Sesión MySQL de vida corta con operaciones semánticas fijas de solo lectura. */
+export interface SesionLecturaRf1 {
+  /**
+   * Busca hasta cien sociedades por RFC receptor y falla ante resultados excesivos.
+   * @param rfcReceptor RFC receptor que debe validarse y normalizarse.
+   * @returns Sociedades acotadas.
+   */
+  buscarSociedadesPorRfc(rfcReceptor: string): Promise<readonly SociedadLecturaRf1[]>;
+  /**
+   * Busca como máximo dos proveedores por RFC, sociedad y ambiente SAP.
+   * @param rfcEmisor RFC emisor.
+   * @param sociedad Código SAP.
+   * @param ambienteSap Ambiente SAP.
+   * @returns Cero, uno o dos resultados para detectar ambigüedad.
+   */
+  buscarProveedoresPorContexto(
+    rfcEmisor: string,
+    sociedad: string,
+    ambienteSap: string,
+  ): Promise<readonly { readonly idProveedor: string }[]>;
+  /**
+   * Comprueba si ya existe un UUID en factura sin devolver el registro.
+   * @param uuid UUID fiscal que debe validarse.
+   * @returns Si existe al menos una coincidencia.
+   */
+  existeUuid(uuid: string): Promise<boolean>;
+  /**
+   * Cierra la conexión y libera el límite de concurrencia del broker.
+   * @returns Promesa de cierre seguro, idempotente.
+   */
+  cerrar(): Promise<void>;
+}
+
 /** Broker server-side que prueba un perfil autorizado sin exponer secretos al navegador. */
 export interface ClientConnectionBroker {
-  /** Ejecuta exclusivamente la prueba de solo lectura `SELECT 1` y borra el paquete recibido. */
+  /**
+   * Ejecuta exclusivamente la prueba de solo lectura `SELECT 1` y borra el paquete recibido.
+   * @param perfil Perfil allowlisted.
+   * @param secretos Buffer mutable de credenciales que se borra.
+   * @returns Resultado sanitizado de conectividad.
+   */
   probar(perfil: PerfilConexionPrueba, secretos: Uint8Array): Promise<ResultadoPruebaConexion>;
+  /**
+   * Abre una sesión RF-1 con lecturas tipadas, cancelación y sin exponer SQL arbitrario.
+   * @param perfil Perfil allowlisted.
+   * @param secretos Buffer mutable de credenciales que se borra.
+   * @param senal Cancelación de la solicitud autorizada.
+   * @returns Sesión limitada que el llamador debe cerrar en `finally`.
+   */
+  abrirLecturaRf1(
+    perfil: PerfilConexionPrueba,
+    secretos: Uint8Array,
+    senal: AbortSignal,
+  ): Promise<SesionLecturaRf1>;
 }
 
 /** Provee copias de las llaves maestras activas e históricas sin persistirlas en PostgreSQL. */

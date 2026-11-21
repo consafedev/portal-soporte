@@ -289,5 +289,15 @@ function traducirErrorPerfil(codigo: ErrorPerfilesConexion['code']): string {
       return 'La custodia segura no está disponible.';
     case 'SECRET_PACKAGE_TOO_LARGE':
       return 'El material de conexión excede el tamaño permitido.';
+    case 'SECRET_PACKAGE_INVALID':
+      return 'El paquete de credenciales no es válido.';
+    case 'CONNECTOR_BUSY':
+      return 'El conector está atendiendo otra operación.';
+    case 'CONNECTION_FAILED':
+      return 'No fue posible establecer la conexión configurada.';
+    case 'CONNECTION_TIMEOUT':
+      return 'La conexión superó el tiempo permitido.';
+    case 'REQUEST_ABORTED':
+      return 'La solicitud de conexión fue cancelada.';
   }
 }

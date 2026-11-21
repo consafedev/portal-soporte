@@ -7,7 +7,9 @@ import type {
   DestinoGatewaySsh,
   PerfilConexionPrueba,
   ResultadoPruebaConexion,
+  SesionLecturaRf1,
 } from '../../core/src/clients/secret-custody-ports.js';
+import { SesionMysqlRf1, type ConsultaFijaRf1 } from './mysql-rf1-catalog.js';
 
 /** Destino MySQL fijo, con hostname TLS y dirección IP previamente aprobada. */
 export type DestinoMySqlPermitido = DestinoMySqlAutorizado;
@@ -61,6 +63,16 @@ export interface DatosConexionMySql {
 export interface ConexionMySqlPrueba {
   /** Ejecuta la consulta fija `SELECT 1` sin aceptar SQL del caller. */
   consultar(consulta: 'SELECT 1'): Promise<void>;
+  /**
+   * Ejecuta una de las lecturas RF-1 fijas con parámetros ligados.
+   * @param consulta Identificador constante de consulta.
+   * @param parametros Valores preparados sin concatenación.
+   * @returns Filas obtenidas, limitadas por la consulta.
+   */
+  ejecutarRf1(
+    consulta: ConsultaFijaRf1,
+    parametros: readonly string[],
+  ): Promise<readonly unknown[]>;
   /** Cierra la conexión MySQL al terminar la prueba. */
   cerrar(): Promise<void>;
   /** Interrumpe la conexión cuando se cancela o vence el timeout. */
@@ -137,6 +149,175 @@ export class ClientConnectionBrokerMySql implements ClientConnectionBroker {
   ) {
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 15_000) {
       throw new Error('CONNECTOR_POLICY_INVALID');
+    }
+  }
+
+  /**
+   * Abre una sesión RF-1 limitada a lecturas de catálogo y existencia de UUID.
+   * @param perfil Perfil de conexión validado contra la política operacional.
+   * @param secretos Buffer mutable que contiene credenciales sintéticas o custodiadas; se borra.
+   * @param senalExterna Señal de cancelación de la solicitud autorizada.
+   * @returns Sesión de lectura que se debe cerrar al terminar.
+   * @throws Error con código estable si el perfil, destino, credencial o conexión no son válidos.
+   */
+  public async abrirLecturaRf1(
+    perfil: PerfilConexionPrueba,
+    secretos: Uint8Array,
+    senalExterna: AbortSignal,
+  ): Promise<SesionLecturaRf1> {
+    const contenido = Buffer.from(secretos);
+    secretos.fill(0);
+    if (this.ocupado) {
+      contenido.fill(0);
+      throw new Error('CONNECTOR_BUSY');
+    }
+    this.ocupado = true;
+
+    const controlador = new AbortController();
+    const recursos: {
+      conexion: ConexionMySqlPrueba | null;
+      tunel: TunelSshPrueba | null;
+    } = { conexion: null, tunel: null };
+    let temporizadorConexion: ReturnType<typeof setTimeout> | undefined;
+    let temporizadorSesion: ReturnType<typeof setTimeout> | undefined;
+    let conexionVencida = false;
+    let etapa: 'SSH' | 'MYSQL' = 'MYSQL';
+    let cierre: Promise<void> | null = null;
+
+    const cerrar = (): Promise<void> => {
+      if (cierre !== null) {
+        return cierre;
+      }
+      cierre = (async (): Promise<void> => {
+        if (temporizadorConexion !== undefined) {
+          clearTimeout(temporizadorConexion);
+        }
+        if (temporizadorSesion !== undefined) {
+          clearTimeout(temporizadorSesion);
+        }
+        senalExterna.removeEventListener('abort', cancelarDesdeSolicitante);
+        controlador.abort();
+        await recursos.conexion?.cerrar().catch(() => undefined);
+        await recursos.tunel?.cerrar().catch(() => undefined);
+        contenido.fill(0);
+        this.ocupado = false;
+      })();
+      return cierre;
+    };
+
+    const cancelarDesdeSolicitante = (): void => controlador.abort();
+
+    try {
+      if (senalExterna.aborted) {
+        throw new Error('RF1_SESSION_ABORTED');
+      }
+      senalExterna.addEventListener('abort', cancelarDesdeSolicitante, { once: true });
+      if (!perfilValido(perfil) || contenido.byteLength > TAMANO_MAXIMO_SECRETOS) {
+        throw new Error(
+          contenido.byteLength > TAMANO_MAXIMO_SECRETOS ? 'INVALID_CREDENTIALS' : 'PROFILE_INVALID',
+        );
+      }
+
+      const destino = this.politica.obtenerMySql(perfil.destinoMySqlId);
+      const gateway =
+        perfil.tipo === 'MYSQL_SSH' && perfil.gatewaySshId !== undefined
+          ? this.politica.obtenerGatewaySsh(perfil.gatewaySshId)
+          : undefined;
+      if (destino === undefined || (perfil.tipo === 'MYSQL_SSH' && gateway === undefined)) {
+        throw new Error('DESTINATION_NOT_ALLOWED');
+      }
+
+      const credenciales = analizarCredenciales(contenido, perfil.tipo);
+      if (credenciales === null) {
+        throw new Error('INVALID_CREDENTIALS');
+      }
+      if ('error' in credenciales) {
+        throw new Error(credenciales.error);
+      }
+
+      const abrir = async (): Promise<void> => {
+        let stream: Duplex | undefined;
+        let gatewayUsado: GatewaySshPermitido | undefined;
+        if (perfil.tipo === 'MYSQL_SSH') {
+          if (gateway === undefined) {
+            throw new ErrorConectorPrueba('DESTINATION_NOT_ALLOWED');
+          }
+          etapa = 'SSH';
+          gatewayUsado = gateway;
+          recursos.tunel = await this.ssh.abrir(
+            gatewayUsado,
+            destino,
+            credenciales.ssh,
+            controlador.signal,
+          );
+          if (controlador.signal.aborted || cierre !== null) {
+            await recursos.tunel.cerrar().catch(() => undefined);
+            throw new Error('RF1_SESSION_ABORTED');
+          }
+          stream = recursos.tunel.stream;
+        }
+        etapa = 'MYSQL';
+        recursos.conexion = await this.mysql.conectar(
+          {
+            destino,
+            database: perfil.baseDatos,
+            mysqlUsername: credenciales.mysqlUsername,
+            mysqlPassword: credenciales.mysqlPassword,
+            tls: { ...credenciales.tls, rejectUnauthorized: true },
+            ...(gatewayUsado === undefined ? {} : { gateway: gatewayUsado }),
+            ...(stream === undefined ? {} : { stream }),
+            timeoutMs: this.timeoutMs,
+          },
+          controlador.signal,
+        );
+        if (controlador.signal.aborted || cierre !== null) {
+          await recursos.conexion.cerrar().catch(() => undefined);
+          throw new Error('RF1_SESSION_ABORTED');
+        }
+      };
+
+      const plazoConexion = new Promise<never>((_, rechazar) => {
+        temporizadorConexion = setTimeout(() => {
+          conexionVencida = true;
+          controlador.abort();
+          rechazar(new Error('RF1_CONNECTION_TIMEOUT'));
+        }, this.timeoutMs);
+      });
+      await Promise.race([abrir(), plazoConexion]);
+      if (senalExterna.aborted || controlador.signal.aborted || recursos.conexion === null) {
+        throw new Error('RF1_SESSION_ABORTED');
+      }
+      if (temporizadorConexion !== undefined) {
+        clearTimeout(temporizadorConexion);
+        temporizadorConexion = undefined;
+      }
+      contenido.fill(0);
+
+      temporizadorSesion = setTimeout(() => controlador.abort(), 15_000);
+      const conexion = recursos.conexion;
+      return new SesionMysqlRf1(
+        {
+          ejecutar: (consulta: ConsultaFijaRf1, parametros: readonly string[]) =>
+            conexion.ejecutarRf1(consulta, parametros),
+        },
+        cerrar,
+        controlador.signal,
+        this.timeoutMs,
+        cancelarDesdeBroker,
+      );
+    } catch (error: unknown) {
+      await cerrar();
+      if (conexionVencida) {
+        throw new Error('RF1_CONNECTION_TIMEOUT');
+      }
+      if (error instanceof Error && esCodigoErrorRf1(error.message)) {
+        throw new Error(error.message);
+      }
+      throw new Error(clasificarFalloConector(error, etapa));
+    }
+
+    function cancelarDesdeBroker(): void {
+      controlador.abort();
     }
   }
 
@@ -501,6 +682,23 @@ function clasificarFalloConector(
     return 'MYSQL_TLS_FAILED';
   }
   return 'MYSQL_CONNECTION_FAILED';
+}
+
+/**
+ * Reconoce códigos internos sanitizados que pueden salir del broker RF-1.
+ * @param codigo Mensaje de error ya reducido a un código estable.
+ * @returns Si el código puede propagarse sin revelar detalles operativos.
+ */
+function esCodigoErrorRf1(codigo: string): boolean {
+  return [
+    'CONNECTOR_BUSY',
+    'PROFILE_INVALID',
+    'DESTINATION_NOT_ALLOWED',
+    'INVALID_CREDENTIALS',
+    'SSH_KEY_FORMAT_UNSUPPORTED',
+    'RF1_SESSION_ABORTED',
+    'RF1_CONNECTION_TIMEOUT',
+  ].includes(codigo);
 }
 
 /** Lee únicamente el identificador estable de un error de driver sin conservar su mensaje. */
