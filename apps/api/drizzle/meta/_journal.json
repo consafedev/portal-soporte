@@ -43,6 +43,13 @@
       "when": 1795216101302,
       "tag": "0005_clients_sap_environments",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795236271028,
+      "tag": "0006_client_connection_profiles",
+      "breakpoints": true
     }
   ]
 }
