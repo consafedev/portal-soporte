@@ -1582,3 +1582,12 @@ eload, se reinició únicamente cloudflared-consafedev.service; procesos web, AP
 - Riesgos abiertos: `esbuild` moderado de desarrollo; `picomatch` revisar `2026-12-10 UTC`, aceptación temporal vence `2026-12-17 UTC`; keyring/recuperación Debian sin provisionar; conexiones reales, PPK v3/DSA y despliegue quedan fuera de validación.
 - Próximo paso: formato y diff-check de documentación, commit/push normal, verificar CI del nuevo head y crear PR a `main` sin merge.
 - Estado: PS-005/PS-005.2 `EN_CURSO`, sin PR/merge.
+
+### [2026-11-21T02:48:51-06:00] PS-005.2 — PR #4 ABIERTO Y CI DE PULL REQUEST VERDE
+- Agente/tarea/rama/head: Codex · PS-005/PS-005.2 · `codex/ps-005-clients-connections` · `9d7fda956e1f03a0efd7d9c3f835c4ac61bd7ba5`.
+- PR: [#4](https://github.com/consafedev/portal-soporte/pull/4), abierto a `main`, no draft, sin merge. GitHub lo marcó mergeable en la consulta posterior a la creación; no había otro PR para esta rama. No se solicitaron revisores porque el propietario hará la revisión manual.
+- Calidad final del PR: Actions run `44886296168` para el mismo head; `Calidad y seguridad básica` SUCCESS y `Conectores MySQL y SSH con fixture sintético` SUCCESS. El push-run del head, `44885891644`, también pasó ambos jobs.
+- El cuerpo del PR incluye alcance, arquitectura de credenciales/conectores, migraciones, pruebas, riesgos pendientes y rollback. Se utilizó Git Credential Manager de Windows en memoria para crear el PR mediante la API de GitHub; no se leyó ni reutilizó ningún token compartido en el chat y no se imprimió credencial.
+- Cambios de seguimiento: `TASK_BOARD.md` cambia PS-005 a `EN_REVISION` y enlaza PR #4; esta entrada mantiene el registro append-only.
+- Próximo paso: subir esta actualización documental y comprobar el run asociado al nuevo head; después dejar el PR abierto para revisión y merge manual del propietario.
+- Estado: PS-005/PS-005.2 `EN_REVISION`; sin merge, despliegue, migraciones persistentes ni acceso a bases de clientes.
