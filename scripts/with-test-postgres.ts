@@ -383,7 +383,7 @@ async function ejecutarMigracionCompilada(): Promise<void> {
   }
 }
 
-/** Concede al rol de ejecución solo el DML de autenticación previsto en la base aislada. */
+/** Concede al rol de ejecución solo el DML requerido por los módulos probados en la base aislada. */
 async function concederPermisosAplicacionRemota(): Promise<void> {
   const variables = { ...process.env, NODE_ENV: 'test' };
   const configuracion = cargarConfiguracionBasePrueba(variables);
@@ -427,6 +427,9 @@ async function concederPermisosAplicacionRemota(): Promise<void> {
       );
       await transaccion.unsafe(
         'GRANT SELECT, INSERT, UPDATE ON TABLE portal.clients, portal.client_sap_environments TO portal_test_app',
+      );
+      await transaccion.unsafe(
+        'GRANT SELECT, INSERT, UPDATE ON TABLE portal.client_connection_profiles TO portal_test_app',
       );
       await transaccion.unsafe(
         'REVOKE ALL ON TABLE portal.__drizzle_migrations FROM portal_test_app',

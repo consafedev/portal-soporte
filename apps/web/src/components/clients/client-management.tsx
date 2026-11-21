@@ -14,6 +14,7 @@ import {
   listarAmbientesSapAdmin,
   listarClientesAdmin,
 } from '../../lib/client-admin-api';
+import { AdministracionPerfilesConexion } from './connection-profile-management';
 
 /** Presenta el catálogo de clientes y ambientes SAP con operaciones protegidas por ADMIN. */
 export function AdministracionClientes(): JSX.Element {
@@ -187,8 +188,8 @@ export function AdministracionClientes(): JSX.Element {
       </section>
 
       <p className="nota-conectividad" role="note">
-        La configuración y prueba de conexiones MySQL/SSH estará disponible después de validar el
-        cifrado de credenciales y la matriz de destinos autorizados.
+        Las pruebas de conexión son de solo lectura y requieren destinos permitidos y custodia de
+        llaves configurados de forma segura en el servidor.
       </p>
     </div>
   );
@@ -453,6 +454,10 @@ function TarjetaCliente({
             ) : null}
             <div className="lista-ambientes">{ambientes?.map(renderizarAmbiente)}</div>
           </section>
+          <AdministracionPerfilesConexion
+            clientId={cliente.id}
+            clienteActivo={cliente.estado === 'ACTIVE'}
+          />
         </div>
       </details>
     </article>

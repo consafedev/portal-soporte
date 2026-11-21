@@ -3,7 +3,23 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
+  "main": "./dist/connectors/src/index.js",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./dist/connectors/src/index.js"
+    }
+  },
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "tsc --noEmit false -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "mysql2": "3.24.6",
+    "ssh2": "1.17.0"
+  },
+  "devDependencies": {
+    "@types/ssh2": "1.15.6"
   }
 }

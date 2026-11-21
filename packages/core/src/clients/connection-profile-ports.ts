@@ -1,0 +1,126 @@
+import type { ResultadoPruebaConexion, SobreSecretoCifrado } from './secret-custody-ports.js';
+import type { ActorAdministracionClientes } from './ports.js';
+
+/** Tipos de perfil MySQL admitidos por el broker del Portal. */
+export type TipoPerfilConexionCliente = 'MYSQL_TCP' | 'MYSQL_SSH';
+
+/** Entornos declarativos del sistema cliente, separados del entorno del Portal. */
+export type EntornoPerfilConexionCliente = 'PRODUCTION' | 'TEST';
+
+/** Estado lógico del perfil; desactivarlo conserva sus referencias y auditoría. */
+export type EstadoPerfilConexionCliente = 'ACTIVE' | 'DISABLED';
+
+/** Metadatos de un perfil que pueden entregarse a la interfaz administrativa. */
+export interface PerfilConexionCliente {
+  /** UUID inmutable del perfil. */
+  readonly id: string;
+  /** UUID del cliente propietario. */
+  readonly clientId: string;
+  /** Etiqueta administrativa sin credenciales ni endpoints de red. */
+  readonly nombre: string;
+  /** Familia de conexión limitada al conector implementado. */
+  readonly tipo: TipoPerfilConexionCliente;
+  /** Ambiente del sistema cliente. */
+  readonly entorno: EntornoPerfilConexionCliente;
+  /** Identificador opaco del destino de red configurado por operaciones. */
+  readonly destinoMySqlId: string;
+  /** Identificador opaco del gateway autorizado, solo para MYSQL_SSH. */
+  readonly gatewaySshId: string | null;
+  /** Nombre de la base MySQL, sin hostname, usuario o contraseña. */
+  readonly baseDatos: string;
+  /** Estado lógico del perfil. */
+  readonly estado: EstadoPerfilConexionCliente;
+  /** Fecha UTC de alta. */
+  readonly createdAt: Date;
+  /** Fecha UTC de modificación. */
+  readonly updatedAt: Date;
+}
+
+/** Metadatos y sobre interno recuperado solo para una operación de servidor. */
+export interface PerfilConexionPersistido extends PerfilConexionCliente {
+  /** Sobre cifrado de usuario, contraseña, llave, certificados y material SSH. */
+  readonly sobre: SobreSecretoCifrado;
+}
+
+/** Datos validados para crear un perfil y persistirlo con su sobre cifrado. */
+export interface AltaPerfilConexionPersistido {
+  /** UUID generado en la capa de aplicación. */
+  readonly id: string;
+  /** UUID del cliente propietario. */
+  readonly clientId: string;
+  /** Nombre validado para la interfaz ADMIN. */
+  readonly nombre: string;
+  /** Tipo de conexión configurado. */
+  readonly tipo: TipoPerfilConexionCliente;
+  /** Ambiente del sistema cliente. */
+  readonly entorno: EntornoPerfilConexionCliente;
+  /** Identificador del destino MySQL allowlisted. */
+  readonly destinoMySqlId: string;
+  /** Gateway allowlisted cuando la conexión usa SSH. */
+  readonly gatewaySshId: string | null;
+  /** Base MySQL acotada, validada por la capa de aplicación. */
+  readonly baseDatos: string;
+  /** Credenciales cifradas con AAD ligado al cliente y perfil. */
+  readonly sobre: SobreSecretoCifrado;
+  /** Instante UTC de creación. */
+  readonly createdAt: Date;
+}
+
+/** Campos administrativos editables sin reemplazar secretos. */
+export interface CambiosPerfilConexionPersistidos {
+  /** Nombre alternativo validado. */
+  readonly nombre?: string;
+  /** Ambiente alternativo del sistema cliente. */
+  readonly entorno?: EntornoPerfilConexionCliente;
+  /** Identificador de destino MySQL allowlisted. */
+  readonly destinoMySqlId?: string;
+  /** Gateway autorizado para conexiones SSH o null al cambiar a TCP. */
+  readonly gatewaySshId?: string | null;
+  /** Base MySQL alternativa. */
+  readonly baseDatos?: string;
+  /** Estado lógico actualizado. */
+  readonly estado?: EstadoPerfilConexionCliente;
+  /** Instante UTC de modificación. */
+  readonly updatedAt: Date;
+}
+
+/** Resultado sin datos sensibles del alta de un perfil asociado al cliente. */
+export type ResultadoAltaPerfilConexion =
+  | { readonly kind: 'CREATED'; readonly perfil: PerfilConexionCliente }
+  | { readonly kind: 'CLIENT_NOT_FOUND' }
+  | { readonly kind: 'PROFILE_DUPLICATE' };
+
+/** Repositorio que nunca expone sobres cifrados fuera de servicios server-side. */
+export interface RepositorioPerfilesConexion {
+  /** Lista perfiles redactados asociados al cliente indicado. */
+  listar(clientId: string): Promise<readonly PerfilConexionCliente[]>;
+  /** Inserta perfil y evento de auditoría dentro de la misma transacción. */
+  crear(
+    entrada: AltaPerfilConexionPersistido,
+    actor: ActorAdministracionClientes,
+  ): Promise<ResultadoAltaPerfilConexion>;
+  /** Actualiza metadatos/estado y audita de forma atómica. */
+  actualizar(
+    clientId: string,
+    profileId: string,
+    cambios: CambiosPerfilConexionPersistidos,
+    actor: ActorAdministracionClientes,
+  ): Promise<PerfilConexionCliente | null>;
+  /** Reemplaza el sobre de secretos sin devolverlo a API ni registrar valores. */
+  reemplazarSobre(
+    clientId: string,
+    profileId: string,
+    sobre: SobreSecretoCifrado,
+    updatedAt: Date,
+    actor: ActorAdministracionClientes,
+  ): Promise<PerfilConexionCliente | null>;
+  /** Recupera el sobre solo para el broker y solo si el perfil está activo. */
+  obtenerParaPrueba(clientId: string, profileId: string): Promise<PerfilConexionPersistido | null>;
+  /** Audita el resultado estable de una prueba sin material de conexión. */
+  registrarPrueba(
+    clientId: string,
+    profileId: string,
+    resultado: ResultadoPruebaConexion,
+    actor: ActorAdministracionClientes,
+  ): Promise<void>;
+}

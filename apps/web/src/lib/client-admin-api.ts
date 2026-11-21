@@ -4,18 +4,26 @@ import {
   ambienteSapClienteAdminSchema,
   clienteAdminSchema,
   errorClienteAdminSchema,
+  listaPerfilesConexionAdminSchema,
   listaAmbientesSapClienteAdminSchema,
   listaClientesAdminSchema,
+  perfilConexionAdminSchema,
+  resultadoPruebaPerfilAdminSchema,
   type AmbienteSapClienteAdminContrato,
   type ClienteAdminContrato,
+  type PerfilConexionAdminContrato,
+  type ResultadoPruebaPerfilAdminContrato,
   type SolicitudActualizarAmbienteSapClienteAdmin,
   type SolicitudActualizarClienteAdmin,
+  type SolicitudActualizarPerfilConexionAdmin,
   type SolicitudCrearAmbienteSapClienteAdmin,
   type SolicitudCrearClienteAdmin,
+  type SolicitudCrearPerfilConexionAdmin,
+  type SolicitudReemplazarCredencialesPerfilAdmin,
 } from '@portal-soporte/contracts/clients';
 import { csrfResponseSchema } from '@portal-soporte/contracts/auth';
 
-type MetodoEscrituraCliente = 'POST' | 'PATCH';
+type MetodoEscrituraCliente = 'POST' | 'PATCH' | 'PUT';
 
 const MENSAJES_CLIENTES: Readonly<Record<string, string>> = {
   AUTH_REQUIRED: 'Tu sesión terminó. Inicia sesión de nuevo.',
@@ -28,6 +36,25 @@ const MENSAJES_CLIENTES: Readonly<Record<string, string>> = {
   SAP_ENVIRONMENT_DUPLICATE: 'Ese código ya existe en el cliente.',
   SAP_ENVIRONMENT_NAME_INVALID: 'El nombre del ambiente debe tener entre 2 y 120 caracteres.',
   SAP_ENVIRONMENT_NOT_FOUND: 'No se encontró el ambiente SAP solicitado para ese cliente.',
+  DESTINATION_NOT_ALLOWED: 'El destino no está habilitado en la configuración del servidor.',
+  MYSQL_CONNECTION_FAILED:
+    'No fue posible conectar con MySQL. Revisa la configuración sin compartir sus secretos.',
+  MYSQL_AUTHENTICATION_FAILED: 'MySQL rechazó las credenciales configuradas.',
+  MYSQL_TLS_FAILED: 'No se pudo validar la conexión TLS de MySQL.',
+  SSH_CONNECTION_FAILED: 'No fue posible abrir el túnel SSH autorizado.',
+  SSH_HOST_KEY_REJECTED: 'La huella del servidor SSH no coincide con la autorizada.',
+  CONNECTION_TIMEOUT: 'La prueba de conexión excedió el tiempo permitido.',
+  CONNECTOR_BUSY: 'Hay otra prueba en curso. Inténtalo nuevamente en unos momentos.',
+  INVALID_CREDENTIALS: 'Las credenciales o llaves no tienen un formato compatible.',
+  SECRET_CUSTODY_DISABLED:
+    'La custodia segura todavía no está configurada; no se guardó la credencial.',
+  SECRET_PACKAGE_TOO_LARGE: 'El material de conexión excede el tamaño permitido.',
+  SECRET_CUSTODY_UNAVAILABLE: 'La custodia segura no está disponible. No se abrió una conexión.',
+  SECRET_PACKAGE_INVALID: 'No fue posible validar el material cifrado del perfil.',
+  PROFILE_CONFIGURATION_INVALID: 'La ruta SSH o los certificados TLS no son coherentes.',
+  PROFILE_DUPLICATE: 'Ya existe un perfil con ese nombre para este cliente.',
+  PROFILE_NOT_FOUND: 'No se encontró el perfil de conexión.',
+  PROFILE_NAME_INVALID: 'El nombre del perfil debe tener entre 2 y 120 caracteres.',
 };
 
 /** Error administrativo localizado sin conservar el cuerpo o causa de la respuesta HTTP. */
@@ -104,6 +131,74 @@ export function actualizarAmbienteSapAdmin(
     'PATCH',
     200,
     ambienteSapClienteAdminSchema,
+  );
+}
+
+/** Lista perfiles de conexión por cliente y valida que la respuesta no contenga secretos. */
+export function listarPerfilesConexionAdmin(
+  clientId: string,
+): Promise<readonly PerfilConexionAdminContrato[]> {
+  return solicitarApi(
+    `/api/v1/admin/clients/${encodeURIComponent(clientId)}/connection-profiles`,
+    listaPerfilesConexionAdminSchema,
+  );
+}
+
+/** Crea un perfil enviando secretos solo en esta solicitud cifrada por HTTPS y CSRF. */
+export function crearPerfilConexionAdmin(
+  clientId: string,
+  solicitud: SolicitudCrearPerfilConexionAdmin,
+): Promise<PerfilConexionAdminContrato> {
+  return enviarJson(
+    `/api/v1/admin/clients/${encodeURIComponent(clientId)}/connection-profiles`,
+    solicitud,
+    'POST',
+    201,
+    perfilConexionAdminSchema,
+  );
+}
+
+/** Actualiza metadatos o estado lógico sin recuperar credenciales existentes. */
+export function actualizarPerfilConexionAdmin(
+  clientId: string,
+  profileId: string,
+  solicitud: SolicitudActualizarPerfilConexionAdmin,
+): Promise<PerfilConexionAdminContrato> {
+  return enviarJson(
+    `/api/v1/admin/clients/${encodeURIComponent(clientId)}/connection-profiles/${encodeURIComponent(profileId)}`,
+    solicitud,
+    'PATCH',
+    200,
+    perfilConexionAdminSchema,
+  );
+}
+
+/** Reemplaza credenciales sin consultar ni rellenar el material previamente guardado. */
+export function reemplazarCredencialesPerfilAdmin(
+  clientId: string,
+  profileId: string,
+  solicitud: SolicitudReemplazarCredencialesPerfilAdmin,
+): Promise<PerfilConexionAdminContrato> {
+  return enviarJson(
+    `/api/v1/admin/clients/${encodeURIComponent(clientId)}/connection-profiles/${encodeURIComponent(profileId)}/credentials`,
+    solicitud,
+    'PUT',
+    200,
+    perfilConexionAdminSchema,
+  );
+}
+
+/** Solicita una prueba de conectividad de solo lectura sin enviar SQL o secretos al navegador. */
+export function probarPerfilConexionAdmin(
+  clientId: string,
+  profileId: string,
+): Promise<ResultadoPruebaPerfilAdminContrato> {
+  return enviarJson(
+    `/api/v1/admin/clients/${encodeURIComponent(clientId)}/connection-profiles/${encodeURIComponent(profileId)}/test`,
+    undefined,
+    'POST',
+    200,
+    resultadoPruebaPerfilAdminSchema,
   );
 }
 

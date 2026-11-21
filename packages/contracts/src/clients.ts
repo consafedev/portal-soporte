@@ -156,3 +156,178 @@ export const errorClienteAdminSchema = Type.Object(
     description: 'Error estable sin datos de PostgreSQL ni secretos.',
   },
 );
+
+/** Tipos de conexión que el núcleo PS-005 soporta actualmente. */
+export const tipoPerfilConexionAdminSchema = Type.Union([
+  Type.Literal('MYSQL_TCP'),
+  Type.Literal('MYSQL_SSH'),
+]);
+
+/** Entornos del sistema cliente disponibles para un perfil de conexión. */
+export const entornoPerfilConexionAdminSchema = Type.Union([
+  Type.Literal('PRODUCTION'),
+  Type.Literal('TEST'),
+]);
+
+/** Tipo del ambiente declarativo asociado al perfil de conexión. */
+export type EntornoPerfilConexionAdmin = Static<typeof entornoPerfilConexionAdminSchema>;
+
+/** Credenciales MySQL protegidas en el servidor; jamás son parte de una respuesta. */
+export const credencialesMySqlAdminSchema = Type.Object(
+  {
+    mysqlUsername: Type.String({ minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.@-]+$' }),
+    mysqlPassword: Type.String({ minLength: 1, maxLength: 4096 }),
+    tls: Type.Optional(
+      Type.Object(
+        {
+          ca: Type.Optional(Type.String({ minLength: 1, maxLength: 16_384 })),
+          cert: Type.Optional(Type.String({ minLength: 1, maxLength: 16_384 })),
+          key: Type.Optional(Type.String({ minLength: 1, maxLength: 16_384 })),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+    ssh: Type.Optional(
+      Type.Object(
+        {
+          username: Type.String({ minLength: 1, maxLength: 128 }),
+          authentication: Type.Literal('PRIVATE_KEY'),
+          privateKey: Type.String({
+            minLength: 1,
+            maxLength: 16_384,
+            pattern:
+              '^(?:-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----|PuTTY-User-Key-File-[0-9]+: [A-Za-z0-9-]+)',
+            description:
+              'Llave PEM/OpenSSH o PuTTY PPK v2 RSA; PPK v3, DSA y otros PPK no son compatibles.',
+          }),
+          passphrase: Type.Optional(Type.String({ maxLength: 1024 })),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  {
+    additionalProperties: false,
+    description:
+      'Material temporal que el servidor cifra antes de persistir; SSH usa llave privada, no contraseña.',
+  },
+);
+
+/** Tipo de credenciales que recibe una única operación de alta/reemplazo. */
+export type CredencialesMySqlAdmin = Static<typeof credencialesMySqlAdminSchema>;
+
+/** Entrada estricta para crear perfil y cifrar credenciales antes de guardar. */
+export const crearPerfilConexionAdminSchema = Type.Object(
+  {
+    nombre: Type.String({ minLength: 2, maxLength: 120 }),
+    tipo: tipoPerfilConexionAdminSchema,
+    entorno: entornoPerfilConexionAdminSchema,
+    destinoMySqlId: Type.String({ minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9_-]*$' }),
+    gatewaySshId: Type.Optional(
+      Type.String({ minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9_-]*$' }),
+    ),
+    baseDatos: Type.String({ minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9_$-]+$' }),
+    credenciales: credencialesMySqlAdminSchema,
+  },
+  {
+    additionalProperties: false,
+    description:
+      'Perfil administrativo; credenciales se reciben solo para cifrado y no se devuelven.',
+  },
+);
+
+/** Tipo de entrada para la creación de un perfil de conexión. */
+export type SolicitudCrearPerfilConexionAdmin = Static<typeof crearPerfilConexionAdminSchema>;
+
+/** Cambios acotados a metadatos; las credenciales se reemplazan por un endpoint separado. */
+export const actualizarPerfilConexionAdminSchema = Type.Object(
+  {
+    nombre: Type.Optional(Type.String({ minLength: 2, maxLength: 120 })),
+    entorno: Type.Optional(entornoPerfilConexionAdminSchema),
+    destinoMySqlId: Type.Optional(
+      Type.String({ minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9_-]*$' }),
+    ),
+    gatewaySshId: Type.Optional(
+      Type.Union([
+        Type.String({ minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9_-]*$' }),
+        Type.Null(),
+      ]),
+    ),
+    baseDatos: Type.Optional(
+      Type.String({ minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9_$-]+$' }),
+    ),
+    estado: Type.Optional(estadoRegistroClienteSchema),
+  },
+  {
+    additionalProperties: false,
+    minProperties: 1,
+    description: 'Actualiza metadatos sin aceptar ni devolver contraseñas o llaves.',
+  },
+);
+
+/** Tipo de los campos editables de un perfil. */
+export type SolicitudActualizarPerfilConexionAdmin = Static<
+  typeof actualizarPerfilConexionAdminSchema
+>;
+
+/** Entrada para sustituir credenciales; TypeBox rechaza campos adicionales. */
+export const reemplazarCredencialesPerfilAdminSchema = Type.Object(
+  { credenciales: credencialesMySqlAdminSchema },
+  { additionalProperties: false },
+);
+
+/** Tipo de entrada para reemplazar credenciales protegidas de un perfil. */
+export type SolicitudReemplazarCredencialesPerfilAdmin = Static<
+  typeof reemplazarCredencialesPerfilAdminSchema
+>;
+
+/** Parámetros de la ruta anidada bajo cliente y perfil. */
+export const clienteYPerfilParamsSchema = Type.Object(
+  {
+    clientId: Type.String({ pattern: PATRON_UUID_CLIENTE }),
+    profileId: Type.String({ pattern: PATRON_UUID_CLIENTE }),
+  },
+  { additionalProperties: false },
+);
+
+/** Tipo de parámetros de una ruta de perfil de conexión. */
+export type ParametrosClientePerfil = Static<typeof clienteYPerfilParamsSchema>;
+
+/** DTO público redactado del perfil de conexión. */
+export const perfilConexionAdminSchema = Type.Object(
+  {
+    id: Type.String({ pattern: PATRON_UUID_CLIENTE }),
+    clientId: Type.String({ pattern: PATRON_UUID_CLIENTE }),
+    nombre: Type.String({ minLength: 2, maxLength: 120 }),
+    tipo: tipoPerfilConexionAdminSchema,
+    entorno: entornoPerfilConexionAdminSchema,
+    destinoMySqlId: Type.String({ minLength: 1, maxLength: 64 }),
+    gatewaySshId: Type.Union([Type.String({ minLength: 1, maxLength: 64 }), Type.Null()]),
+    baseDatos: Type.String({ minLength: 1, maxLength: 64 }),
+    estado: estadoRegistroClienteSchema,
+    createdAt: Type.String({ pattern: PATRON_FECHA_CLIENTE }),
+    updatedAt: Type.String({ pattern: PATRON_FECHA_CLIENTE }),
+  },
+  {
+    additionalProperties: false,
+    description: 'Respuesta sin nombre de usuario ni material secreto.',
+  },
+);
+
+/** Tipo de la respuesta redactada de perfil de conexión. */
+export type PerfilConexionAdminContrato = Static<typeof perfilConexionAdminSchema>;
+
+/** Respuesta de prueba MySQL sin host, usuario, detalle de driver o secretos. */
+export const resultadoPruebaPerfilAdminSchema = Type.Object(
+  {
+    code: Type.String({ pattern: '^[A-Z0-9_]{1,64}$' }),
+    completedAt: Type.String({ pattern: PATRON_FECHA_CLIENTE }),
+  },
+  { additionalProperties: false },
+);
+
+/** Tipo de resultado público de una prueba de conexión redactada. */
+export type ResultadoPruebaPerfilAdminContrato = Static<typeof resultadoPruebaPerfilAdminSchema>;
+
+/** Lista redactada de perfiles asociados a un cliente. */
+export const listaPerfilesConexionAdminSchema = Type.Array(perfilConexionAdminSchema);

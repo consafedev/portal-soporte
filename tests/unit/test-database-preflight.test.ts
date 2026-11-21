@@ -24,6 +24,16 @@ const restriccionesEsperadasPrueba = [
   ['client_sap_environments', 'client_sap_environments_name_check', 'c'],
   ['client_sap_environments', 'client_sap_environments_pkey', 'p'],
   ['client_sap_environments', 'client_sap_environments_status_check', 'c'],
+  ['client_connection_profiles', 'client_connection_profiles_client_id_clients_id_fk', 'f'],
+  ['client_connection_profiles', 'client_connection_profiles_created_by_user_id_users_id_fk', 'f'],
+  ['client_connection_profiles', 'client_connection_profiles_pkey', 'p'],
+  ['client_connection_profiles', 'client_connection_profiles_type_check', 'c'],
+  ['client_connection_profiles', 'client_connection_profiles_environment_check', 'c'],
+  ['client_connection_profiles', 'client_connection_profiles_status_check', 'c'],
+  ['client_connection_profiles', 'client_connection_profiles_name_check', 'c'],
+  ['client_connection_profiles', 'client_connection_profiles_destination_check', 'c'],
+  ['client_connection_profiles', 'client_connection_profiles_database_check', 'c'],
+  ['client_connection_profiles', 'client_connection_profiles_gateway_check', 'c'],
   ['clients', 'clients_created_by_user_id_users_id_fk', 'f'],
   ['clients', 'clients_name_check', 'c'],
   ['clients', 'clients_pkey', 'p'],
@@ -113,6 +123,7 @@ function crearEstadoVacio(): EstadoEsquemaBasePrueba {
       invariantes: 0,
       clientes: 0,
       ambientesSap: 0,
+      perfilesConexion: 0,
     },
   };
 }
@@ -121,6 +132,7 @@ function crearEstadoVacio(): EstadoEsquemaBasePrueba {
 function crearEstadoMigrado(
   variantesHashesMigracion: readonly (readonly string[])[],
   incluirClientes = true,
+  incluirPerfiles = true,
 ): EstadoEsquemaBasePrueba {
   const tablas = [
     '__drizzle_migrations',
@@ -128,6 +140,7 @@ function crearEstadoMigrado(
     'auth_invariants',
     'auth_throttle_windows',
     ...(incluirClientes ? ['client_sap_environments', 'clients'] : []),
+    ...(incluirPerfiles ? ['client_connection_profiles'] : []),
     'recovery_tokens',
     'sessions',
     'users',
@@ -159,6 +172,15 @@ function crearEstadoMigrado(
           ['clients_status_idx', 'i'],
         ]
       : []),
+    ...(incluirPerfiles
+      ? [
+          ['client_connection_profiles', 'r'],
+          ['client_connection_profiles_client_name_unique', 'i'],
+          ['client_connection_profiles_client_id_idx', 'i'],
+          ['client_connection_profiles_pkey', 'i'],
+          ['client_connection_profiles_status_idx', 'i'],
+        ]
+      : []),
     ['recovery_tokens', 'r'],
     ['recovery_tokens_expires_at_idx', 'i'],
     ['recovery_tokens_pkey', 'i'],
@@ -179,12 +201,12 @@ function crearEstadoMigrado(
     esquemas: ['portal', 'public'],
     tablas: tablas.map((nombre) => ({ esquema: 'portal', nombre, tipo: 'BASE TABLE' })),
     secuencias: [{ esquema: 'portal', nombre: '__drizzle_migrations_id_seq' }],
-    restricciones: incluirClientes
-      ? restriccionesEsperadasPrueba
-      : restriccionesEsperadasPrueba.filter(
-          (restriccion) =>
-            restriccion.tabla !== 'client_sap_environments' && restriccion.tabla !== 'clients',
-        ),
+    restricciones: restriccionesEsperadasPrueba.filter(
+      (restriccion) =>
+        (incluirClientes ||
+          (restriccion.tabla !== 'client_sap_environments' && restriccion.tabla !== 'clients')) &&
+        (incluirPerfiles || restriccion.tabla !== 'client_connection_profiles'),
+    ),
     relaciones: relaciones.map(([nombre, tipo]) => ({
       esquema: 'portal',
       nombre: nombre!,
@@ -209,6 +231,7 @@ function crearEstadoMigrado(
       invariantes: 1,
       clientes: 0,
       ambientesSap: 0,
+      perfilesConexion: 0,
     },
   };
 }
@@ -285,6 +308,7 @@ describe('validación del estado persistente de la base de pruebas', () => {
     'hash-0003',
     'hash-0004',
     'hash-0005',
+    'hash-0006',
   ].map((hash) => [hash]);
 
   it('acepta una base nueva antes de aplicar migraciones', () => {
@@ -307,7 +331,7 @@ describe('validación del estado persistente de la base de pruebas', () => {
   });
 
   it('acepta únicamente el esquema vacío inmediatamente anterior a la última migración', () => {
-    const estadoAnterior = crearEstadoMigrado(hashesEsperados.slice(0, -1), false);
+    const estadoAnterior = crearEstadoMigrado(hashesEsperados.slice(0, -1), true, false);
 
     expect(validarEstadoEsquemaBasePrueba(estadoAnterior, hashesEsperados)).toBe(
       'migracion-pendiente',
@@ -322,6 +346,7 @@ describe('validación del estado persistente de la base de pruebas', () => {
       'hash-0003',
       'hash-0004',
       'hash-0005',
+      'hash-0006',
     ].map((hash) => [`${hash}-windows`, `${hash}-unix`]);
     const estado = crearEstadoMigrado(variantes);
 
