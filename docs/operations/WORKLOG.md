@@ -1572,3 +1572,13 @@ eload, se reinició únicamente cloudflared-consafedev.service; procesos web, AP
 - Riesgos abiertos: auditoría general conserva `esbuild` moderado en desarrollo; riesgo temporal de `picomatch` revisar `2026-12-10 UTC`, aceptación vence `2026-12-17 UTC`; custodia/recuperación del llavero en Debian pendiente; PPK v3/DSA sin soporte.
 - Próximo paso: actualizar seguimiento, comprobar si ya existe PR para esta rama y crear PR revisable contra `main` una vez verde el head documental actualizado. Sin merge.
 - Estado: PS-005/PS-005.2 `EN_CURSO`; Actions verde en el SHA `a3edf4c`, PR pendiente.
+
+### [2026-11-21T02:38:26-06:00] PS-005.2 — RETIRAR RIESGO OBSOLETO Y VERIFICAR HEAD DOCUMENTAL
+- Agente/tarea/rama/base: Codex · PS-005.2 · `codex/ps-005-clients-connections` · head publicado `543f3ba658f8b0d45e30190976e5206db329670b`.
+- Objetivo: evitar que la ADR de custodia siga declarando pendiente un handshake que ya fue ejecutado con éxito en CI.
+- Evidencia: run `44885452443` sobre `543f3ba`; ambos jobs (`Calidad y seguridad básica`, `Conectores MySQL y SSH con fixture sintético`) finalizaron `SUCCESS`. El workflow cubre servicios efímeros MySQL/sshd, TLS/SSH y formatos PEM/PPK conforme al fixture versionado.
+- Cambio documental: ADR-0002 registra la evidencia del run y aclara su límite (solo destinos sintéticos; no se han probado clientes reales). `TASK_BOARD.md` ahora señala `543f3ba` como head validado y mantiene PS-005 `EN_CURSO` mientras se crea el PR.
+- Verificaciones de contexto: el diff contra `origin/main` contiene únicamente PS-005 y su fixture; 0005 es aditiva en esquema `portal`, 0006 tiene reversión limitada a `portal.client_connection_profiles`. No se ejecutaron migraciones persistentes. Árbol limpio previo a esta actualización; remoto `origin/codex/ps-005-clients-connections` coincidía con el head consultado.
+- Riesgos abiertos: `esbuild` moderado de desarrollo; `picomatch` revisar `2026-12-10 UTC`, aceptación temporal vence `2026-12-17 UTC`; keyring/recuperación Debian sin provisionar; conexiones reales, PPK v3/DSA y despliegue quedan fuera de validación.
+- Próximo paso: formato y diff-check de documentación, commit/push normal, verificar CI del nuevo head y crear PR a `main` sin merge.
+- Estado: PS-005/PS-005.2 `EN_CURSO`, sin PR/merge.

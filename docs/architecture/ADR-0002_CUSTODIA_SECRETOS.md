@@ -31,7 +31,7 @@
 - La selección del formato y del algoritmo criptográfico está implementable; **no** autoriza crear/instalar llavero, sobres reales o credenciales en Debian.
 - Recuperabilidad depende de una copia independiente custodiada por el propietario. Hasta probarla, los perfiles secretos permanecen deshabilitados.
 - La allowlist debe ser provisionada por infraestructura en archivo de configuración protegido. No se inferirá de un host recibido por API.
-- El soporte anunciado de PPK se limita a v2 RSA. El fixture sintético aún debe ejecutar el handshake SSH/MySQL real antes de declarar compatibilidad end-to-end.
+- El soporte anunciado de PPK se limita a v2 RSA; el handshake SSH/MySQL se validó extremo a extremo con credenciales y servicios efímeros sintéticos en [Actions run `44885452443`](https://github.com/consafedev/portal-soporte/actions/runs/44885452443), head `543f3ba658f8b0d45e30190976e5206db329670b`. Esta evidencia no valida conexiones a destinos reales. PPK v3, DSA y variantes no verificadas continúan rechazándose.
 - La implementación y los tests no habilitan RF-1 ni operaciones sobre bases de clientes; escrituras RF-1 tienen puertas separadas.
 
 ## Reversión
