@@ -1,7 +1,7 @@
 # Procedimiento operativo — Recuperación del llavero de clientes
 
-**Estado:** procedimiento preparado; no provisionado ni probado en Debian.  
-**Ámbito:** PS-005.2; llaves maestras de cifrado de credenciales de conexiones.  
+**Estado:** procedimiento preparado; no provisionado ni probado en Debian.
+**Ámbito:** PS-005.2; llaves maestras de cifrado de credenciales de conexiones.
 **Última revisión:** 2026-11-21.
 
 ## Límites
