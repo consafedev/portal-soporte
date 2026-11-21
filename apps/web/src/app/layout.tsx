@@ -1,5 +1,7 @@
 import type { Metadata } from 'next';
 import type { JSX, ReactNode } from 'react';
+import { ProveedorTemaPortal } from '../components/theme/theme-provider';
+import { BotonAlternarTema } from '../components/theme/theme-toggle-button';
 import './globals.css';
 
 /** Metadatos del portal interno; evita indexación de páginas con datos de cuenta. */
@@ -21,8 +23,13 @@ export default function RootLayout({
   children: ReactNode;
 }>): JSX.Element {
   return (
-    <html lang="es">
-      <body>{children}</body>
+    <html lang="es" data-theme="system">
+      <body>
+        <ProveedorTemaPortal>
+          <BotonAlternarTema />
+          {children}
+        </ProveedorTemaPortal>
+      </body>
     </html>
   );
 }

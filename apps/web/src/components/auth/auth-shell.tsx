@@ -5,11 +5,12 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import type { RespuestaUsuarioPublico, RolUsuario } from '@portal-soporte/contracts/auth';
 import { cerrarSesion, ErrorApiAuth, obtenerSesion } from '../../lib/auth-api';
+import { ProveedorUsuarioAutenticado } from './auth-user-context';
 
 /** Propiedades de contenido cuya sesión requiere validación remota antes de mostrarse. */
 export interface PropiedadesMarcoAutenticado {
-  /** Contenido protegido que se renderiza tras cargar la sesión. */
-  readonly children: ReactNode;
+  /** Contenido protegido que se renderiza después de validar la sesión. */
+  readonly children?: ReactNode;
   /** Rol requerido en la interfaz; el backend conserva la autorización definitiva. */
   readonly rolRequerido?: RolUsuario;
 }
@@ -160,7 +161,7 @@ export function MarcoAutenticado({
             href="/profile/password"
             aria-current={rutaActual.startsWith('/profile/') ? 'page' : undefined}
           >
-            Mi contraseña
+            Mi perfil
           </Link>
           <button className="boton-secundario boton-salir" type="button" onClick={manejarSalida}>
             Cerrar sesión
@@ -173,7 +174,9 @@ export function MarcoAutenticado({
             {errorSalida}
           </p>
         ) : null}
-        <main className="contenido-autenticado">{children}</main>
+        <ProveedorUsuarioAutenticado usuario={usuario}>
+          <main className="contenido-autenticado">{children}</main>
+        </ProveedorUsuarioAutenticado>
       </div>
     </div>
   );

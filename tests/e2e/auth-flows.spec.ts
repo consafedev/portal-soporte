@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { expect, test, type Page, type Route } from '@playwright/test';
+import { expect, test, type Page, type Response, type Route } from '@playwright/test';
 import type {
   RespuestaAltaUsuarioAdmin,
   RespuestaUsuarioAdmin,
@@ -22,6 +22,19 @@ const usuarioAdmin: RespuestaUsuarioPublico = {
 
 /** Responde una ruta del API simulado con JSON sintético y estado explícito. */
 type ManejadorJsonE2e = (ruta: Route) => Promise<void>;
+
+/**
+ * Reconoce la respuesta de la escritura de tema personal que inicia el dashboard.
+ *
+ * @param respuesta - Respuesta de red observada por Playwright.
+ * @returns `true` solo para el PATCH del contrato de preferencias de usuario.
+ */
+function esRespuestaActualizacionTema(respuesta: Response): boolean {
+  return (
+    respuesta.request().method() === 'PATCH' &&
+    new URL(respuesta.url()).pathname === '/api/v1/me/preferences'
+  );
+}
 
 /**
  * Crea un manejador Playwright para respuestas públicas JSON sin datos reales.
@@ -102,6 +115,8 @@ async function probarAccesoSoporteYCambioPropio({ page }: { page: Page }): Promi
   await page.route('**/api/v1/auth/password', cambiarContrasena);
   await page.goto('/login');
   await page.keyboard.press('Tab');
+  await expect(page.getByRole('button', { name: 'Cambiar a tema oscuro' })).toBeFocused();
+  await page.keyboard.press('Tab');
   await expect(page.getByLabel('Nombre de usuario')).toBeFocused();
   await page.getByLabel('Nombre de usuario').fill(usuarioSoporte.username);
   await page.getByLabel('Contraseña').fill(contrasenaPrueba);
@@ -112,9 +127,11 @@ async function probarAccesoSoporteYCambioPropio({ page }: { page: Page }): Promi
 
   await page.getByRole('button', { name: 'Continuar' }).click();
   await expect(page).toHaveURL(/\/dashboard$/u);
-  await expect(page.getByRole('heading', { name: 'Inicio' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Hola, Soporte sintético', exact: true }),
+  ).toBeVisible();
   await expect(page.getByRole('link', { name: 'Usuarios' })).toHaveCount(0);
-  await page.getByRole('link', { name: 'Mi contraseña', exact: true }).click();
+  await page.getByRole('link', { name: 'Mi perfil', exact: true }).click();
   await expect(page).toHaveURL(/\/profile\/password$/u);
   await expect(page.getByRole('heading', { name: 'Mi perfil' })).toBeVisible();
   await page.getByLabel('Contraseña actual').first().fill(contrasenaPrueba);
@@ -122,7 +139,7 @@ async function probarAccesoSoporteYCambioPropio({ page }: { page: Page }): Promi
   await page.getByLabel('Confirma la contraseña nueva').fill(contrasenaNueva);
   await page.getByRole('button', { name: 'Guardar contraseña' }).click();
 
-  await expect(page.getByRole('status')).toContainText(
+  await expect(page.locator('.aviso-exito')).toContainText(
     'La contraseña cambió y tus otras sesiones se cerraron.',
   );
   expect(csrfValidoEnCambio).toBe(true);
@@ -154,17 +171,63 @@ async function probarDenegacionVisualSoporte({ page }: { page: Page }): Promise<
   expect(seConsultaronUsuarios).toBe(false);
 }
 
-/** Valida navegación, foco, contraste y ajuste móvil del dashboard con identidad sintética. */
+/**
+ * Valida navegación, foco, contraste, tema y ajuste móvil con identidad sintética.
+ *
+ * @param contexto - Fixture de navegador aislado de Playwright.
+ * @param contexto.page - Página con API simulada y usuario SUPPORT ficticio.
+ * @returns Promesa resuelta después de comprobar los estados visuales y accesibles.
+ */
 async function probarDashboardAccesibleYResponsivo({ page }: { page: Page }): Promise<void> {
+  const tokenCsrf = await interceptarCsrf(page);
+  let temaGuardado = 'system';
+  let seValidoCsrf = false;
+
+  /**
+   * Lee o persiste un tema sintético y verifica CSRF en la escritura del perfil.
+   *
+   * @param ruta - Solicitud a preferencias capturada por Playwright.
+   * @returns Promesa resuelta tras responder con el tema sintético vigente.
+   * @effects Actualiza el estado en memoria de la prueba, nunca una cuenta real.
+   */
+  async function manejarPreferenciaTema(ruta: Route): Promise<void> {
+    if (ruta.request().method() === 'GET') {
+      await ruta.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ theme: temaGuardado }),
+      });
+      return;
+    }
+
+    const solicitud = ruta.request().postDataJSON() as { theme: string };
+    seValidoCsrf = ruta.request().headers()['x-csrf-token'] === tokenCsrf;
+    temaGuardado = solicitud.theme;
+    await ruta.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ theme: temaGuardado }),
+    });
+  }
+
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
   await page.route('**/api/v1/auth/login', crearManejadorJson(200, { user: usuarioSoporte }));
   await page.route('**/api/v1/auth/me', crearManejadorJson(200, { user: usuarioSoporte }));
+  await page.route('**/api/v1/me/preferences', manejarPreferenciaTema);
   await page.goto('/login');
   await page.getByLabel('Nombre de usuario').fill(usuarioSoporte.username);
   await page.getByLabel('Contraseña').fill(randomBytes(24).toString('base64url'));
   await page.getByRole('button', { name: 'Continuar' }).click();
 
   await expect(page).toHaveURL(/\/dashboard$/u);
-  await expect(page.getByRole('heading', { name: 'Inicio' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Hola, Soporte sintético', exact: true }),
+  ).toBeVisible();
+  // Evita que la insignia exclusiva de desarrollo contamine la evidencia visual del producto.
+  await page.addStyleTag({ content: 'nextjs-portal { display: none !important; }' });
+  await expect(
+    page.locator('.pagina-dashboard').locator('section, canvas, table, svg'),
+  ).toHaveCount(0);
   const nav = page.getByRole('navigation', { name: 'Principal' });
   await expect(nav.getByRole('link', { name: 'Inicio' })).toHaveAttribute('aria-current', 'page');
   await expect(nav.getByRole('link', { name: 'Usuarios' })).toHaveCount(0);
@@ -172,11 +235,29 @@ async function probarDashboardAccesibleYResponsivo({ page }: { page: Page }): Pr
   await page.keyboard.press('Tab');
   await expect(nav.getByRole('link', { name: 'Inicio', exact: true })).toBeFocused();
 
-  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.screenshot({
     path: '.superpowers/sdd/2026-11-19-deploy-002-publicacion/dashboard-ps004-sintetico.png',
   });
+
+  const duracionTransicionTema = await page
+    .locator('.boton-cambiar-tema svg')
+    .first()
+    .evaluate((icono) => getComputedStyle(icono).transitionDuration);
+  expect(Number.parseFloat(duracionTransicionTema)).toBeGreaterThan(0);
+
+  const botonTemaOscuro = page.getByRole('button', { name: 'Cambiar a tema oscuro' });
+  await expect(botonTemaOscuro).toHaveAttribute('aria-pressed', 'false');
+  const respuestaTemaGuardado = page.waitForResponse(esRespuestaActualizacionTema);
+  await botonTemaOscuro.click();
+  await respuestaTemaGuardado;
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await expect(page.getByRole('button', { name: 'Cambiar a tema claro' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  expect(temaGuardado).toBe('dark');
+  expect(seValidoCsrf).toBe(true);
 
   await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
   await page.setViewportSize({ width: 360, height: 780 });
@@ -185,14 +266,20 @@ async function probarDashboardAccesibleYResponsivo({ page }: { page: Page }): Pr
     fondoOscuro:
       getComputedStyle(document.documentElement).getPropertyValue('--fondo').trim() === '#0f141c',
     movimientoReducido: matchMedia('(prefers-reduced-motion: reduce)').matches,
-    transicionAcceso: getComputedStyle(document.querySelector('.enlace-acceso') as Element)
+    transicionTema: getComputedStyle(document.querySelector('.boton-cambiar-tema svg') as Element)
       .transitionDuration,
   }));
 
   expect(estadoVisual.anchoSinDesborde).toBe(true);
   expect(estadoVisual.fondoOscuro).toBe(true);
   expect(estadoVisual.movimientoReducido).toBe(true);
-  expect(estadoVisual.transicionAcceso).not.toBe('120ms');
+  expect(Number.parseFloat(estadoVisual.transicionTema)).toBeLessThan(0.001);
+  await page.getByRole('button', { name: 'Cambiar a tema claro' }).focus();
+  await page.keyboard.press('Space');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await page.screenshot({
+    path: '.superpowers/sdd/2026-11-19-deploy-002-publicacion/dashboard-ps004-movil.png',
+  });
 }
 
 /**
@@ -261,7 +348,9 @@ async function probarAltaDirectaAdministrativa({ page }: { page: Page }): Promis
   await page.getByLabel('Contraseña').fill(randomBytes(24).toString('base64url'));
   await page.getByRole('button', { name: 'Continuar' }).click();
   await expect(page).toHaveURL(/\/dashboard$/u);
-  await expect(page.getByRole('heading', { name: 'Inicio' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Hola, Admin sintético', exact: true }),
+  ).toBeVisible();
   await page.getByRole('link', { name: 'Usuarios' }).click();
   await expect(page).toHaveURL(/\/settings\/users$/u);
   await expect(page.getByRole('heading', { name: 'Usuarios' })).toBeVisible();
@@ -400,6 +489,186 @@ async function probarRecuperacionPorCorreoDeshabilitada({ page }: { page: Page }
   await expect(page.getByRole('button', { name: 'Guardar contraseña' })).toHaveCount(0);
 }
 
+/**
+ * Comprueba tema persistido, teclado, contraste y la limitación visible de SMTP.
+ *
+ * @param contexto - Fixture aislado de Playwright.
+ * @param contexto.page - Página con API sintética y usuario SUPPORT ficticio.
+ * @returns Promesa resuelta tras validar persistencia y presentación del perfil.
+ */
+async function probarPreferenciasPersonales({ page }: { page: Page }): Promise<void> {
+  const tokenCsrf = await interceptarCsrf(page);
+  let temaGuardado = 'system';
+  let seValidaronCsrf = false;
+
+  /** Devuelve la preferencia sintética o guarda el tema elegido desde el formulario. */
+  async function manejarPreferencias(ruta: Route): Promise<void> {
+    if (ruta.request().method() === 'GET') {
+      if (page.url().endsWith('/login')) {
+        await ruta.fulfill({ status: 401, contentType: 'application/json', body: '{}' });
+        return;
+      }
+      await ruta.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ theme: temaGuardado }),
+      });
+      return;
+    }
+
+    const solicitud = ruta.request().postDataJSON() as { theme: string };
+    seValidaronCsrf = ruta.request().headers()['x-csrf-token'] === tokenCsrf;
+    temaGuardado = solicitud.theme;
+    await ruta.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ theme: temaGuardado }),
+    });
+  }
+
+  /** Simula una sesión válida en el perfil y una sesión ausente en la pantalla pública. */
+  async function manejarIdentidad(ruta: Route): Promise<void> {
+    if (page.url().endsWith('/login')) {
+      await ruta.fulfill({ status: 401, contentType: 'application/json', body: '{}' });
+      return;
+    }
+    await ruta.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ user: usuarioSoporte }),
+    });
+  }
+
+  await page.route('**/api/v1/auth/me', manejarIdentidad);
+  await page.route('**/api/v1/me/preferences', manejarPreferencias);
+  await page.goto('/profile/password');
+
+  await expect(page.getByRole('heading', { name: 'Apariencia' })).toBeVisible();
+  await expect(
+    page.getByRole('status').filter({ hasText: 'El cambio de correo está deshabilitado' }),
+  ).toBeVisible();
+  await expect(page.getByLabel('Correo nuevo')).toHaveCount(0);
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
+  expect(await obtenerContrasteTextoPreferencias(page)).toBeGreaterThanOrEqual(4.5);
+  const opcionOscura = page.getByRole('radio', { name: /^Oscuro/u });
+  await opcionOscura.focus();
+  await expect(opcionOscura).toBeFocused();
+  await page.keyboard.press('Space');
+  await expect(opcionOscura).toBeChecked();
+  await page.getByRole('button', { name: 'Guardar apariencia' }).click();
+  await expect(page.locator('.aviso-exito')).toContainText('Preferencia guardada.');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  expect(seValidaronCsrf).toBe(true);
+  expect(await obtenerContrasteTextoPreferencias(page)).toBeGreaterThanOrEqual(4.5);
+  await page.screenshot({
+    path: '.superpowers/sdd/2026-11-19-deploy-002-publicacion/perfil-ps004-sintetico.png',
+  });
+
+  await page.reload();
+  await expect(page.getByRole('radio', { name: /^Oscuro/u })).toBeChecked();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  expect(await page.evaluate(() => localStorage.getItem('portal-soporte-theme'))).toBe('dark');
+  await page.setViewportSize({ width: 360, height: 780 });
+  await page.screenshot({
+    path: '.superpowers/sdd/2026-11-19-deploy-002-publicacion/perfil-ps004-movil-sintetico.png',
+  });
+  const estadoVisual = await page.evaluate(() => ({
+    sinDesbordamiento: document.documentElement.scrollWidth <= window.innerWidth,
+    temaOscuro: getComputedStyle(document.documentElement).getPropertyValue('--fondo').trim(),
+    movimientoReducido: matchMedia('(prefers-reduced-motion: reduce)').matches,
+  }));
+  expect(estadoVisual.sinDesbordamiento).toBe(true);
+  expect(estadoVisual.temaOscuro).toBe('#0f141c');
+  expect(estadoVisual.movimientoReducido).toBe(true);
+
+  await page.goto('/login');
+  await expect(page.getByRole('heading', { name: 'Inicia sesión' })).toBeVisible();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await page.getByRole('button', { name: 'Cambiar a tema claro' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  expect(await page.evaluate(() => localStorage.getItem('portal-soporte-theme'))).toBe('light');
+  await page.getByRole('button', { name: 'Cambiar a tema oscuro' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  expect(await page.evaluate(() => localStorage.getItem('portal-soporte-theme'))).toBe('dark');
+}
+
+/**
+ * Lee el contraste real del texto secundario sobre la opción visible del formulario.
+ *
+ * @param page - Página de Playwright con el perfil sintético abierto.
+ * @returns Proporción WCAG del texto secundario sobre su superficie.
+ */
+async function obtenerContrasteTextoPreferencias(page: Page): Promise<number> {
+  const colores = await page.evaluate(leerColoresCssPreferencias);
+
+  if (colores === null) {
+    throw new Error('No se pudo identificar el texto de la opción de apariencia.');
+  }
+
+  return calcularContrasteWcag(colores.texto, colores.fondo);
+}
+
+/** Lee colores computados del formulario, sin recoger etiquetas ni contenido de cuenta. */
+function leerColoresCssPreferencias(): { texto: string; fondo: string } | null {
+  const texto = document.querySelector('.opcion-tema .texto-secundario');
+  const opcion = texto?.closest('.opcion-tema');
+  if (texto === null || opcion === null || opcion === undefined) return null;
+  return {
+    texto: getComputedStyle(texto).color,
+    fondo: getComputedStyle(opcion).backgroundColor,
+  };
+}
+
+/**
+ * Calcula la proporción WCAG 2.1 entre colores CSS RGB de texto y superficie.
+ *
+ * @param colorTexto - Color CSS computado del texto secundario.
+ * @param colorFondo - Color CSS computado de la opción que lo contiene.
+ * @returns Relación de contraste que se compara con el mínimo de texto normal.
+ */
+function calcularContrasteWcag(colorTexto: string, colorFondo: string): number {
+  const luminanciaTexto = calcularLuminanciaRelativa(colorTexto);
+  const luminanciaFondo = calcularLuminanciaRelativa(colorFondo);
+  const luminanciaMayor = Math.max(luminanciaTexto, luminanciaFondo);
+  const luminanciaMenor = Math.min(luminanciaTexto, luminanciaFondo);
+  return (luminanciaMayor + 0.05) / (luminanciaMenor + 0.05);
+}
+
+/**
+ * Convierte el triplete CSS RGB a luminancia relativa con la curva sRGB de WCAG.
+ *
+ * @param colorCss - Valor RGB computado por el navegador.
+ * @returns Luminancia relativa lineal del color.
+ * @throws Error si el navegador no devuelve tres canales RGB.
+ */
+function calcularLuminanciaRelativa(colorCss: string): number {
+  const canales = colorCss
+    .match(/\d+(?:\.\d+)?/gu)
+    ?.slice(0, 3)
+    .map(Number);
+  const [rojo, verde, azul] = canales ?? [];
+  if (rojo === undefined || verde === undefined || azul === undefined) {
+    throw new Error('El color CSS de la preferencia no es un triplete RGB válido.');
+  }
+
+  return (
+    0.2126 * linealizarCanalSrgb(rojo) +
+    0.7152 * linealizarCanalSrgb(verde) +
+    0.0722 * linealizarCanalSrgb(azul)
+  );
+}
+
+/**
+ * Normaliza un canal sRGB de 8 bits y aplica su tramo lineal o potencia.
+ *
+ * @param canal - Intensidad CSS entre cero y 255.
+ * @returns Componente sRGB lineal para la luminancia WCAG.
+ */
+function linealizarCanalSrgb(canal: number): number {
+  const normalizado = canal / 255;
+  return normalizado <= 0.04045 ? normalizado / 12.92 : ((normalizado + 0.055) / 1.055) ** 2.4;
+}
+
 test(
   'SUPPORT inicia sesión, recibe error genérico y cambia su contraseña propia',
   probarAccesoSoporteYCambioPropio,
@@ -417,4 +686,8 @@ test(
 test(
   'recuperación por correo queda deshabilitada sin SMTP',
   probarRecuperacionPorCorreoDeshabilitada,
+);
+test(
+  'ADMIN y SUPPORT conservan tema personal y no ofrecen cambio de correo sin SMTP',
+  probarPreferenciasPersonales,
 );

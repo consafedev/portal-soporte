@@ -11,6 +11,10 @@
     "./auth": {
       "types": "./src/auth.ts",
       "import": "./src/auth.ts"
+    },
+    "./user-preferences": {
+      "types": "./src/user-preferences.ts",
+      "import": "./src/user-preferences.ts"
     }
   },
   "scripts": {

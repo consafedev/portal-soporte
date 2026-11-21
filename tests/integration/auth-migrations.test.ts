@@ -274,7 +274,7 @@ async function pruebaMigracionRepetible(): Promise<void> {
     SELECT count(*)::int AS cantidad FROM portal.auth_invariants
   `;
 
-  expect(versiones[0]?.cantidad).toBe(4);
+  expect(versiones[0]?.cantidad).toBe(5);
   expect(invariantes[0]?.cantidad).toBe(1);
 }
 

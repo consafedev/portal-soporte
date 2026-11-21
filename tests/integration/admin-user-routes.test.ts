@@ -7,6 +7,8 @@ import { ServicioUsuariosAdmin } from '../../apps/api/src/auth/admin-user-servic
 import { LimitadorIntentosPostgres } from '../../apps/api/src/auth/attempt-limiter.js';
 import { ErrorRepositorioUsuariosAdmin } from '../../packages/core/src/auth/admin-ports.js';
 import { PostgresAuthRepository } from '../../apps/api/src/auth/postgres-auth-repository.js';
+import { RepositorioPreferenciasUsuarioPostgres } from '../../apps/api/src/preferences/postgres-user-preferences-repository.js';
+import { ServicioPreferenciasUsuario } from '../../packages/core/src/preferences/service.js';
 import { ServicioSesion } from '../../apps/api/src/auth/session-service.js';
 import { ServicioRecuperacionAuth } from '../../apps/api/src/auth/recovery-service.js';
 import { cargarConfiguracionAuth } from '../../apps/api/src/config.js';
@@ -242,6 +244,9 @@ async function prepararAdministracion(): Promise<void> {
     limitador,
     recuperacion,
     usuariosAdmin,
+    preferencias: new ServicioPreferenciasUsuario(
+      new RepositorioPreferenciasUsuarioPostgres(exigirBasePrueba()),
+    ),
     generarIdSolicitud: identificadoresSolicitud.generar,
   });
   cookieAdmin = await iniciarSesion(usuarioAdmin);
@@ -279,6 +284,7 @@ async function cerrarAdministracion(): Promise<void> {
 
 /** Ejecuta requests administrativos con cookie de sesión y CSRF vigentes. */
 function definirPruebasAdmin(): void {
+  it('permite a ADMIN leer y guardar su preferencia de tema', probarPreferenciasAdmin);
   it('renueva el vencimiento de la cookie al extender una sesión por actividad', async () => {
     const cookie = cookieAdmin;
     if (cookie === null) {
@@ -939,6 +945,29 @@ function definirPruebasAdmin(): void {
     expect(respuesta.json()).toMatchObject({ role: 'ADMIN' });
     expect(consulta.statusCode).toBe(401);
   });
+}
+
+/** Comprueba que la identidad ADMIN use el mismo contrato de preferencia personal. */
+async function probarPreferenciasAdmin(): Promise<void> {
+  const cookie = cookieAdmin;
+  if (cookie === null) throw new Error('La prueba requiere la sesión ADMIN sintética.');
+
+  const inicial = await exigirAplicacion().inject({
+    method: 'GET',
+    url: '/api/v1/me/preferences',
+    headers: { cookie },
+  });
+  expect(inicial.statusCode).toBe(200);
+  expect(inicial.json()).toEqual({ theme: 'system' });
+
+  const guardada = await exigirAplicacion().inject({
+    method: 'PATCH',
+    url: '/api/v1/me/preferences',
+    headers: await headersDeEscritura(cookie),
+    payload: { theme: 'light' },
+  });
+  expect(guardada.statusCode).toBe(200);
+  expect(guardada.json()).toEqual({ theme: 'light' });
 }
 
 /**

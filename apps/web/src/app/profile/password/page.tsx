@@ -5,14 +5,16 @@ import { FormularioPerfil } from '../../../components/auth/password-change-form'
 /** Evita prerender de una ruta que consulta identidad/sesión al cargarse. */
 export const dynamic = 'force-dynamic';
 
-/** Metadatos de actualización voluntaria de credenciales. */
+/** Metadatos de preferencias personales y actualización voluntaria de credenciales. */
 export const metadata: Metadata = {
   title: 'Mi perfil · Portal de Soporte',
-  description: 'Actualiza tu contraseña y solicita verificar tu correo.',
+  description: 'Configura la apariencia del portal y administra tus credenciales.',
   robots: { index: false, follow: false },
 };
 
-/** Presenta cambio de contraseña y correo con reautenticación en el servidor. */
+/** Presenta preferencias personales y habilita correo solo si el runtime lo declara disponible. */
 export default function PaginaPerfil(): JSX.Element {
-  return <FormularioPerfil />;
+  const correoHabilitado = process.env['PORTAL_EMAIL_DELIVERY_ENABLED'] === 'true';
+
+  return <FormularioPerfil correoHabilitado={correoHabilitado} />;
 }

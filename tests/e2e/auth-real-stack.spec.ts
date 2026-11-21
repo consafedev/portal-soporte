@@ -172,9 +172,11 @@ async function iniciarSesionEnNavegador(
   await pagina.getByLabel('Contraseña').fill(credenciales.password);
   await pagina.getByRole('button', { name: 'Continuar' }).click();
   await expect(pagina).toHaveURL(/\/dashboard$/u);
-  await expect(pagina.getByRole('heading', { name: 'Inicio' })).toBeVisible();
+  await expect(
+    pagina.getByRole('heading', { name: /^Hola, Cuenta sintética (ADMIN|SUPPORT)$/u }),
+  ).toBeVisible();
   if (rutaDestino !== '/dashboard') {
-    const etiquetaEnlace = rutaDestino === '/settings/users' ? 'Usuarios' : 'Mi contraseña';
+    const etiquetaEnlace = rutaDestino === '/settings/users' ? 'Usuarios' : 'Mi perfil';
     await pagina.getByRole('link', { name: etiquetaEnlace, exact: true }).click();
   }
   await expect(pagina).toHaveURL(new RegExp(`${rutaDestino.replaceAll('/', '\\/')}$`, 'u'));
@@ -310,7 +312,7 @@ test('SUPPORT cambia su contraseña y el otro navegador queda revocado', async (
     await page.getByLabel('Contraseña nueva', { exact: true }).fill(nuevaContrasena);
     await page.getByLabel('Confirma la contraseña nueva').fill(nuevaContrasena);
     await page.getByRole('button', { name: 'Guardar contraseña' }).click();
-    await expect(page.getByRole('status')).toContainText(
+    await expect(page.locator('.aviso-exito')).toContainText(
       'La contraseña cambió y tus otras sesiones se cerraron.',
     );
 
@@ -330,8 +332,10 @@ test('SUPPORT cambia su contraseña y el otro navegador queda revocado', async (
     await paginaParalela.getByLabel('Contraseña').fill(nuevaContrasena);
     await paginaParalela.getByRole('button', { name: 'Continuar' }).click();
     await expect(paginaParalela).toHaveURL(/\/dashboard$/u);
-    await expect(paginaParalela.getByRole('heading', { name: 'Inicio' })).toBeVisible();
-    await paginaParalela.getByRole('link', { name: 'Mi contraseña', exact: true }).click();
+    await expect(
+      paginaParalela.getByRole('heading', { name: 'Hola, Cuenta sintética SUPPORT', exact: true }),
+    ).toBeVisible();
+    await paginaParalela.getByRole('link', { name: 'Mi perfil', exact: true }).click();
     await expect(paginaParalela).toHaveURL(/\/profile\/password$/u);
     await expect(paginaParalela.getByRole('heading', { name: 'Mi perfil' })).toBeVisible();
   } finally {

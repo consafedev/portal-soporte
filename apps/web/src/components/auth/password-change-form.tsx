@@ -2,14 +2,25 @@
 
 import { useState, type ChangeEvent, type FormEvent, type JSX } from 'react';
 import { MarcoAutenticado } from './auth-shell';
+import { FormularioPreferenciaTema } from '../theme/theme-preference-form';
 import { cambiarContrasena, ErrorApiAuth, solicitarCambioCorreoPropio } from '../../lib/auth-api';
+
+/** Configuración de disponibilidad del flujo de cambio de correo. */
+export interface PropiedadesFormularioPerfil {
+  /** Evita ofrecer verificación por correo cuando el runtime no tiene SMTP. */
+  readonly correoHabilitado?: boolean;
+}
 
 /**
  * Presenta los cambios voluntarios de contraseña y correo con reautenticación.
  *
+ * @param propiedades - Disponibilidad configurada para el flujo de cambio de correo.
+ * @param propiedades.correoHabilitado - Indica si el runtime web tiene habilitado SMTP.
  * @returns Perfil protegido que explica revocación de sesiones y verificación de correo.
  */
-export function FormularioPerfil(): JSX.Element {
+export function FormularioPerfil({
+  correoHabilitado = false,
+}: PropiedadesFormularioPerfil = {}): JSX.Element {
   const [contrasenaActual, setContrasenaActual] = useState('');
   const [contrasenaNueva, setContrasenaNueva] = useState('');
   const [confirmacion, setConfirmacion] = useState('');
@@ -113,6 +124,7 @@ export function FormularioPerfil(): JSX.Element {
           <h1>Mi perfil</h1>
           <p className="texto-secundario">Mantén tus credenciales actualizadas y privadas.</p>
         </header>
+        <FormularioPreferenciaTema />
         <div className="columnas-perfil">
           <section className="panel-contenido" aria-labelledby="contrasena-titulo">
             <h2 id="contrasena-titulo">Cambiar contraseña</h2>
@@ -168,46 +180,56 @@ export function FormularioPerfil(): JSX.Element {
               </button>
             </form>
           </section>
-          <section className="panel-contenido" aria-labelledby="correo-titulo">
-            <h2 id="correo-titulo">Cambiar correo</h2>
-            <p className="texto-secundario">
-              Se requiere la contraseña actual. El correo no cambia hasta confirmar el enlace
-              enviado al destino nuevo.
-            </p>
-            <form className="formulario" onSubmit={solicitarCambioCorreo}>
-              <div className="campo">
-                <label htmlFor="email-current-password">Contraseña actual</label>
-                <input
-                  id="email-current-password"
-                  type="password"
-                  autoComplete="current-password"
-                  required
-                  value={contrasenaActual}
-                  onChange={manejarCambioContrasenaActual}
-                />
-              </div>
-              <div className="campo">
-                <label htmlFor="new-email">Correo nuevo</label>
-                <input
-                  id="new-email"
-                  type="email"
-                  autoComplete="email"
-                  maxLength={254}
-                  required
-                  value={correoNuevo}
-                  onChange={manejarCambioCorreoNuevo}
-                />
-              </div>
-              <button
-                className="boton-secundario"
-                type="submit"
-                disabled={cargando}
-                aria-busy={cargando}
-              >
-                {cargando ? 'Enviando…' : 'Enviar verificación'}
-              </button>
-            </form>
-          </section>
+          {correoHabilitado ? (
+            <section className="panel-contenido" aria-labelledby="correo-titulo">
+              <h2 id="correo-titulo">Cambiar correo</h2>
+              <p className="texto-secundario">
+                Se requiere la contraseña actual. El correo no cambia hasta confirmar el enlace
+                enviado al destino nuevo.
+              </p>
+              <form className="formulario" onSubmit={solicitarCambioCorreo}>
+                <div className="campo">
+                  <label htmlFor="email-current-password">Contraseña actual</label>
+                  <input
+                    id="email-current-password"
+                    type="password"
+                    autoComplete="current-password"
+                    required
+                    value={contrasenaActual}
+                    onChange={manejarCambioContrasenaActual}
+                  />
+                </div>
+                <div className="campo">
+                  <label htmlFor="new-email">Correo nuevo</label>
+                  <input
+                    id="new-email"
+                    type="email"
+                    autoComplete="email"
+                    maxLength={254}
+                    required
+                    value={correoNuevo}
+                    onChange={manejarCambioCorreoNuevo}
+                  />
+                </div>
+                <button
+                  className="boton-secundario"
+                  type="submit"
+                  disabled={cargando}
+                  aria-busy={cargando}
+                >
+                  {cargando ? 'Enviando…' : 'Enviar verificación'}
+                </button>
+              </form>
+            </section>
+          ) : (
+            <section className="panel-contenido" aria-labelledby="correo-titulo">
+              <h2 id="correo-titulo">Correo</h2>
+              <p className="aviso-informativo" role="status">
+                El cambio de correo está deshabilitado porque el portal no tiene un servicio SMTP
+                configurado. Una persona administradora puede restablecer credenciales sin correo.
+              </p>
+            </section>
+          )}
         </div>
         {error !== null ? (
           <p className="aviso-error" role="alert">

@@ -1,7 +1,7 @@
 # Plan ejecutable propuesto — PS-004, PS-005 y RF-1
 
-**Estado:** PS-004 tiene un incremento de dashboard en `EN_REVISION`; catálogo/activación y preferencias persistidas siguen pendientes. PS-005 y RF-1 no se han iniciado.
-**Restricción:** no iniciar incrementos adicionales de PS-004, PS-005 ni RF-1 sin autorización específica y reconciliación de alcance conforme al cierre de PS-003.
+**Estado actualizado 2026-11-20:** PS-004 está listo para revisión de integración; PS-005 se inicia en incremento separado según autorización expresa del propietario. RF-1 permanece planificado detrás del contrato público de conexiones de PS-005.
+**Límites:** no cambiar infraestructura ni bases productivas. Las operaciones MySQL/SSH de clientes permanecen sintéticas o limitadas a destinos de prueba explícitamente autorizados; ninguna inserción real de RF-1.
 
 ## Dependencias y puerta de alcance
 
@@ -67,3 +67,23 @@ Antes de cualquier componente, HTML visible, CSS, navegación, interacción o ac
 - En PS-003.2 se repitieron pruebas PostgreSQL reales en `portal_soporte_test` (53/53 integración, 8/8 E2E y CLI de migración); no se usó `portal_soporte` para pruebas destructivas. INFRA-001 queda `EN_REVISION` después de inventario read-only y migraciones autorizadas.
 - MFA no se implementará para ADMIN ni SUPPORT por AP-013; el propietario acepta el riesgo de autenticación por un factor. SMTP puede permanecer deshabilitado mientras las funciones dependientes estén inactivas y claramente informadas. Custodia independiente de la clave de respaldo, revisión de exposición de PostgreSQL, revisión independiente y el moderado de `esbuild` en desarrollo permanecen abiertos. Picomatch conserva revisión **2026-12-10 UTC** y vencimiento de aceptación temporal **2026-12-17 UTC**.
 - El inventario de Debian 12/PostgreSQL 15.20 y las ACL está registrado en WORKLOG y `DEPLOYMENT_DEBIAN.md`; no se modificaron servicios ni túneles. No guardar ni enviar secretos por chat.
+
+## Actualización autorizada — 2026-11-20
+
+### Límite de alcance PS-004/PS-006
+
+- PS-004 entrega el marco autenticado, saludo de inicio, presentación de la navegación existente y preferencias personales.
+- PS-006 conserva la única fuente de verdad del catálogo `ModuleManifest`, su registro estático, activación por rol/cliente y capacidades en backend, conforme a AP-012 y `PORTAL_CORE.md`.
+- El marco de PS-004 presenta solamente rutas devueltas por ese catálogo cuando PS-006 lo integre; no implementará un segundo registro, flags o matriz de permisos.
+
+### Estado PS-004
+
+El incremento local de perfil/tema, saludo y selector global sol/luna está `EN_REVISION`. Unitarias (234), integración PostgreSQL aislada (57), E2E (10), build, typecheck, lint, secretos y auditoría CI pasaron. La migración 0004 se aplicó únicamente a `portal_soporte_test`; queda fuera de producción hasta revisión del PR y autorización posterior. Las pruebas visuales están en WORKLOG.
+
+### Inicio PS-005 y preparación RF-1
+
+El propietario autoriza comenzar PS-005 sin nuevas decisiones de infraestructura. Se trabajará en una rama separada después de preparar PS-004 para integración. PS-005 cubre CRUD de clientes/ambientes/perfiles, credenciales cifradas, prueba de conexión no mutante y administración ADMIN; las cuentas SUPPORT solo reciben operaciones autorizadas. Se aplican contratos de `PORTAL_CORE.md` y los límites de no secreto/no SQL arbitrario.
+
+Antes de conectar destinos externos, debe definirse y probar un proveedor de claves versionado con secretos fuera del repositorio; las claves de desarrollo serán efímeras y sintéticas. `MYSQL_TCP`/`MYSQL_URL` y `MYSQL_SSH` no se declararán disponibles hasta pruebas con fixtures aislados. PPK se limitará a formatos/algoritmos que la librería elegida acepte; incompatibilidad produce error explícito.
+
+RF-1 permanece independiente de Complementos y depende del broker público de PS-005. Se permiten parser/preview y pruebas con XML sintéticos; inserciones quedan bloqueadas hasta DDL autorizado, puertas VT, revisión independiente y destino de laboratorio. No consultar ni escribir en bases MySQL de clientes.
