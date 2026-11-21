@@ -1534,3 +1534,19 @@ eload, se reinició únicamente cloudflared-consafedev.service; procesos web, AP
 - Próximo paso: commit y push normal del cambio, luego leer las líneas sanitizadas del nuevo run para identificar rechazo de cuenta/clave, configuración o canal; corregir solo el motivo observado.
 - Riesgos/límites: los logs son únicamente del sshd efímero de CI con llaves y datos sintéticos; se acota salida y se limpia el recurso incluso ante fallo. Sin bases reales, servidores ni secretos reales.
 - Estado: PS-005/PS-005.2 `EN_CURSO`; PR no creado, merge no realizado.
+
+### [2026-11-21T02:14:16-06:00] PS-005.2 — CAUSA RAÍZ SSH CONFIRMADA
+- Agente/tarea/rama: Codex · PS-005.2 · `codex/ps-005-clients-connections` · commit publicado `e1b7dccce07febd2d68810bfba0ac14ff8fc0033` · run `44883683968`.
+- Evidencia nueva del log acotado de sshd: `User fixture not allowed because account is locked`; conexiones PEM/PPK se rechazaban antes de autenticar la llave. La prueba de fingerprint incorrecta se mantiene como negativa correcta. Root cause confirmado: `useradd` crea la cuenta efímera `fixture` bloqueada por defecto.
+- Corrección prevista y limitada al fixture: generar dentro del contenedor una contraseña aleatoria sintética de 256 bits, pasarla solo por stdin para fijar un hash y desbloquear esa cuenta; mantener `AuthenticationMethods publickey`, `PasswordAuthentication no`, `KbdInteractiveAuthentication no` y `PermitEmptyPasswords no`. No se cambia el broker ni se habilita login por contraseña.
+- Validación pendiente: runner CI debe demostrar handshake de clave, `SELECT 1`, límites de `PermitOpen`, limpieza de procesos y logs sin secreto. Recurso Docker local no disponible.
+- Riesgos/límites: tras autenticación, el runner podrá revelar cualquier fallo subsiguiente del forward; no asumir PASS hasta que se ejecute. Sin llaves/credenciales reales ni servidores externos.
+- Estado: PS-005/PS-005.2 `EN_CURSO`; no PR/merge.
+
+### [2026-11-21T02:15:11-06:00] PS-005.2 — CORRECCIÓN AISLADA DEL USUARIO SSH EFÍMERO
+- Agente/tarea/rama: Codex · PS-005.2 · `codex/ps-005-clients-connections` · HEAD previo `e1b7dccce07febd2d68810bfba0ac14ff8fc0033`.
+- Causa confirmada: sshd rechazaba la cuenta `fixture` porque `useradd` la deja bloqueada, incluso con la clave pública correcta.
+- Cambio: el entrypoint del contenedor de prueba crea una contraseña aleatoria sintética de 256 bits por `openssl`, establece su hash mediante stdin con `chpasswd --encrypted` y borra de la variable el hash; sshd mantiene `AuthenticationMethods publickey`, `PasswordAuthentication no`, `KbdInteractiveAuthentication no` y `PermitEmptyPasswords no`. Añadí OpenSSL solo al fixture efímero de CI. No se cambia el conector de producción ni se habilita autenticación por password.
+- Validación local: `bash -n` PASS para entrypoint y fixture (flujo LF-normalizado); `git diff --check` PASS. Docker/handshake: NO EJECUTADO localmente. No hay secretos ni credenciales persistentes.
+- Próximo paso: push normal; esperar el runner para comprobar autenticación por llave, `SELECT 1`, destino PermitOpen, PPK y liberación del túnel. No ajustar el destino/forward hasta observar resultado.
+- Estado: PS-005/PS-005.2 `EN_CURSO`, root cause corregido en el fixture, CI pendiente; sin PR/merge.

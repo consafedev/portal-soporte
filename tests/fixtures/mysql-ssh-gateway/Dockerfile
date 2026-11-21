@@ -1,7 +1,7 @@
 FROM debian:bookworm-slim
 
 RUN apt-get update \
-  && apt-get install --yes --no-install-recommends openssh-server ca-certificates \
+  && apt-get install --yes --no-install-recommends openssh-server ca-certificates openssl \
   && rm -rf /var/lib/apt/lists/* \
   && useradd --create-home --shell /usr/sbin/nologin fixture
 

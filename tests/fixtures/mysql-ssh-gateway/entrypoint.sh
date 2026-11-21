@@ -8,6 +8,11 @@ esac
 
 install -d -m 0700 -o fixture -g fixture /home/fixture/.ssh
 install -m 0600 -o fixture -g fixture /run/fixture/authorized_keys /home/fixture/.ssh/authorized_keys
+# Desbloquea la cuenta efímera con un secreto aleatorio que solo viaja por stdin.
+# sshd sigue aceptando exclusivamente claves públicas; no se habilita auth por contraseña.
+clave_hash_sintetica="$(openssl rand -hex 32 | openssl passwd -6 -stdin)"
+printf 'fixture:%s\n' "${clave_hash_sintetica}" | chpasswd --encrypted
+unset clave_hash_sintetica
 ssh-keygen -A
 install -d -m 0755 /run/sshd
 cat > /run/sshd/sshd_config <<EOF
