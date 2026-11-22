@@ -11,6 +11,7 @@ import {
   type VistaPreviaCfdiRf1,
 } from '../../../../modules/rf-1/src/preview.js';
 import type { SesionLecturaRf1 } from '../../../../packages/core/src/clients/secret-custody-ports.js';
+import type { SeleccionSociedadArchivoRf1Contrato } from '../../../../packages/contracts/src/clients.js';
 
 /** Identidad de solicitud autenticada que debe revalidarse contra el estado PostgreSQL actual. */
 export interface ActorVistaPreviaRf1 extends ActorAccesoCliente {
@@ -32,6 +33,8 @@ export interface SolicitudServicioVistaPreviaRf1 {
   readonly estatus: 'CONTABILIZADO' | 'PAGADA';
   /** Bytes de los CFDI originales recibidos en memoria y no persistidos. */
   readonly archivos: readonly Uint8Array[];
+  /** Selecciones de catálogo por índice de archivo, validadas otra vez por el dominio. */
+  readonly seleccionesSociedad?: readonly SeleccionSociedadArchivoRf1Contrato[];
   /** Señal para cancelar el broker cuando vence o se cierra la petición. */
   readonly senal: AbortSignal;
 }
@@ -94,10 +97,22 @@ export class ServicioVistaPreviaRf1 {
     let resultados: readonly VistaPreviaCfdiRf1[];
     try {
       const catalogo = new CatalogoConUuidUnico(new CatalogoLecturaRf1DesdeBroker(sesion));
-      const solicitudes: SolicitudVistaPreviaRf1[] = solicitud.archivos.map((xml) => ({
-        xml,
-        estatus: solicitud.estatus,
-      }));
+      const seleccionesPorArchivo = new Map(
+        (solicitud.seleccionesSociedad ?? []).map((seleccion) => [
+          seleccion.indiceArchivo,
+          seleccion,
+        ]),
+      );
+      const solicitudes: SolicitudVistaPreviaRf1[] = solicitud.archivos.map((xml, indice) => {
+        const seleccion = seleccionesPorArchivo.get(indice);
+        return {
+          xml,
+          estatus: solicitud.estatus,
+          ...(seleccion === undefined
+            ? {}
+            : { sociedad: seleccion.sociedad, ambienteSap: seleccion.ambienteSap }),
+        };
+      });
       resultados = await generarVistaPreviaLote(solicitudes, catalogo);
     } finally {
       await sesion.cerrar().catch(() => {

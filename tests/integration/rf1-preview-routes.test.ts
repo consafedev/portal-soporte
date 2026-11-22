@@ -23,6 +23,7 @@ import { RepositorioPerfilesConexionPostgres } from '../../apps/api/src/clients/
 import { ServicioVistaPreviaRf1 } from '../../apps/api/src/clients/rf1-preview-service.js';
 import { PostgresAuthRepository } from '../../apps/api/src/auth/postgres-auth-repository.js';
 import { ServicioPreferenciasUsuario } from '../../packages/core/src/preferences/service.js';
+import type { SeleccionSociedadArchivoRf1Contrato } from '../../packages/contracts/src/clients.js';
 import { RepositorioPreferenciasUsuarioPostgres } from '../../apps/api/src/preferences/postgres-user-preferences-repository.js';
 import { crearServidorAuth } from '../../apps/api/src/server.js';
 import type { RelojAuth } from '../../packages/core/src/auth/ports.js';
@@ -62,6 +63,12 @@ let aperturasBroker = 0;
 let cierresBroker = 0;
 let catalogoFalla = false;
 const operacionesBroker: string[] = [];
+let sociedadesMultiples = false;
+const consultasProveedor: {
+  readonly rfcEmisor: string;
+  readonly sociedad: string;
+  readonly ambienteSap: string;
+}[] = [];
 
 /** Devuelve la hora fija que usan las sesiones y eventos de la integración aislada. */
 const reloj: RelojAuth = {
@@ -154,10 +161,16 @@ function crearXmlSintetico(overrides: Readonly<Record<string, string>> = {}): Bu
   );
 }
 
-/** Serializa partes sintéticas sin interpretar ni reenviar nombre o metadatos del archivo. */
+/** Serializa partes sintéticas sin interpretar ni reenviar nombre o metadatos del archivo.
+ * @param archivos - XML completamente sintéticos para el lote aislado.
+ * @param boundary - Separador multipart fijo de la prueba.
+ * @param seleccionesSociedad - Pares sintéticos indexados que se enviarán opcionalmente.
+ * @returns Separador y cuerpo multipart sin datos reales.
+ */
 function crearMultipart(
   archivos: readonly Buffer[],
   boundary = 'rf1-fixture-boundary',
+  seleccionesSociedad?: readonly SeleccionSociedadArchivoRf1Contrato[],
 ): { readonly boundary: string; readonly payload: Buffer } {
   const partes: Buffer[] = [];
   for (const archivo of archivos) {
@@ -169,17 +182,35 @@ function crearMultipart(
       Buffer.from('\r\n'),
     );
   }
+  if (seleccionesSociedad !== undefined) {
+    partes.push(
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="seleccionesSociedad"\r\n\r\n${JSON.stringify(seleccionesSociedad)}\r\n`,
+      ),
+    );
+  }
   partes.push(Buffer.from(`--${boundary}--\r\n`));
   return { boundary, payload: Buffer.concat(partes) };
 }
 
-/** Envía un lote multipart con CSRF a la ruta versionada y devuelve la respuesta observada. */
+/** Envía un lote sintético con CSRF y devuelve la respuesta observada.
+ * @param cookieSesion - Cookie de la cuenta sintética autorizada o `undefined`.
+ * @param archivos - XML sintéticos del mismo lote.
+ * @param profileId - Perfil perteneciente al cliente fixture.
+ * @param seleccionesSociedad - Selecciones por índice opcionales del lote.
+ * @returns Respuesta inyectada de Fastify, sin contactar clientes externos.
+ */
 async function enviarLote(
   cookieSesion: string | undefined,
   archivos: readonly Buffer[],
   profileId = idPerfil,
+  seleccionesSociedad?: readonly SeleccionSociedadArchivoRf1Contrato[],
 ) {
-  const { boundary, payload } = crearMultipart(archivos);
+  const { boundary, payload } = crearMultipart(
+    archivos,
+    'rf1-fixture-boundary',
+    seleccionesSociedad,
+  );
   return exigirAplicacion().inject({
     method: 'POST',
     url: `/api/v1/clients/${idCliente}/modules/rf-1/preview?profileId=${profileId}&estatus=CONTABILIZADO`,
@@ -339,11 +370,17 @@ async function prepararFixtures(): Promise<void> {
         async buscarSociedadesPorRfc() {
           operacionesBroker.push('SELECT SOCIEDADES');
           if (catalogoFalla) throw new Error('detalle_driver_sintetico_no_publicable');
-          return [{ sociedad: '1000', ambienteSap: 'E1P' }];
+          return sociedadesMultiples
+            ? [
+                { sociedad: '1000', ambienteSap: 'ERP-QA' },
+                { sociedad: '2000', ambienteSap: 'ERP-DEV' },
+              ]
+            : [{ sociedad: '1000', ambienteSap: 'E1P' }];
         },
         /** Simula lectura por RFC proveedor, sociedad y ambiente SAP sintéticos. */
-        async buscarProveedoresPorContexto() {
+        async buscarProveedoresPorContexto(rfcEmisor, sociedad, ambienteSap) {
           operacionesBroker.push('SELECT PROVEEDORES');
+          consultasProveedor.push({ rfcEmisor, sociedad, ambienteSap });
           if (catalogoFalla) throw new Error('detalle_driver_sintetico_no_publicable');
           return [{ idProveedor: 'PROV-FIXTURE' }];
         },
@@ -478,6 +515,75 @@ describe('vista previa RF-1 con autorización y PostgreSQL aislado', () => {
 
     expect(respuesta.statusCode).toBe(200);
     expect(respuesta.json<readonly { status: string }[]>()[0]?.status).toBe('READY');
+  });
+
+  it('revalida y usa el par sociedad/ambiente elegido para buscar proveedor', async () => {
+    sociedadesMultiples = true;
+    const xml = crearXmlSintetico();
+    try {
+      const pendiente = await enviarLote(cookieSupport, [xml]);
+      expect(pendiente.json()[0]).toMatchObject({
+        status: 'NEEDS_SELECTION',
+        sociedadesDisponibles: [
+          { sociedad: '1000', ambienteSap: 'ERP-QA' },
+          { sociedad: '2000', ambienteSap: 'ERP-DEV' },
+        ],
+      });
+
+      const respuesta = await enviarLote(cookieSupport, [xml], idPerfil, [
+        { indiceArchivo: 0, sociedad: '2000', ambienteSap: 'ERP-DEV' },
+      ]);
+
+      expect(respuesta.statusCode).toBe(200);
+      expect(respuesta.json()[0]).toMatchObject({
+        status: 'READY',
+        resolution: { sociedad: '2000', ambienteSap: 'ERP-DEV', idProveedor: 'PROV-FIXTURE' },
+      });
+      expect(consultasProveedor.at(-1)).toEqual({
+        rfcEmisor: 'AAA010101AAA',
+        sociedad: '2000',
+        ambienteSap: 'ERP-DEV',
+      });
+    } finally {
+      sociedadesMultiples = false;
+    }
+  });
+
+  it('rechaza índices repetidos o fuera del lote antes de abrir el broker', async () => {
+    const aperturasAntes = aperturasBroker;
+    const archivo = crearXmlSintetico();
+    const fueraDelLote = await enviarLote(cookieAdmin, [archivo], idPerfil, [
+      { indiceArchivo: 1, sociedad: '1000', ambienteSap: 'E1P' },
+    ]);
+    const indiceDuplicado = await enviarLote(cookieAdmin, [archivo], idPerfil, [
+      { indiceArchivo: 0, sociedad: '1000', ambienteSap: 'E1P' },
+      { indiceArchivo: 0, sociedad: '2000', ambienteSap: 'ERP-DEV' },
+    ]);
+
+    expect(fueraDelLote.statusCode).toBe(400);
+    expect(fueraDelLote.json()).toMatchObject({ code: 'MULTIPART_SELECTION_INVALID' });
+    expect(indiceDuplicado.statusCode).toBe(400);
+    expect(indiceDuplicado.json()).toMatchObject({ code: 'MULTIPART_SELECTION_INVALID' });
+    expect(aperturasBroker).toBe(aperturasAntes);
+  });
+
+  it('bloquea una sociedad/ambiente falsificado que no devolvió el catálogo', async () => {
+    sociedadesMultiples = true;
+    const consultasAntes = consultasProveedor.length;
+    try {
+      const respuesta = await enviarLote(cookieAdmin, [crearXmlSintetico()], idPerfil, [
+        { indiceArchivo: 0, sociedad: '9999', ambienteSap: 'ERP-DEV' },
+      ]);
+
+      expect(respuesta.statusCode).toBe(200);
+      expect(respuesta.json()[0]).toMatchObject({
+        status: 'BLOCKED',
+        errorCode: 'RF1_CONTEXT_MISMATCH',
+      });
+      expect(consultasProveedor).toHaveLength(consultasAntes);
+    } finally {
+      sociedadesMultiples = false;
+    }
   });
 
   it('exige sesión vigente antes de procesar el multipart', async () => {

@@ -65,6 +65,21 @@ describe('cliente HTTP same-origin para vista previa RF-1', () => {
     expect(String(ruta)).not.toContain('filename');
   });
 
+  it('envía la selección explícita por índice sin alterar los archivos del lote', async () => {
+    const archivo = crearArchivoSintetico('factura-sociedades.xml');
+    const selecciones = [{ indiceArchivo: 0, sociedad: '2000', ambienteSap: 'ERP-DEV' }];
+    fetchMock
+      .mockResolvedValueOnce(crearRespuestaCsrf())
+      .mockResolvedValueOnce(crearRespuestaJson([{ status: 'READY' }]));
+
+    await previsualizarRf1(CLIENT_ID, PROFILE_ID, 'PAGADA', [archivo], selecciones);
+
+    const formulario = fetchMock.mock.calls[1]?.[1]?.body as FormData;
+    expect([...formulario.keys()]).toEqual(['files', 'seleccionesSociedad']);
+    expect(formulario.getAll('files')).toEqual([archivo]);
+    expect(formulario.get('seleccionesSociedad')).toBe(JSON.stringify(selecciones));
+  });
+
   it('rechaza una respuesta fuera del contrato sin devolver sus campos extra', async () => {
     fetchMock
       .mockResolvedValueOnce(crearRespuestaCsrf())

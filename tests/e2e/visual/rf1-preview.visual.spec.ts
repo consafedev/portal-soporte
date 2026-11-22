@@ -80,6 +80,21 @@ const RESULTADO_VISUAL: ResultadoArchivoVistaPreviaRf1Contrato = {
   estatus: 'PAGADA',
 };
 
+const RESULTADO_PENDIENTE_VISUAL: ResultadoArchivoVistaPreviaRf1Contrato = {
+  status: 'NEEDS_SELECTION',
+  errorCode: 'RF1_SOCIETY_SELECTION_REQUIRED',
+  factura: RESULTADO_VISUAL.factura,
+  sociedadesDisponibles: [
+    { sociedad: '1000', ambienteSap: 'ERP-QA' },
+    { sociedad: '2000', ambienteSap: 'ERP-DEV' },
+  ],
+};
+
+const RESULTADO_SELECCIONADO_VISUAL: ResultadoArchivoVistaPreviaRf1Contrato = {
+  ...RESULTADO_VISUAL,
+  resolution: { sociedad: '2000', ambienteSap: 'ERP-DEV', idProveedor: 'SUP-42' },
+};
+
 /** Responde datos sintéticos a una ruta visual y evita cualquier conexión externa. */
 function responderJson(cuerpo: unknown): (ruta: Route) => Promise<void> {
   /** Completa la solicitud con el DTO sintético esperado por el navegador. */
@@ -93,7 +108,9 @@ function responderJson(cuerpo: unknown): (ruta: Route) => Promise<void> {
 }
 
 /** Verifica layout, teclado, tema y movimiento reducido con catálogos y resultados sintéticos. */
-test('ADMIN revisa la vista previa en escritorio y móvil con tema accesible', async ({ page }) => {
+test('ADMIN selecciona sociedad por teclado en escritorio/móvil y ambos temas', async ({
+  page,
+}) => {
   const tokenCsrf = randomBytes(32).toString('base64url');
   let tema = 'light';
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
@@ -116,21 +133,18 @@ test('ADMIN revisa la vista previa en escritorio y móvil con tema accesible', a
     `**/api/v1/admin/clients/${CLIENT_ID}/connection-profiles`,
     responderJson([PERFIL_VISUAL]),
   );
-  await page.route(
-    `**/api/v1/clients/${CLIENT_ID}/modules/rf-1/preview?*`,
-    responderJson([RESULTADO_VISUAL]),
-  );
+  let solicitudesPreview = 0;
+  await page.route(`**/api/v1/clients/${CLIENT_ID}/modules/rf-1/preview?*`, async (ruta) => {
+    solicitudesPreview += 1;
+    await responderJson([
+      solicitudesPreview === 1 ? RESULTADO_PENDIENTE_VISUAL : RESULTADO_SELECCIONADO_VISUAL,
+    ])(ruta);
+  });
 
   await page.goto('/modules/rf-1');
   await expect(page.getByRole('heading', { name: 'Vista previa de facturas' })).toBeVisible();
   await expect(page.getByLabel('Cliente')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Cambiar a tema oscuro' })).toBeVisible();
-  await page.screenshot({
-    path: join(tmpdir(), 'portal-soporte-rf1-escritorio-claro.png'),
-    fullPage: true,
-    animations: 'disabled',
-  });
-
   const cliente = page.getByLabel('Cliente');
   await cliente.focus();
   await cliente.press('ArrowDown');
@@ -150,9 +164,21 @@ test('ADMIN revisa la vista previa en escritorio y móvil con tema accesible', a
   await analizar.focus();
   await expect(analizar).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(page.getByRole('table', { name: 'Resultados de vista previa RF-1' })).toContainText(
-    'SUP-42',
-  );
+  const tablaResultados = page.getByRole('table', { name: 'Resultados de vista previa RF-1' });
+  await expect(tablaResultados).toContainText('La sociedad requiere una selección explícita.');
+  const selectorSociedad = page.getByLabel('Sociedad y ambiente SAP para archivo 1: sintetico.xml');
+  await selectorSociedad.focus();
+  await selectorSociedad.press('ArrowDown');
+  await selectorSociedad.press('ArrowDown');
+  await selectorSociedad.press('Enter');
+  await expect(selectorSociedad).toHaveValue('["2000","ERP-DEV"]');
+  const validarSeleccion = page.getByRole('button', { name: 'Validar selecciones de sociedad' });
+  await expect(validarSeleccion).toBeEnabled();
+  await page.screenshot({
+    path: join(tmpdir(), 'portal-soporte-rf1-escritorio-claro.png'),
+    fullPage: true,
+    animations: 'disabled',
+  });
   expect(await page.locator('body').innerText()).not.toContain('destino-visual-interno');
   expect(await page.locator('body').innerText()).not.toContain('base_visual_interna');
   expect(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(
@@ -172,6 +198,8 @@ test('ADMIN revisa la vista previa en escritorio y móvil con tema accesible', a
     };
   });
   expect(ordenMovil.temaInferior).toBeLessThanOrEqual(ordenMovil.navegacionSuperior);
+  await expect(selectorSociedad).toBeVisible();
+  await expect(selectorSociedad).toHaveValue('["2000","ERP-DEV"]');
   await page.screenshot({
     path: join(tmpdir(), 'portal-soporte-rf1-movil-oscuro.png'),
     fullPage: true,
@@ -188,4 +216,9 @@ test('ADMIN revisa la vista previa en escritorio y móvil con tema accesible', a
   ).toBe(true);
   await expect(analizar).toBeVisible();
   await expect(page.getByRole('button', { name: 'Cambiar a tema claro' })).toBeVisible();
+
+  await validarSeleccion.focus();
+  await page.keyboard.press('Enter');
+  await expect(tablaResultados).toContainText('2000 · ERP-DEV · SUP-42');
+  expect(solicitudesPreview).toBe(2);
 });

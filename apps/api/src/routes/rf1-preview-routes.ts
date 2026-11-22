@@ -1,12 +1,15 @@
 import type { MultipartFile } from '@fastify/multipart';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { Value } from '@sinclair/typebox/value';
 import {
   clienteParamsSchema,
   errorClienteAdminSchema,
   resultadosVistaPreviaRf1Schema,
+  seleccionesSociedadRf1Schema,
   solicitudVistaPreviaRf1Schema,
   type EstatusVistaPreviaRf1Contrato,
   type ParametrosCliente,
+  type SeleccionSociedadArchivoRf1Contrato,
   type SolicitudVistaPreviaRf1Contrato,
 } from '../../../../packages/contracts/src/clients.js';
 import type { RelojAuth, EscritorAuditoriaAuth } from '../../../../packages/core/src/auth/ports.js';
@@ -20,14 +23,15 @@ import { ServicioVistaPreviaRf1 } from '../clients/rf1-preview-service.js';
 const MAXIMO_ARCHIVOS = 100;
 const MAXIMO_BYTES_POR_ARCHIVO = 5 * 1024 * 1024;
 const MAXIMO_BYTES_POR_LOTE = 25 * 1024 * 1024;
+const MAXIMO_BYTES_SELECCIONES = 16 * 1024;
 const LIMITE_TIEMPO_SOLICITUD_MS = 30_000;
 const LIMITES_MULTIPART = {
   files: MAXIMO_ARCHIVOS,
-  fields: 0,
-  parts: MAXIMO_ARCHIVOS,
+  fields: 1,
+  parts: MAXIMO_ARCHIVOS + 1,
   fileSize: MAXIMO_BYTES_POR_ARCHIVO,
-  fieldNameSize: 16,
-  fieldSize: 0,
+  fieldNameSize: 32,
+  fieldSize: MAXIMO_BYTES_SELECCIONES,
   headerPairs: 64,
 } as const;
 
@@ -101,7 +105,8 @@ export async function registrarRutasVistaPreviaRf1(
 
       const archivos: Buffer[] = [];
       try {
-        archivos.push(...(await leerArchivosMultipart(solicitud, controlador.signal)));
+        const lote = await leerArchivosMultipart(solicitud, controlador.signal);
+        archivos.push(...lote.archivos);
         if (vencioTiempo) {
           return respuesta.code(408).send({
             code: 'REQUEST_TIMEOUT',
@@ -115,6 +120,7 @@ export async function registrarRutasVistaPreviaRf1(
           profileId: solicitud.query.profileId,
           estatus: solicitud.query.estatus as EstatusVistaPreviaRf1Contrato,
           archivos,
+          seleccionesSociedad: lote.seleccionesSociedad,
           senal: controlador.signal,
         });
         return respuesta.code(200).send(resultados);
@@ -169,13 +175,24 @@ export async function registrarRutasVistaPreviaRf1(
   });
 }
 
-/** Lee cada archivo desde el stream con límites por archivo y agregado, sin disco temporal. */
+/** Lee los XML y la selección opcional desde multipart, solo en memoria.
+ * @param solicitud - Request de Fastify ya autenticada y protegida contra CSRF.
+ * @param senal - Señal que detiene lectura y procesamiento al cancelar o vencer la petición.
+ * @returns Archivos originales y selecciones con índices validados dentro del lote.
+ * @throws ErrorCargaVistaPrevia ante límites, estructura multipart o selección inválidos.
+ * @effects Borra buffers acumulados si la lectura o validación falla.
+ */
 async function leerArchivosMultipart(
   solicitud: FastifyRequest,
   senal: AbortSignal,
-): Promise<readonly Buffer[]> {
+): Promise<{
+  readonly archivos: readonly Buffer[];
+  readonly seleccionesSociedad: readonly SeleccionSociedadArchivoRf1Contrato[];
+}> {
   const archivos: Buffer[] = [];
   let totalBytes = 0;
+  let recibioSelecciones = false;
+  let jsonSelecciones: string | undefined;
   try {
     for await (const parte of solicitud.parts({
       limits: LIMITES_MULTIPART,
@@ -183,8 +200,19 @@ async function leerArchivosMultipart(
       if (senal.aborted) {
         throw new ErrorCargaVistaPrevia('REQUEST_ABORTED', 408);
       }
-      if (parte.type !== 'file') {
-        throw new ErrorCargaVistaPrevia('MULTIPART_FIELDS_FORBIDDEN', 400);
+      if (parte.type === 'field') {
+        if (
+          parte.fieldname !== 'seleccionesSociedad' ||
+          recibioSelecciones ||
+          parte.fieldnameTruncated ||
+          parte.valueTruncated ||
+          typeof parte.value !== 'string'
+        ) {
+          throw new ErrorCargaVistaPrevia('MULTIPART_SELECTION_INVALID', 400);
+        }
+        recibioSelecciones = true;
+        jsonSelecciones = parte.value;
+        continue;
       }
       if (parte.fieldname !== 'files') {
         parte.file.destroy();
@@ -199,6 +227,11 @@ async function leerArchivosMultipart(
         }),
       );
     }
+    if (archivos.length === 0) {
+      throw new ErrorCargaVistaPrevia('BATCH_EMPTY', 400);
+    }
+    const seleccionesSociedad = validarSeleccionesSociedad(jsonSelecciones, archivos.length);
+    return { archivos, seleccionesSociedad };
   } catch (error: unknown) {
     for (const archivo of archivos) {
       archivo.fill(0);
@@ -208,11 +241,41 @@ async function leerArchivosMultipart(
     }
     throw traducirErrorMultipart(error);
   }
+}
 
-  if (archivos.length === 0) {
-    throw new ErrorCargaVistaPrevia('BATCH_EMPTY', 400);
+/** Valida estructura, unicidad e índices del campo opcional antes de abrir el broker.
+ * @param json - Contenido JSON acotado del campo multipart o `undefined` en el primer análisis.
+ * @param cantidadArchivos - Número de archivos aceptados en la misma solicitud.
+ * @returns Selecciones tipadas, únicas y acotadas al lote.
+ * @throws ErrorCargaVistaPrevia si el JSON, las propiedades o sus índices no son válidos.
+ */
+function validarSeleccionesSociedad(
+  json: string | undefined,
+  cantidadArchivos: number,
+): readonly SeleccionSociedadArchivoRf1Contrato[] {
+  if (json === undefined) {
+    return [];
   }
-  return archivos;
+
+  let valor: unknown;
+  try {
+    valor = JSON.parse(json) as unknown;
+  } catch {
+    throw new ErrorCargaVistaPrevia('MULTIPART_SELECTION_INVALID', 400);
+  }
+  if (!Value.Check(seleccionesSociedadRf1Schema, valor)) {
+    throw new ErrorCargaVistaPrevia('MULTIPART_SELECTION_INVALID', 400);
+  }
+
+  const selecciones = valor as readonly SeleccionSociedadArchivoRf1Contrato[];
+  const indices = new Set<number>();
+  for (const seleccion of selecciones) {
+    if (seleccion.indiceArchivo >= cantidadArchivos || indices.has(seleccion.indiceArchivo)) {
+      throw new ErrorCargaVistaPrevia('MULTIPART_SELECTION_INVALID', 400);
+    }
+    indices.add(seleccion.indiceArchivo);
+  }
+  return selecciones;
 }
 
 /** Acumula un archivo de hasta 5 MiB y borra segmentos temporales después de unirlos. */
@@ -329,8 +392,8 @@ class ErrorCargaVistaPrevia extends Error {
       | 'BATCH_EMPTY'
       | 'BATCH_TOO_LARGE'
       | 'FILE_TOO_LARGE'
-      | 'MULTIPART_FIELDS_FORBIDDEN'
       | 'MULTIPART_FIELD_INVALID'
+      | 'MULTIPART_SELECTION_INVALID'
       | 'MULTIPART_INVALID'
       | 'MULTIPART_REQUIRED'
       | 'REQUEST_ABORTED'
@@ -363,8 +426,8 @@ function mensajeCarga(error: ErrorCargaVistaPrevia): string {
       return 'La solicitud debe contener archivos multipart/form-data.';
     case 'REQUEST_ABORTED':
       return 'La solicitud fue cancelada antes de terminar.';
-    case 'MULTIPART_FIELDS_FORBIDDEN':
     case 'MULTIPART_FIELD_INVALID':
+    case 'MULTIPART_SELECTION_INVALID':
     case 'MULTIPART_INVALID':
       return 'El cuerpo multipart no tiene el formato permitido.';
   }

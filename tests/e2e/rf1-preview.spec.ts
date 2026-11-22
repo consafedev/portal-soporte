@@ -15,7 +15,10 @@ import {
   sessions,
   users,
 } from '../../apps/api/src/db/schema.js';
-import type { ResultadoArchivoVistaPreviaRf1Contrato } from '../../packages/contracts/src/clients.js';
+import type {
+  ResultadoArchivoVistaPreviaRf1Contrato,
+  SeleccionSociedadArchivoRf1Contrato,
+} from '../../packages/contracts/src/clients.js';
 
 /** Cuenta sintética con credenciales generadas solo para la ejecución de Playwright. */
 interface CuentaPreviewE2e {
@@ -39,6 +42,8 @@ interface ObservacionPreview {
   readonly archivos: number;
   /** Indica que el perfil y estatus aprobados llegaron como query. */
   readonly contextoPresente: boolean;
+  /** Selecciones sintéticas observadas sin conservar XML, cookies ni CSRF. */
+  readonly seleccionesSociedad: readonly SeleccionSociedadArchivoRf1Contrato[];
 }
 
 const idCliente = randomUUID();
@@ -195,7 +200,9 @@ test.afterAll(async () => {
 test('SUPPORT autorizado carga XML y ve resultados de preview sin inserción', async ({ page }) => {
   const observaciones: ObservacionPreview[] = [];
   await instalarPerfilSimulado(page, '/api/v1/clients');
-  await instalarRespuestaPreview(page, resultadosMixtos(), observaciones);
+  await instalarRespuestaPreview(page, resultadosMixtos(), observaciones, [
+    resultadosSeleccionados(),
+  ]);
   await iniciarSesion(page, cuentaSupport);
   await page.getByRole('link', { name: 'RF-1' }).click();
   await expect(page.getByRole('heading', { name: 'Vista previa de facturas' })).toBeVisible();
@@ -228,10 +235,13 @@ test('SUPPORT autorizado carga XML y ve resultados de preview sin inserción', a
   await expect(resultados.getByText('factura-malformada.xml')).toBeVisible();
   await expect(resultados.getByText('XML mal formado')).toBeVisible();
   await expect(resultados.getByText('La sociedad requiere una selección explícita.')).toBeVisible();
-  await expect(resultados.getByText('1000 · ERP-QA', { exact: true })).toBeVisible();
-  await expect(
-    page.getByText(/La selección no se envió al servidor; esta fila permanece pendiente\./u),
-  ).toBeVisible();
+  await page
+    .getByLabel('Sociedad y ambiente SAP para archivo 2: factura-sociedades.xml')
+    .selectOption({ label: '2000 · ERP-DEV' });
+  await expect(page.getByRole('button', { name: 'Validar selecciones de sociedad' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Validar selecciones de sociedad' }).click();
+  await expect(resultados.getByText(/2000 · ERP-DEV · SUP-42/u)).toBeVisible();
+  await expect(resultados.getByText('Vista previa completa')).toHaveCount(2);
   await expect(page.getByRole('button', { name: /insertar factura/i })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /confirmar inserción/i })).toHaveCount(0);
 
@@ -242,6 +252,15 @@ test('SUPPORT autorizado carga XML y ve resultados de preview sin inserción', a
       csrfPresente: true,
       archivos: 4,
       contextoPresente: true,
+      seleccionesSociedad: [],
+    },
+    {
+      metodo: 'POST',
+      multipart: true,
+      csrfPresente: true,
+      archivos: 4,
+      contextoPresente: true,
+      seleccionesSociedad: [{ indiceArchivo: 1, sociedad: '2000', ambienteSap: 'ERP-DEV' }],
     },
   ]);
 });
@@ -450,12 +469,21 @@ async function instalarPerfilSimulado(pagina: Page, prefijo: string): Promise<vo
   });
 }
 
-/** Intercepta solo el HTTP de preview y registra metadatos sin conservar XML o token CSRF. */
+/** Intercepta HTTP de preview y registra elecciones sintéticas sin XML ni tokens.
+ * @param pagina - Página Playwright del flujo RF-1.
+ * @param resultados - Respuesta controlada para la primera petición.
+ * @param observaciones - Salida de metadatos seguros comprobados por el caso E2E.
+ * @param respuestasAdicionales - Respuestas secuenciales para revalidar elecciones.
+ * @returns Promesa resuelta cuando queda instalada la ruta de red.
+ */
 async function instalarRespuestaPreview(
   pagina: Page,
   resultados: readonly ResultadoArchivoVistaPreviaRf1Contrato[],
   observaciones: ObservacionPreview[],
+  respuestasAdicionales: readonly (readonly ResultadoArchivoVistaPreviaRf1Contrato[])[] = [],
 ): Promise<void> {
+  const respuestas = [resultados, ...respuestasAdicionales];
+  let indiceRespuesta = 0;
   await pagina.route(
     `**/api/v1/clients/${idCliente}/modules/rf-1/preview?*`,
     async (ruta: Route) => {
@@ -463,6 +491,7 @@ async function instalarRespuestaPreview(
       const headers = await solicitud.allHeaders();
       const url = new URL(solicitud.url());
       const cuerpo = solicitud.postDataBuffer() ?? Buffer.alloc(0);
+      const seleccionesSociedad = leerSeleccionesMultipart(cuerpo);
       const archivos = [
         'factura-lista.xml',
         'factura-sociedades.xml',
@@ -479,14 +508,37 @@ async function instalarRespuestaPreview(
           url.searchParams.get('profileId') === idPerfil &&
           (url.searchParams.get('estatus') === 'PAGADA' ||
             url.searchParams.get('estatus') === 'CONTABILIZADO'),
+        seleccionesSociedad,
       });
       await ruta.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify(resultados),
+        body: JSON.stringify(respuestas[indiceRespuesta++] ?? respuestas.at(-1)),
       });
     },
   );
+}
+
+/** Lee solo la selección sintética del multipart observado por E2E.
+ * @param cuerpo - Buffer efímero creado exclusivamente por el navegador de prueba.
+ * @returns Selecciones tipadas sin almacenar el XML del cuerpo.
+ * @throws Error si el campo sintético no contiene JSON válido.
+ */
+function leerSeleccionesMultipart(cuerpo: Buffer): ObservacionPreview['seleccionesSociedad'] {
+  const marcaCampo = Buffer.from('name="seleccionesSociedad"', 'utf8');
+  const inicioCampo = cuerpo.indexOf(marcaCampo);
+  if (inicioCampo < 0) {
+    return [];
+  }
+  const separador = Buffer.from('\r\n\r\n', 'utf8');
+  const inicioJson = cuerpo.indexOf(separador, inicioCampo) + separador.byteLength;
+  const finJson = cuerpo.indexOf(Buffer.from('\r\n', 'utf8'), inicioJson);
+  if (inicioJson < separador.byteLength || finJson < inicioJson) {
+    throw new Error('El multipart sintético no contiene una selección válida.');
+  }
+  return JSON.parse(
+    cuerpo.subarray(inicioJson, finJson).toString('utf8'),
+  ) as ObservacionPreview['seleccionesSociedad'];
 }
 
 /** Produce un CFDI de ingreso sintético solo para el cuerpo efímero del navegador. */
@@ -542,6 +594,29 @@ function resultadosMixtos(): readonly ResultadoArchivoVistaPreviaRf1Contrato[] {
     },
     { status: 'BLOCKED', errorCode: 'RF1_DUPLICATE_UUID', factura },
     { status: 'BLOCKED', errorCode: 'XML_MALFORMED' },
+  ];
+}
+
+/** Devuelve la respuesta tras revalidar la sociedad sintética elegida.
+ * @returns Resultados de preview que resuelven solo la fila seleccionada.
+ * @throws Error si falta la factura sintética pendiente.
+ */
+function resultadosSeleccionados(): readonly ResultadoArchivoVistaPreviaRf1Contrato[] {
+  const resultados = resultadosMixtos();
+  const factura = resultados[1]?.factura;
+  if (factura === undefined) {
+    throw new Error('La fixture requiere una factura sintética pendiente de selección.');
+  }
+  return [
+    resultados[0]!,
+    {
+      status: 'READY',
+      factura,
+      resolution: { sociedad: '2000', ambienteSap: 'ERP-DEV', idProveedor: 'SUP-42' },
+      estatus: 'PAGADA',
+    },
+    resultados[2]!,
+    resultados[3]!,
   ];
 }
 

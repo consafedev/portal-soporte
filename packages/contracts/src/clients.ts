@@ -485,6 +485,29 @@ const sociedadVistaPreviaRf1Schema = Type.Object(
   { additionalProperties: false },
 );
 
+/** Selección de catálogo que identifica un XML por su índice original en el lote. */
+export const seleccionSociedadArchivoRf1Schema = Type.Object(
+  {
+    indiceArchivo: Type.Integer({ minimum: 0, maximum: 99 }),
+    sociedad: Type.String({ minLength: 1, maxLength: 64 }),
+    ambienteSap: Type.String({ minLength: 1, maxLength: 32 }),
+  },
+  {
+    additionalProperties: false,
+    description: 'Par sociedad/ambiente explícito ligado al índice del archivo CFDI.',
+  },
+);
+
+/** Tipo estricto de selección societaria recibida por el endpoint RF-1 read-only. */
+export type SeleccionSociedadArchivoRf1Contrato = Static<typeof seleccionSociedadArchivoRf1Schema>;
+
+/** Colección acotada de selecciones, validada de nuevo contra el catálogo en el backend. */
+export const seleccionesSociedadRf1Schema = Type.Array(seleccionSociedadArchivoRf1Schema, {
+  minItems: 1,
+  maxItems: 100,
+  description: 'Selecciones explícitas indexadas en el mismo orden que los archivos recibidos.',
+});
+
 /** Campos fiscales serializables que puede presentar la vista previa sin XML original. */
 const facturaVistaPreviaRf1Schema = Type.Object(
   {

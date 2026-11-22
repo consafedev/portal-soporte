@@ -4,6 +4,7 @@ import { useEffect, useState, type ChangeEvent, type JSX } from 'react';
 import type {
   EstatusVistaPreviaRf1Contrato,
   ResultadoArchivoVistaPreviaRf1Contrato,
+  SeleccionSociedadArchivoRf1Contrato,
 } from '@portal-soporte/contracts/clients';
 import {
   ErrorApiClientes,
@@ -44,11 +45,19 @@ interface PerfilSeleccionable {
 interface ResultadoConArchivo {
   /** Nombre presentado localmente; nunca se persiste ni se envía en auditoría. */
   readonly nombreArchivo: string;
+  /** Índice cero basado que conserva la relación con el archivo original en memoria. */
+  readonly indiceArchivo: number;
   /** Datos de preview retornados por el contrato del servidor. */
   readonly resultado: ResultadoArchivoVistaPreviaRf1Contrato;
 }
 
-/** Presenta lectura RF-1 por archivos, sin persistir XML ni habilitar inserciones. */
+/** Par elegido dentro del catálogo autorizado, ligado en estado local al índice del archivo. */
+type ParSociedadRf1 = Pick<SeleccionSociedadArchivoRf1Contrato, 'sociedad' | 'ambienteSap'>;
+
+/** Presenta lectura RF-1 por archivos, sin persistir XML ni habilitar inserciones.
+ * @returns Vista accesible para seleccionar cliente, perfil, XML y pares del catálogo real.
+ * @effects Conserva archivos y elecciones solo en memoria y solicita únicamente vistas previas.
+ */
 export function VistaPreviaRf1(): JSX.Element {
   const usuario = useUsuarioAutenticado();
   const esAdmin = usuario.role === 'ADMIN';
@@ -62,6 +71,9 @@ export function VistaPreviaRf1(): JSX.Element {
   const [estatus, setEstatus] = useState<EstatusVistaPreviaRf1Contrato>('PAGADA');
   const [archivos, setArchivos] = useState<readonly File[]>([]);
   const [resultados, setResultados] = useState<readonly ResultadoConArchivo[]>([]);
+  const [seleccionesSociedad, setSeleccionesSociedad] = useState<
+    Readonly<Record<number, ParSociedadRf1>>
+  >({});
   const [cargandoClientes, setCargandoClientes] = useState(true);
   const [cargandoDetalle, setCargandoDetalle] = useState(false);
   const [analizando, setAnalizando] = useState(false);
@@ -156,6 +168,7 @@ export function VistaPreviaRf1(): JSX.Element {
     const seleccion = Array.from(evento.currentTarget.files ?? []);
     setArchivos([]);
     setResultados([]);
+    setSeleccionesSociedad({});
     setAviso(null);
     setError(null);
 
@@ -181,13 +194,21 @@ export function VistaPreviaRf1(): JSX.Element {
     setPerfilId('');
     setArchivos([]);
     setResultados([]);
+    setSeleccionesSociedad({});
     setAviso(null);
     setError(null);
     setCargandoDetalle(siguienteClienteId.length > 0);
   }
 
-  /** Envía solo el lote seleccionado a la ruta de preview protegida con CSRF. */
-  async function analizarArchivos(): Promise<void> {
+  /**
+   * Envía el lote protegido con CSRF y conserva el resultado anterior mientras revalida.
+   * @param selecciones - Pares elegidos por índice para que el servidor los vuelva a validar.
+   * @returns Promesa resuelta al recibir y validar el contrato de vista previa.
+   * @effects Conserva XML en memoria y no habilita escrituras.
+   */
+  async function analizarArchivos(
+    selecciones: readonly SeleccionSociedadArchivoRf1Contrato[] = [],
+  ): Promise<void> {
     if (clienteId.length === 0 || perfilId.length === 0 || archivos.length === 0) {
       return;
     }
@@ -195,12 +216,17 @@ export function VistaPreviaRf1(): JSX.Element {
     setAnalizando(true);
     setError(null);
     setAviso(null);
-    setResultados([]);
+    if (selecciones.length === 0) {
+      setResultados([]);
+      setSeleccionesSociedad({});
+    }
     try {
-      const respuesta = await previsualizarRf1(clienteId, perfilId, estatus, archivos);
+      const respuesta = await previsualizarRf1(clienteId, perfilId, estatus, archivos, selecciones);
+      setSeleccionesSociedad({});
       setResultados(
         respuesta.map((resultado, indice) => ({
           nombreArchivo: archivos[indice]?.name ?? `Archivo ${indice + 1}`,
+          indiceArchivo: indice,
           resultado,
         })),
       );
@@ -215,6 +241,49 @@ export function VistaPreviaRf1(): JSX.Element {
   function manejarAnalisis(): void {
     void analizarArchivos();
   }
+
+  /** Actualiza un par del catálogo recibido sin convertir datos del navegador en autoridad.
+   * @param indiceArchivo - Posición del XML dentro del lote actualmente cargado.
+   * @param sociedad - Par ofrecido por la respuesta o `undefined` para limpiar la selección.
+   * @effects Actualiza únicamente estado efímero de la página.
+   */
+  function cambiarSeleccionSociedad(
+    indiceArchivo: number,
+    sociedad: ParSociedadRf1 | undefined,
+  ): void {
+    setSeleccionesSociedad((actuales) => {
+      const siguientes = { ...actuales };
+      if (sociedad === undefined) {
+        delete siguientes[indiceArchivo];
+      } else {
+        siguientes[indiceArchivo] = sociedad;
+      }
+      return siguientes;
+    });
+  }
+
+  /** Reenvía el mismo lote con todas las selecciones pendientes.
+   * @effects La operación permanece en modo de lectura y el servidor revalida cada par.
+   */
+  function manejarValidacionSociedad(): void {
+    if (!seleccionesCompletas) {
+      return;
+    }
+    const selecciones = indicesSociedadPendientes.map((indiceArchivo) => ({
+      indiceArchivo,
+      ...seleccionesSociedad[indiceArchivo]!,
+    }));
+    void analizarArchivos(selecciones);
+  }
+
+  const indicesSociedadPendientes = resultados.flatMap(({ indiceArchivo, resultado }) =>
+    resultado.status === 'NEEDS_SELECTION' ? [indiceArchivo] : [],
+  );
+  const seleccionesCompletas =
+    indicesSociedadPendientes.length > 0 &&
+    indicesSociedadPendientes.every(
+      (indiceArchivo) => seleccionesSociedad[indiceArchivo] !== undefined,
+    );
 
   return (
     <div className="pagina-contenido pagina-rf1">
@@ -297,6 +366,7 @@ export function VistaPreviaRf1(): JSX.Element {
                     onChange={(evento) => {
                       setPerfilId(evento.currentTarget.value);
                       setResultados([]);
+                      setSeleccionesSociedad({});
                     }}
                   >
                     <option value="">Selecciona un perfil autorizado</option>
@@ -324,6 +394,7 @@ export function VistaPreviaRf1(): JSX.Element {
                     onChange={(evento) => {
                       setEstatus(evento.currentTarget.value as EstatusVistaPreviaRf1Contrato);
                       setResultados([]);
+                      setSeleccionesSociedad({});
                     }}
                   >
                     <option value="PAGADA">Pagada</option>
@@ -376,16 +447,51 @@ export function VistaPreviaRf1(): JSX.Element {
         </section>
       )}
 
-      {resultados.length > 0 ? <TablaResultados resultados={resultados} /> : null}
+      {resultados.length > 0 ? (
+        <>
+          <TablaResultados
+            resultados={resultados}
+            seleccionesSociedad={seleccionesSociedad}
+            onCambioSeleccion={cambiarSeleccionSociedad}
+          />
+          {indicesSociedadPendientes.length > 0 ? (
+            <div>
+              <p className="texto-secundario" role="status">
+                El servidor comprobará nuevamente cada par en el catálogo del mismo cliente y
+                perfil.
+              </p>
+              <button
+                className="boton-secundario"
+                type="button"
+                disabled={analizando || !seleccionesCompletas}
+                onClick={manejarValidacionSociedad}
+              >
+                {analizando ? 'Validando sociedad…' : 'Validar selecciones de sociedad'}
+              </button>
+            </div>
+          ) : null}
+        </>
+      ) : null}
     </div>
   );
 }
 
-/** Presenta resultados resumidos por archivo sin representar el XML ni secretos. */
+/** Presenta resultados y permite elegir solo pares societarios devueltos por el API.
+ * @param resultados - Resultado redactado asociado con cada archivo del lote.
+ * @param seleccionesSociedad - Selecciones locales aún no enviadas para revalidación.
+ * @param onCambioSeleccion - Callback para guardar una opción del catálogo recibido.
+ * @returns Tabla accesible con estado y datos seguros de la vista previa.
+ */
 function TablaResultados({
   resultados,
+  seleccionesSociedad,
+  onCambioSeleccion,
 }: {
   readonly resultados: readonly ResultadoConArchivo[];
+  /** Selecciones locales indexadas por el archivo original. */
+  readonly seleccionesSociedad: Readonly<Record<number, ParSociedadRf1>>;
+  /** Actualiza una opción que proviene de las sociedades devueltas por el servidor. */
+  readonly onCambioSeleccion: (indiceArchivo: number, sociedad: ParSociedadRf1 | undefined) => void;
 }): JSX.Element {
   return (
     <section className="seccion-resultados-rf1" aria-labelledby="rf1-resultados-titulo">
@@ -400,12 +506,18 @@ function TablaResultados({
             </tr>
           </thead>
           <tbody>
-            {resultados.map(({ nombreArchivo, resultado }, indice) => (
+            {resultados.map(({ nombreArchivo, indiceArchivo, resultado }, indice) => (
               <tr key={`${nombreArchivo}-${indice}`}>
                 <th scope="row">{nombreArchivo}</th>
                 <td>{etiquetaEstado(resultado)}</td>
                 <td>
-                  <ResumenResultado resultado={resultado} />
+                  <ResumenResultado
+                    nombreArchivo={nombreArchivo}
+                    indiceArchivo={indiceArchivo}
+                    resultado={resultado}
+                    seleccion={seleccionesSociedad[indiceArchivo]}
+                    onCambioSeleccion={onCambioSeleccion}
+                  />
                 </td>
               </tr>
             ))}
@@ -416,24 +528,67 @@ function TablaResultados({
   );
 }
 
-/** Renderiza el mensaje de estado y los datos permitidos por el resultado del API. */
+/** Renderiza resultado y, si aplica, el selector nativo limitado al catálogo recibido.
+ * @param nombreArchivo - Nombre local para identificar el archivo de esta fila.
+ * @param indiceArchivo - Índice cero basado correlacionado con el lote HTTP.
+ * @param resultado - Resultado redactado del backend.
+ * @param seleccion - Par actualmente elegido por el operador.
+ * @param onCambioSeleccion - Callback que actualiza estado efímero de selección.
+ * @returns Contenido accesible de la celda sin secretos ni XML.
+ */
 function ResumenResultado({
+  nombreArchivo,
+  indiceArchivo,
   resultado,
+  seleccion,
+  onCambioSeleccion,
 }: {
+  /** Nombre local para que cada selector tenga una etiqueta distinguible. */
+  readonly nombreArchivo: string;
+  /** Índice cero basado del XML que coincide con el contrato HTTP. */
+  readonly indiceArchivo: number;
   readonly resultado: ResultadoArchivoVistaPreviaRf1Contrato;
+  /** Selección actualmente realizada en la memoria de la página. */
+  readonly seleccion: ParSociedadRf1 | undefined;
+  /** Guarda una opción presente en el catálogo recibido desde el backend. */
+  readonly onCambioSeleccion: (indiceArchivo: number, sociedad: ParSociedadRf1 | undefined) => void;
 }): JSX.Element {
   if (resultado.status === 'NEEDS_SELECTION') {
+    const sociedades = resultado.sociedadesDisponibles ?? [];
     return (
       <div>
         <p>La sociedad requiere una selección explícita.</p>
-        {resultado.sociedadesDisponibles?.map((sociedad) => (
-          <p key={`${sociedad.sociedad}-${sociedad.ambienteSap}`}>
-            {sociedad.sociedad} · {sociedad.ambienteSap}
-          </p>
-        ))}
-        <p className="texto-secundario">
-          La selección no se envió al servidor; esta fila permanece pendiente.
-        </p>
+        {sociedades.length > 0 ? (
+          <div className="campo">
+            <label htmlFor={`rf1-sociedad-${indiceArchivo}`}>
+              Sociedad y ambiente SAP para archivo {indiceArchivo + 1}: {nombreArchivo}
+            </label>
+            <select
+              id={`rf1-sociedad-${indiceArchivo}`}
+              value={seleccion === undefined ? '' : crearClaveSociedad(seleccion)}
+              onChange={(evento) => {
+                const opcion = sociedades.find(
+                  (sociedad) => crearClaveSociedad(sociedad) === evento.currentTarget.value,
+                );
+                onCambioSeleccion(
+                  indiceArchivo,
+                  opcion === undefined
+                    ? undefined
+                    : { sociedad: opcion.sociedad, ambienteSap: opcion.ambienteSap },
+                );
+              }}
+            >
+              <option value="">Selecciona sociedad y ambiente SAP</option>
+              {sociedades.map((sociedad) => (
+                <option key={crearClaveSociedad(sociedad)} value={crearClaveSociedad(sociedad)}>
+                  {sociedad.sociedad} · {sociedad.ambienteSap}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <p className="texto-secundario">El catálogo no devolvió opciones seleccionables.</p>
+        )}
       </div>
     );
   }
@@ -458,6 +613,14 @@ function ResumenResultado({
       ) : null}
     </div>
   );
+}
+
+/** Genera una clave estable de interfaz para comparar el par sin concatenaciones ambiguas.
+ * @param sociedad - Par procedente del catálogo del servidor.
+ * @returns Clave serializada que conserva exactamente ambos valores.
+ */
+function crearClaveSociedad(sociedad: ParSociedadRf1): string {
+  return JSON.stringify([sociedad.sociedad, sociedad.ambienteSap]);
 }
 
 /** Valida cantidad, extensión y tamaños sin abrir o copiar el contenido de los XML. */
@@ -494,6 +657,8 @@ function mensajeErrorRf1(codigo: string | undefined): string {
       return 'XML mal formado';
     case 'RF1_SOCIETY_SELECTION_REQUIRED':
       return 'La sociedad requiere una selección explícita.';
+    case 'RF1_CONTEXT_MISMATCH':
+      return 'El contexto cambió. Analiza de nuevo el archivo para consultar opciones vigentes.';
     default:
       return 'El archivo no cumple las reglas de validación de RF-1.';
   }
