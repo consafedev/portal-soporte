@@ -161,6 +161,9 @@ async function probarLecturasRf1(perfil: PerfilConexionPrueba): Promise<void> {
     await expect(
       sesion.buscarProveedoresPorContexto('COSC8001137NA', '1000', 'E1P'),
     ).resolves.toEqual([{ idProveedor: 'PROV000003' }, { idProveedor: 'PROV000004' }]);
+    await expect(
+      sesion.buscarProveedoresPorContexto('AAA010101AAA', '1000', 'E1P'),
+    ).resolves.toEqual([{ idProveedor: 'PROV000005' }]);
     await expect(sesion.existeUuid('550e8400-e29b-41d4-a716-446655440001')).resolves.toBe(true);
     await expect(sesion.existeUuid('550e8400-e29b-41d4-a716-446655440002')).resolves.toBe(false);
   } finally {
@@ -202,7 +205,7 @@ function crearEntradaInsercionRf1(
   return {
     factura: {
       uuid,
-      rfcEmisor: 'COSC8001137NA',
+      rfcEmisor: 'AAA010101AAA',
       rfcReceptor: 'XAXX010101000',
       fecha: '2025-06-07T23:30:00-06:00',
       subtotal: '1250.50',
@@ -220,7 +223,7 @@ function crearEntradaInsercionRf1(
       metodoPago: 'PUE',
       formaPago: '03',
     },
-    resolution: { sociedad: '1000', ambienteSap: 'E1P', idProveedor: 'PROV000001' },
+    resolution: { sociedad: '1000', ambienteSap: 'E1P', idProveedor: 'PROV000005' },
     estatus,
     fechaCarga: new Date('2026-11-22T07:00:00.000Z'),
     documentos: { documentoContable: null, entradaMercancia: null, ordenCompra: null },
