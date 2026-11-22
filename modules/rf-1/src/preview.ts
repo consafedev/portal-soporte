@@ -35,6 +35,10 @@ export interface SolicitudVistaPreviaRf1 {
   readonly ambienteSap?: string;
 }
 
+/** Límites del primer procesamiento por lote aprobados en la especificación RF-1. */
+const MAXIMO_XML_POR_LOTE = 100;
+const MAXIMO_BYTES_POR_LOTE = 25 * 1024 * 1024;
+
 /** Vista de un documento listo, pendiente de selección o bloqueado, sin efectos de escritura. */
 export interface VistaPreviaCfdiRf1 {
   /** Estado de resolución del documento antes de cualquier operación futura. */
@@ -109,6 +113,36 @@ export async function generarVistaPreviaCfdi(
   } catch {
     return { status: 'BLOCKED', errorCode: 'RF1_CATALOG_UNAVAILABLE', factura };
   }
+}
+
+/** Analiza un lote acotado de CFDI en serie y conserva un resultado por documento. */
+export async function generarVistaPreviaLote(
+  solicitudes: readonly SolicitudVistaPreviaRf1[],
+  catalogo: CatalogoLecturaRf1,
+): Promise<readonly VistaPreviaCfdiRf1[]> {
+  if (solicitudes.length === 0) {
+    throw new ErrorRf1('BATCH_EMPTY');
+  }
+  if (solicitudes.length > MAXIMO_XML_POR_LOTE) {
+    throw new ErrorRf1('BATCH_TOO_MANY_FILES');
+  }
+  const bytesTotales = solicitudes.reduce(
+    (total, solicitud) => total + solicitud.xml.byteLength,
+    0,
+  );
+  if (bytesTotales > MAXIMO_BYTES_POR_LOTE) {
+    throw new ErrorRf1('BATCH_TOO_LARGE');
+  }
+
+  const instantanea = solicitudes.map((solicitud) => ({
+    ...solicitud,
+    xml: new Uint8Array(solicitud.xml),
+  }));
+  const resultados: VistaPreviaCfdiRf1[] = [];
+  for (const solicitud of instantanea) {
+    resultados.push(await generarVistaPreviaCfdi(solicitud, catalogo));
+  }
+  return resultados;
 }
 
 /** Resuelve una selección disponible y bloquea catálogos duplicados o contextos ajenos. */

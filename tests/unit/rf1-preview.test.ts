@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ErrorRf1,
   analizarCfdiIngreso,
+  generarVistaPreviaLote,
   generarVistaPreviaCfdi,
   type CatalogoLecturaRf1,
   type SociedadCatalogoRf1,
@@ -19,6 +20,7 @@ function crearXml(overrides: Readonly<Record<string, string>> = {}): Uint8Array 
     TipoDeComprobante: 'I',
     Fecha: '2026-11-20T14:35:00',
     Moneda: 'MXN',
+    SubTotal: '100.25',
     Total: '100.25',
     ...overrides,
   };
@@ -31,6 +33,36 @@ function crearXml(overrides: Readonly<Record<string, string>> = {}): Uint8Array 
   <c:Emisor Rfc="${RFC_EMISOR}"/><c:Receptor Rfc="${RFC_RECEPTOR}"/>
   <c:Complemento><t:TimbreFiscalDigital UUID="${UUID_CFDI}"/></c:Complemento>
 </c:Comprobante>`,
+  );
+}
+
+/** Crea un CFDI sintético con resumen fiscal y nodos que no deben duplicarse. */
+function crearXmlConResumenFiscal(): Uint8Array {
+  const xml = new TextDecoder().decode(
+    crearXml({ Descuento: '3.25', FormaPago: '03', MetodoPago: 'PUE' }),
+  );
+  return new TextEncoder().encode(
+    xml.replace(
+      '</c:Comprobante>',
+      `<c:Impuestos>
+        <c:Traslados>
+          <c:Traslado Impuesto="002" TipoFactor="Tasa" Importe="10.01"/>
+          <c:Traslado Impuesto="002" TipoFactor="Tasa" Importe="6.03"/>
+        </c:Traslados>
+        <c:Retenciones>
+          <c:Retencion Impuesto="001" Importe="2.00"/>
+          <c:Retencion Impuesto="002" Importe="1.00"/>
+          <c:Retencion Impuesto="003" Importe="0.50"/>
+        </c:Retenciones>
+      </c:Impuestos>
+      <c:Conceptos><c:Concepto><c:Impuestos><c:Traslados>
+        <c:Traslado Impuesto="002" TipoFactor="Tasa" Importe="999.99"/>
+      </c:Traslados></c:Impuestos></c:Concepto></c:Conceptos>
+      <i:ImpuestosLocales xmlns:i="http://www.sat.gob.mx/implocal">
+        <i:RetencionesLocales ImpLocRetenido="900.00"/>
+      </i:ImpuestosLocales>
+      </c:Comprobante>`,
+    ),
   );
 }
 
@@ -91,6 +123,47 @@ async function analizaCfdiSintetico(): Promise<void> {
   });
 }
 
+/** Extrae los impuestos agregados del comprobante sin duplicar conceptos ni incluir locales. */
+async function extraeResumenFiscalSinDuplicarImpuestos(): Promise<void> {
+  const factura = analizarCfdiIngreso(crearXmlConResumenFiscal());
+
+  expect(factura).toMatchObject({
+    subtotal: '100.25',
+    descuento: '3.25',
+    importeIvaFAC: '16.04',
+    retencionIsr: '2',
+    retencionIva: '1',
+    retencionIeps: '0.5',
+    metodoPago: 'PUE',
+    formaPago: '03',
+  });
+}
+
+/** Rechaza factores de impuesto no válidos en el resumen CFDI del comprobante. */
+async function rechazaFactorDeImpuestoInvalido(): Promise<void> {
+  const xml = new TextDecoder()
+    .decode(crearXmlConResumenFiscal())
+    .replace('TipoFactor="Tasa"', 'TipoFactor="Desconocido"');
+
+  expect(() => analizarCfdiIngreso(new TextEncoder().encode(xml))).toThrowError(
+    expect.objectContaining({ code: 'CFDI_TAX_DATA_INVALID' }),
+  );
+}
+
+/** Bloquea impuestos de concepto cuando falta el resumen agregado autorizado para el mapeo. */
+async function bloqueaImpuestosDeConceptoSinResumen(): Promise<void> {
+  const xml = new TextDecoder().decode(crearXml()).replace(
+    '</c:Comprobante>',
+    `<c:Conceptos><c:Concepto><c:Impuestos><c:Traslados>
+        <c:Traslado Impuesto="002" TipoFactor="Tasa" Importe="16.04"/>
+      </c:Traslados></c:Impuestos></c:Concepto></c:Conceptos></c:Comprobante>`,
+  );
+
+  expect(() => analizarCfdiIngreso(new TextEncoder().encode(xml))).toThrowError(
+    expect.objectContaining({ code: 'CFDI_TAX_SUMMARY_MISSING' }),
+  );
+}
+
 /** Conserva una referencia vacía cuando el XML no aporta serie ni folio. */
 async function permiteFacturaSinSerieNiFolio(): Promise<void> {
   const xml = new TextDecoder().decode(crearXml()).replace(' Serie="A" Folio="12"', '');
@@ -130,6 +203,27 @@ async function rechazaRfcConNamespaceAjeno(): Promise<void> {
   expect(() => analizarCfdiIngreso(new TextEncoder().encode(xml))).toThrowError(
     expect.objectContaining({ code: 'CFDI_REQUIRED_FIELD_INVALID' }),
   );
+}
+
+/** Rechaza nodos Emisor/Receptor repetidos incluso si el primero carece del RFC. */
+async function rechazaEmisorOReceptorDuplicadoSinRfc(): Promise<void> {
+  const xmlBase = new TextDecoder().decode(crearXml());
+  const documentos = [
+    xmlBase.replace(
+      `<c:Emisor Rfc="${RFC_EMISOR}"/>`,
+      `<c:Emisor/><c:Emisor Rfc="${RFC_EMISOR}"/>`,
+    ),
+    xmlBase.replace(
+      `<c:Receptor Rfc="${RFC_RECEPTOR}"/>`,
+      `<c:Receptor/><c:Receptor Rfc="${RFC_RECEPTOR}"/>`,
+    ),
+  ];
+
+  for (const documento of documentos) {
+    expect(() => analizarCfdiIngreso(new TextEncoder().encode(documento))).toThrowError(
+      expect.objectContaining({ code: 'CFDI_REQUIRED_FIELD_INVALID' }),
+    );
+  }
 }
 
 /** Rechaza fecha fiscal imposible e importe que excede la gramática decimal autorizada. */
@@ -306,9 +400,107 @@ async function exponeCodigoControladoDeXmlMalformado(): Promise<void> {
   }
 }
 
+/** Conserva una fila de resultado por XML y aísla un documento inválido de sus pares. */
+async function conservaResultadosIndependientesDeLote(): Promise<void> {
+  const { catalogo } = crearCatalogo();
+  const resultado = await generarVistaPreviaLote(
+    [
+      { xml: crearXml(), estatus: 'CONTABILIZADO' },
+      { xml: new Uint8Array(), estatus: 'CONTABILIZADO' },
+      { xml: crearXml(), estatus: 'PAGADA' },
+    ],
+    catalogo,
+  );
+
+  expect(resultado.map((fila) => fila.status)).toEqual(['READY', 'BLOCKED', 'READY']);
+  expect(resultado[1]).toMatchObject({ errorCode: 'XML_MALFORMED' });
+}
+
+/** Rechaza lotes vacíos, demasiado grandes o numerosos antes de consultar el catálogo. */
+async function rechazaLoteFueraDeLimites(): Promise<void> {
+  const catalogo: CatalogoLecturaRf1 = {
+    async buscarSociedadesPorRfc(): Promise<readonly SociedadCatalogoRf1[]> {
+      throw new Error('el catálogo no debe consultarse');
+    },
+    async buscarProveedoresPorContexto(): Promise<readonly { readonly idProveedor: string }[]> {
+      throw new Error('el catálogo no debe consultarse');
+    },
+    async existeUuid(): Promise<boolean> {
+      throw new Error('el catálogo no debe consultarse');
+    },
+  };
+  const vacio = generarVistaPreviaLote([], catalogo);
+  const demasiados = generarVistaPreviaLote(
+    Array.from({ length: 101 }, () => ({ xml: new Uint8Array(), estatus: 'PAGADA' })),
+    catalogo,
+  );
+  const xml = new Uint8Array(5 * 1024 * 1024);
+  const grande = generarVistaPreviaLote(
+    Array.from({ length: 6 }, () => ({ xml, estatus: 'PAGADA' })),
+    catalogo,
+  );
+
+  await expect(vacio).rejects.toMatchObject({ code: 'BATCH_EMPTY' });
+  await expect(demasiados).rejects.toMatchObject({ code: 'BATCH_TOO_MANY_FILES' });
+  await expect(grande).rejects.toMatchObject({ code: 'BATCH_TOO_LARGE' });
+}
+
+/** Congela todos los bytes del lote antes de esperar consultas asíncronas al catálogo. */
+async function conservaInstantaneaDeBytesDelLote(): Promise<void> {
+  let iniciarPrimeraConsulta!: () => void;
+  let liberarPrimeraConsulta!: () => void;
+  const primeraConsultaIniciada = new Promise<void>((resolve) => {
+    iniciarPrimeraConsulta = resolve;
+  });
+  const barreraPrimeraConsulta = new Promise<void>((resolve) => {
+    liberarPrimeraConsulta = resolve;
+  });
+  let consultasSociedad = 0;
+  const catalogo: CatalogoLecturaRf1 = {
+    async buscarSociedadesPorRfc(): Promise<readonly SociedadCatalogoRf1[]> {
+      consultasSociedad += 1;
+      if (consultasSociedad === 1) {
+        iniciarPrimeraConsulta();
+        await barreraPrimeraConsulta;
+      }
+      return [SOCIEDAD_E1P];
+    },
+    async buscarProveedoresPorContexto(): Promise<readonly { readonly idProveedor: string }[]> {
+      return [{ idProveedor: 'PROV-001' }];
+    },
+    async existeUuid(): Promise<boolean> {
+      return false;
+    },
+  };
+  const xmlSegundo = crearXml();
+  const proceso = generarVistaPreviaLote(
+    [
+      { xml: crearXml(), estatus: 'CONTABILIZADO' },
+      { xml: xmlSegundo, estatus: 'CONTABILIZADO' },
+    ],
+    catalogo,
+  );
+
+  await primeraConsultaIniciada;
+  xmlSegundo.fill(0);
+  liberarPrimeraConsulta();
+  const resultado = await proceso;
+
+  expect(resultado.map((fila) => fila.status)).toEqual(['READY', 'READY']);
+}
+
 /** Agrupa las pruebas del parser que solo consume documentos sintéticos en memoria. */
 function describirParserCfdi(): void {
   it('extrae datos por namespace y conserva el importe decimal', analizaCfdiSintetico);
+  it(
+    'extrae impuestos agregados sin duplicar conceptos ni impuestos locales',
+    extraeResumenFiscalSinDuplicarImpuestos,
+  );
+  it('rechaza factores de impuesto desconocidos', rechazaFactorDeImpuestoInvalido);
+  it(
+    'bloquea impuestos por concepto si falta el resumen agregado',
+    bloqueaImpuestosDeConceptoSinResumen,
+  );
   it('permite serie y folio ausentes sin inventar la referencia', permiteFacturaSinSerieNiFolio);
   it('rechaza DTD y entidades externas', rechazaDtd);
   it('rechaza CFDI fuera del tipo de ingreso', rechazaNotaDeCredito);
@@ -316,6 +508,10 @@ function describirParserCfdi(): void {
   it(
     'rechaza atributos fiscales sustituidos mediante namespaces ajenos',
     rechazaRfcConNamespaceAjeno,
+  );
+  it(
+    'rechaza Emisor y Receptor duplicados aunque el primero omita su RFC',
+    rechazaEmisorOReceptorDuplicadoSinRfc,
   );
   it('rechaza fechas e importes fuera de la gramática permitida', rechazaFechaEImporteInvalidos);
   it('rechaza UUID ausente o repetido', rechazaUuidInvalidoORepetido);
@@ -345,3 +541,18 @@ function describirPreviewSinEscritura(): void {
 
 describe('análisis CFDI RF-1', describirParserCfdi);
 describe('preview RF-1 de solo lectura', describirPreviewSinEscritura);
+
+describe('previsualización RF-1 por lote', () => {
+  it(
+    'conserva el resultado de cada XML aunque un documento falle',
+    conservaResultadosIndependientesDeLote,
+  );
+  it(
+    'rechaza lotes vacíos o fuera de límites antes de acceder al catálogo',
+    rechazaLoteFueraDeLimites,
+  );
+  it(
+    'conserva los bytes iniciales aunque el llamador cambie el búfer después',
+    conservaInstantaneaDeBytesDelLote,
+  );
+});

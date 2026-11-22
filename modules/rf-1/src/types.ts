@@ -20,6 +20,13 @@ export type CodigoErrorRf1 =
   | 'CFDI_REQUIRED_FIELD_INVALID'
   | 'CFDI_UUID_INVALID'
   | 'CFDI_REFERENCE_TOO_LONG'
+  | 'CFDI_TAX_DATA_INVALID'
+  | 'CFDI_TAX_SUMMARY_AMBIGUOUS'
+  | 'CFDI_TAX_SUMMARY_MISSING'
+  | 'CFDI_PAYMENT_METHOD_INVALID'
+  | 'BATCH_EMPTY'
+  | 'BATCH_TOO_MANY_FILES'
+  | 'BATCH_TOO_LARGE'
   | 'CFDI_STATUS_UNSUPPORTED';
 
 /** Datos inmutables extraídos de un CFDI de ingreso sin mutar ni guardar su origen. */
@@ -32,6 +39,10 @@ export interface DatosCfdiIngreso {
   readonly rfcReceptor: string;
   /** Fecha fiscal literal del XML; no se convierte de zona horaria. */
   readonly fecha: string;
+  /** Subtotal fiscal exacto expresado como texto decimal. */
+  readonly subtotal: string;
+  /** Descuento fiscal exacto; se representa como cero cuando no viene informado. */
+  readonly descuento: string;
   /** Moneda declarada en el comprobante. */
   readonly moneda: string;
   /** Total decimal textual exacto; no se convierte a número binario. */
@@ -40,4 +51,20 @@ export interface DatosCfdiIngreso {
   readonly referencia: string;
   /** Tipo de comprobante validado como ingreso. */
   readonly tipoComprobante: 'I';
+  /** IVA trasladado agregado desde el resumen fiscal del comprobante. */
+  readonly importeIvaFAC: string;
+  /** ISR retenido agregado desde el resumen fiscal del comprobante. */
+  readonly retencionIsr: string;
+  /** IVA retenido agregado desde el resumen fiscal del comprobante. */
+  readonly retencionIva: string;
+  /** IEPS retenido agregado desde el resumen fiscal del comprobante. */
+  readonly retencionIeps: string;
+  /** Método de pago CFDI cuando el emisor lo informó. */
+  readonly metodoPago?: string;
+  /** Forma de pago CFDI cuando el emisor la informó. */
+  readonly formaPago?: string;
+  /** Serie original cuando el comprobante la incluye. */
+  readonly serie?: string;
+  /** Folio original cuando el comprobante lo incluye. */
+  readonly folio?: string;
 }
