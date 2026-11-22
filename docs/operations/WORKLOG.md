@@ -2014,3 +2014,8 @@ eload, se reinició únicamente cloudflared-consafedev.service; procesos web, AP
 - La corrección de privilegios compara SHOW GRANTS con INFORMATION_SCHEMA.TABLE_PRIVILEGES; no relaja los permisos del usuario sintético. La semilla de inserción usa un proveedor único y mantiene la pareja ambigua para validaciones negativas.
 - Verificación local: typecheck/lint/Secretlint/Bash syntax/test de grants/Prettier focalizados PASS; `format:check` global del checkout Windows listó 210 archivos, mientras la misma comprobación de CI Linux pasó. Fixture local NO EJECUTADO por Docker Engine ausente; CI lo ejecutó completamente.
 - Estado: PS-009 EN_REVISION. El PR entrega una base sintética sin endpoint ni `rf-1:execute`; VT-01..VT-09, AuthContext/capacidad independiente, auditoría y conciliación siguen pendientes antes de DML real. No hubo conexiones ni escrituras a bases de clientes, migraciones nuevas o cambios de infraestructura.
+
+### [2026-11-22T03:04:40-06:00] PS-009 — REVALIDACIÓN FINAL DE PR #6
+- Revalidación GitHub: PR #6 sigue OPEN, base `main`, sin merge. Actions run `45005424165` SUCCESS en HEAD probado `2d2f1f83e790caa99e354eeee50837586a2455a7`.
+- Ambos jobs SUCCESS: calidad/seguridad completo y conectores MySQL/SSH efímeros completo. El diff de esta actualización documental no cambia código, tests, fixtures ni configuración.
+- Estado: PS-009 EN_REVISION para aprobación manual; limitaciones de DDL real, AuthContext/capacidad, auditoría y conciliación siguen vigentes.
