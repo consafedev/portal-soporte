@@ -2069,3 +2069,9 @@ eload, se reinició únicamente cloudflared-consafedev.service; procesos web, AP
 - Seguridad y límites: PORTAL_RF1_INSERTION_ENABLED sigue cerrado por defecto. AP-013/AP-014 conservadas; SMTP deshabilitado. La base permanente no tiene clientes, perfiles, asignaciones ni capacidades; faltan destino/DDL autorizados y VT-01–VT-09, por lo que no se solicita habilitar piloto. Riesgo moderado de dependencia permanece documentado.
 - Acción: dejar PS-009 en EN_REVISION; solicitar revisión humana del PR. No merge, despliegue, migración productiva, cambio de Cloudflare/DNS/firewall ni acceso a bases de clientes.
 - Estado: EN_REVISION.
+### [2026-11-22T06:51:48-06:00] PS-009 — CI VERDE EN HEAD ACTUAL
+- Rama y HEAD: codex/ps-009-rf1-execution-gate · e24c08cfa018e40c1ce8e2ac020f863133afe2bd. El incremento de código continúa en 5ba70dc3c7a2b251f4d0e9dc6618f6b1054896a7; e24c08c solo actualiza WORKLOG y TASK_BOARD.
+- GitHub Actions para el HEAD e24c08c: push run #59 / 45024085513 SUCCESS y pull_request run #60 / 45024089862 SUCCESS. Cada run terminó con ambos jobs: “Calidad y seguridad básica” SUCCESS y “Conectores MySQL y SSH con fixture sintético” SUCCESS.
+- Estos runs validan el mismo código funcional ya verificado en el HEAD anterior; no hubo modificaciones de código, migraciones ni configuración después del run #58. El nuevo commit solo registra evidencia administrativa.
+- PR #7 sigue abierto contra main y no tiene reviews; listo para revisión humana. No se fusionó.
+- Estado: EN_REVISION.
