@@ -16,11 +16,78 @@ puerto_mysql=""
 puerto_ssh=""
 ip_mysql=""
 huella_ssh=""
+docker_disponible='false'
+diagnostico_mysql_emitido='false'
+motivo_fallo_mysql='fixture-failed'
+detalle_readiness_mysql=''
+
+# Redacta en la entrada estándar secretos reconocibles de diagnósticos; recibe texto y escribe texto saneado en stdout.
+redactar_diagnosticos_mysql() {
+  sed -E \
+    -e 's/((password|passwd|passphrase|secret|token|private.?key|authorization|dsn)[[:alnum:]_.-]*"?[[:space:]]*[:=][[:space:]]*"?)[^"[:space:],;]+/\1[REDACTED]/Ig' \
+    -e 's/((password|passwd|passphrase|secret|token|private.?key|authorization|dsn)[[:alnum:]_.-]*[[:space:]]+)[^"[:space:],;]+/\1[REDACTED]/Ig' \
+    -e 's#(://[^:/[:space:]]+:)[^@/[:space:]]+@#\1[REDACTED]@#g'
+}
+
+# Registra en stderr el estado, la salida, los volúmenes y los últimos logs del contenedor exacto; recibe el motivo y solo lee Docker.
+diagnosticar_mysql_fixture() {
+  local motivo="$1"
+  diagnostico_mysql_emitido='true'
+  echo "MYSQL_FIXTURE_DIAGNOSTICS_BEGIN reason=${motivo}" >&2
+  if docker container inspect "${contenedor_mysql}" >/dev/null 2>&1; then
+    docker container inspect \
+      --format 'status={{.State.Status}} exit_code={{.State.ExitCode}} oom_killed={{.State.OOMKilled}} state_error={{.State.Error}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}not-configured{{end}} mounts={{range .Mounts}}{{.Source}}->{{.Destination}}:rw={{.RW}};{{end}}' \
+      "${contenedor_mysql}" 2>&1 | redactar_diagnosticos_mysql || true
+    docker logs --tail 120 "${contenedor_mysql}" 2>&1 | redactar_diagnosticos_mysql || true
+  else
+    echo 'MYSQL_FIXTURE_CONTAINER_NOT_FOUND' >&2
+  fi
+  if [[ -n "${detalle_readiness_mysql}" ]]; then
+    printf 'readiness_detail=%s\n' "${detalle_readiness_mysql}" | redactar_diagnosticos_mysql >&2
+  fi
+  echo 'MYSQL_FIXTURE_DIAGNOSTICS_END' >&2
+}
+
+# Comprueba por TCP/TLS la disponibilidad autenticada en loopback y captura únicamente el error saneado.
+comprobar_readiness_mysql() {
+  local salida_ping
+  local salida_consulta
+  local codigo_error
+
+  if salida_ping="$(docker exec --env "MYSQL_PWD=${password_root}" "${contenedor_mysql}" \
+    mysqladmin ping --ssl-mode=REQUIRED --host=127.0.0.1 --user=root 2>&1)"; then
+    :
+  else
+    codigo_error="$?"
+    detalle_readiness_mysql="$(printf 'mysqladmin exit=%s output=%s' "${codigo_error}" "${salida_ping}" \
+      | redactar_diagnosticos_mysql)"
+    return 1
+  fi
+
+  if salida_consulta="$(docker exec --env "MYSQL_PWD=${password_root}" "${contenedor_mysql}" \
+    mysql --ssl-mode=REQUIRED --batch --skip-column-names --host=127.0.0.1 --user=root \
+    --execute='SELECT 1' 2>&1)"; then
+    :
+  else
+    codigo_error="$?"
+    detalle_readiness_mysql="$(printf 'mysql SELECT 1 exit=%s output=%s' "${codigo_error}" "${salida_consulta}" \
+      | redactar_diagnosticos_mysql)"
+    return 1
+  fi
+
+  detalle_readiness_mysql=''
+  return 0
+}
 
 # Limpia únicamente los recursos efímeros identificados por esta ejecución.
 limpiar_fixture() {
   local codigo_salida="$?"
   trap - EXIT
+  if [[ "${codigo_salida}" -ne 0 && "${docker_disponible}" == 'true' \
+    && "${diagnostico_mysql_emitido}" != 'true' ]] \
+    && docker container inspect "${contenedor_mysql}" >/dev/null 2>&1; then
+    diagnosticar_mysql_fixture "${motivo_fallo_mysql}"
+  fi
   if [[ "${codigo_salida}" -ne 0 && -n "${contenedor_ssh}" ]] \
     && docker container inspect "${contenedor_ssh}" >/dev/null 2>&1; then
     echo 'SSH_FIXTURE_DIAGNOSTICS_BEGIN' >&2
@@ -29,11 +96,39 @@ limpiar_fixture() {
       || true
     echo 'SSH_FIXTURE_DIAGNOSTICS_END' >&2
   fi
-  if [[ -n "${contenedor_ssh}" ]]; then docker rm --force "${contenedor_ssh}" >/dev/null 2>&1 || true; fi
-  if [[ -n "${contenedor_mysql}" ]]; then docker rm --force "${contenedor_mysql}" >/dev/null 2>&1 || true; fi
-  if [[ -n "${red}" ]]; then docker network rm "${red}" >/dev/null 2>&1 || true; fi
-  if [[ -n "${imagen_ssh}" ]]; then docker image rm "${imagen_ssh}" >/dev/null 2>&1 || true; fi
-  rm -rf -- "${directorio_temporal}"
+  if [[ "${docker_disponible}" == 'true' ]]; then
+    if ! docker info >/dev/null 2>&1; then
+      echo 'MYSQL_FIXTURE_CLEANUP_DOCKER_UNAVAILABLE' >&2
+      codigo_salida=1
+    else
+      if [[ -n "${contenedor_ssh}" ]]; then docker rm --force "${contenedor_ssh}" >/dev/null 2>&1 || true; fi
+      if [[ -n "${contenedor_mysql}" ]]; then docker rm --force "${contenedor_mysql}" >/dev/null 2>&1 || true; fi
+      if [[ -n "${red}" ]]; then docker network rm "${red}" >/dev/null 2>&1 || true; fi
+      if [[ -n "${imagen_ssh}" ]]; then docker image rm "${imagen_ssh}" >/dev/null 2>&1 || true; fi
+
+      if [[ -n "${contenedor_ssh}" ]] && docker container inspect "${contenedor_ssh}" >/dev/null 2>&1; then
+        echo 'MYSQL_FIXTURE_CLEANUP_SSH_CONTAINER_REMAINS' >&2
+        codigo_salida=1
+      fi
+      if [[ -n "${contenedor_mysql}" ]] && docker container inspect "${contenedor_mysql}" >/dev/null 2>&1; then
+        echo 'MYSQL_FIXTURE_CLEANUP_MYSQL_CONTAINER_REMAINS' >&2
+        codigo_salida=1
+      fi
+      if [[ -n "${red}" ]] && docker network inspect "${red}" >/dev/null 2>&1; then
+        echo 'MYSQL_FIXTURE_CLEANUP_NETWORK_REMAINS' >&2
+        codigo_salida=1
+      fi
+      if [[ -n "${imagen_ssh}" ]] && docker image inspect "${imagen_ssh}" >/dev/null 2>&1; then
+        echo 'MYSQL_FIXTURE_CLEANUP_IMAGE_REMAINS' >&2
+        codigo_salida=1
+      fi
+    fi
+  fi
+  rm -rf -- "${directorio_temporal}" || codigo_salida=1
+  if [[ -e "${directorio_temporal}" ]]; then
+    echo 'MYSQL_FIXTURE_CLEANUP_TEMPORARY_DIRECTORY_REMAINS' >&2
+    codigo_salida=1
+  fi
   exit "${codigo_salida}"
 }
 
@@ -76,6 +171,7 @@ if ! docker info >/dev/null 2>&1; then
   echo 'MYSQL_FIXTURE_REQUIRES_DOCKER_ENGINE' >&2
   exit 2
 fi
+docker_disponible='true'
 if ! command -v puttygen >/dev/null 2>&1; then
   echo 'MYSQL_FIXTURE_REQUIRES_PUTTYGEN' >&2
   exit 2
@@ -120,7 +216,7 @@ generar_llaves_ssh_sinteticas() {
 # Crea solo la red, base, gateway y certificados efímeros identificados por esta ejecución.
 iniciar_contenedores_aislados() {
   docker network create "${red}" >/dev/null
-  docker run --detach --name "${contenedor_mysql}" --network "${red}" \
+  if ! docker run --detach --name "${contenedor_mysql}" --network "${red}" \
     --network-alias mysql.fixture.invalid --publish 127.0.0.1::3306 \
     --mount "type=bind,source=${directorio_tls},target=/run/mysql-tls,readonly" \
     --env MYSQL_DATABASE=portal_fixture \
@@ -129,19 +225,42 @@ iniciar_contenedores_aislados() {
     --require_secure_transport=ON \
     --ssl-ca=/run/mysql-tls/ca.pem \
     --ssl-cert=/run/mysql-tls/server-cert.pem \
-    --ssl-key=/run/mysql-tls/server-key.pem >/dev/null
+    --ssl-key=/run/mysql-tls/server-key.pem >/dev/null \
+    2>"${directorio_temporal}/mysql-container-start.stderr"; then
+    echo 'MYSQL_FIXTURE_MYSQL_CONTAINER_START_FAILED' >&2
+    motivo_fallo_mysql='container-start-failed'
+    redactar_diagnosticos_mysql \
+      < "${directorio_temporal}/mysql-container-start.stderr" >&2 || true
+    diagnosticar_mysql_fixture "${motivo_fallo_mysql}"
+    exit 3
+  fi
 
   local listo='false'
-  for _ in $(seq 1 90); do
-    if docker exec --env "MYSQL_PWD=${password_root}" "${contenedor_mysql}" \
-      mysqladmin ping --host=127.0.0.1 --user=root >/dev/null 2>&1; then
+  local motivo_fallo='startup-timeout'
+  local inicio_espera="${SECONDS}"
+  local limite_espera_segundos=180
+  local intervalo_espera_segundos=2
+  local estado_contenedor
+  while (( SECONDS - inicio_espera < limite_espera_segundos )); do
+    # Comprueba vida y autenticación desde el contenedor exacto, por loopback y como root.
+    if comprobar_readiness_mysql; then
       listo='true'
       break
     fi
-    sleep 1
+    estado_contenedor="$(docker container inspect --format '{{.State.Status}}' "${contenedor_mysql}" 2>/dev/null || true)"
+    if [[ "${estado_contenedor}" != 'running' ]]; then
+      motivo_fallo='container-exited-before-readiness'
+      break
+    fi
+    sleep "${intervalo_espera_segundos}"
   done
   if [[ "${listo}" != 'true' ]]; then
-    echo 'MYSQL_FIXTURE_DATABASE_START_TIMEOUT' >&2
+    if [[ "${motivo_fallo}" == 'startup-timeout' ]]; then
+      echo 'MYSQL_FIXTURE_DATABASE_START_TIMEOUT' >&2
+    else
+      echo 'MYSQL_FIXTURE_DATABASE_CONTAINER_EXITED' >&2
+    fi
+    motivo_fallo_mysql="${motivo_fallo}"
     exit 3
   fi
 
