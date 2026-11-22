@@ -3,6 +3,7 @@ set -Eeuo pipefail
 set +x
 
 raiz_repositorio="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "${raiz_repositorio}/scripts/mysql-fixture-grants.sh"
 identificador="$(openssl rand -hex 6)"
 red="portal-mysql-fixture-${identificador}"
 contenedor_mysql="portal-mysql-fixture-db-${identificador}"
@@ -230,6 +231,7 @@ iniciar_contenedores_aislados() {
     --ssl-key=/run/mysql-tls/server-key.pem >/dev/null \
     2>"${directorio_temporal}/mysql-container-start.stderr"; then
     echo 'MYSQL_FIXTURE_MYSQL_CONTAINER_START_FAILED' >&2
+    echo '::error title=MySQL fixture start::MYSQL_FIXTURE_MYSQL_CONTAINER_START_FAILED' >&2
     motivo_fallo_mysql='container-start-failed'
     redactar_diagnosticos_mysql \
       < "${directorio_temporal}/mysql-container-start.stderr" >&2 || true
@@ -259,8 +261,10 @@ iniciar_contenedores_aislados() {
   if [[ "${listo}" != 'true' ]]; then
     if [[ "${motivo_fallo}" == 'startup-timeout' ]]; then
       echo 'MYSQL_FIXTURE_DATABASE_START_TIMEOUT' >&2
+      echo '::error title=MySQL fixture readiness::MYSQL_FIXTURE_DATABASE_START_TIMEOUT' >&2
     else
       echo 'MYSQL_FIXTURE_DATABASE_CONTAINER_EXITED' >&2
+      echo '::error title=MySQL fixture readiness::MYSQL_FIXTURE_DATABASE_CONTAINER_EXITED' >&2
     fi
     motivo_fallo_mysql="${motivo_fallo}"
     exit 3
@@ -286,17 +290,16 @@ iniciar_contenedores_aislados() {
   privilegios="$(docker exec --env "MYSQL_PWD=${password_root}" "${contenedor_mysql}" \
     mysql --batch --skip-column-names --host=127.0.0.1 --user=root \
     --execute="SHOW GRANTS FOR 'portal_fixture_app'@'%'" 2>/dev/null)"
-  local cantidad_grants
-  cantidad_grants="$(grep -c '^GRANT ' <<< "${privilegios}" || true)"
-  if [[ "${cantidad_grants}" -ne 5 ]] \
-    || ! grep -Eiq '^GRANT USAGE ON \*\.\* TO .portal_fixture_app.@.%.$' <<< "${privilegios}" \
-    || ! grep -Eiq '^GRANT SELECT ON .portal_fixture.\.sap_sociedad. TO .portal_fixture_app.@.%.$' <<< "${privilegios}" \
-    || ! grep -Eiq '^GRANT SELECT ON .portal_fixture.\.sap_proveedor. TO .portal_fixture_app.@.%.$' <<< "${privilegios}" \
-    || ! grep -Eiq '^GRANT SELECT ON .portal_fixture.\.factura. TO .portal_fixture_app.@.%.$' <<< "${privilegios}" \
-    || ! grep -Eiq '^GRANT INSERT ON .portal_fixture.\.factura. TO .portal_fixture_app.@.%.$' <<< "${privilegios}" \
-    || grep -Eiq 'ALL PRIVILEGES|UPDATE|DELETE|CREATE|ALTER|DROP|GRANT OPTION|FILE|SUPER' \
-      <<< "${privilegios}"; then
+  local privilegios_tabla
+  privilegios_tabla="$(docker exec --env "MYSQL_PWD=${password_root}" "${contenedor_mysql}" \
+    mysql --batch --skip-column-names --host=127.0.0.1 --user=root \
+    --execute="SELECT CONCAT(TABLE_SCHEMA, '.', TABLE_NAME, ':', PRIVILEGE_TYPE) \
+      FROM information_schema.TABLE_PRIVILEGES \
+      WHERE GRANTEE = CONCAT(QUOTE('portal_fixture_app'), '@', QUOTE('%')) \
+      ORDER BY TABLE_SCHEMA, TABLE_NAME, PRIVILEGE_TYPE" 2>/dev/null)"
+  if ! validar_privilegios_minimos_mysql_fixture "${privilegios}" "${privilegios_tabla}"; then
     echo 'MYSQL_FIXTURE_MINIMAL_INSERT_GRANT_INVALID' >&2
+    echo '::error title=MySQL fixture privileges::MYSQL_FIXTURE_MINIMAL_INSERT_GRANT_INVALID' >&2
     exit 3
   fi
 

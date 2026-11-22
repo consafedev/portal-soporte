@@ -134,5 +134,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes openssl openssh-client putty-tools
 
+      - name: Validar el contrato de permisos mínimos del fixture MySQL
+        run: bash scripts/test-mysql-fixture-grants.sh
+
       - name: Ejecutar conectividad MySQL TLS/SSH contra servicios desechables
         run: pnpm test:mysql-fixture
