@@ -1,78 +1,11 @@
-/** Proyección fiscal consumida por el conector, compatible con la salida del parser RF-1. */
-export interface DatosFacturaFiscalRf1 {
-  /** UUID normalizado leído del timbre fiscal. */
-  readonly uuid: string;
-  /** RFC normalizado del emisor. */
-  readonly rfcEmisor: string;
-  /** RFC normalizado del receptor. */
-  readonly rfcReceptor: string;
-  /** Fecha fiscal literal conservada desde el XML. */
-  readonly fecha: string;
-  /** Subtotal exacto como texto decimal. */
-  readonly subtotal: string;
-  /** Descuento exacto extraído por el parser, reservado para futuras reglas de mapeo. */
-  readonly descuento: string;
-  /** Moneda declarada en el CFDI. */
-  readonly moneda: string;
-  /** Total exacto como texto decimal. */
-  readonly total: string;
-  /** Referencia de serie y folio preparada por el parser. */
-  readonly referencia: string;
-  /** Tipo de comprobante admitido por el MVP. */
-  readonly tipoComprobante: 'I';
-  /** IVA trasladado federal exacto. */
-  readonly importeIvaFAC: string;
-  /** Retención ISR federal exacta. */
-  readonly retencionIsr: string;
-  /** Retención IVA federal exacta. */
-  readonly retencionIva: string;
-  /** Retención IEPS federal exacta. */
-  readonly retencionIeps: string;
-  /** Método de pago CFDI opcional. */
-  readonly metodoPago?: string;
-  /** Forma de pago CFDI opcional. */
-  readonly formaPago?: string;
-  /** Serie original opcional. */
-  readonly serie?: string;
-  /** Folio original opcional. */
-  readonly folio?: string;
-}
+import type { EntradaMapeoFacturaRf1 } from '../../core/src/clients/rf1-insertion-ports.js';
 
-/** Campos opcionales ingresados por el operador para una factura individual. */
-export interface DocumentosFacturaRf1 {
-  /** Número de documento contable, de hasta diez caracteres. */
-  readonly documentoContable?: string | null;
-  /** Entrada de mercancía, de hasta dos mil caracteres. */
-  readonly entradaMercancia?: string | null;
-  /** Orden de compra, de hasta dos mil caracteres. */
-  readonly ordenCompra?: string | null;
-  /** Número de documento de pago, de hasta diez caracteres. */
-  readonly documentoPago?: string | null;
-}
-
-/** Contexto SAP resuelto y confirmado en la misma conexión del cliente. */
-export interface ResolucionFacturaRf1 {
-  /** Sociedad válida para el RFC receptor seleccionado. */
-  readonly sociedad: string;
-  /** Ambiente SAP leído de la misma fila de sociedad. */
-  readonly ambienteSap: string;
-  /** Proveedor único del RFC emisor dentro de sociedad y ambiente SAP. */
-  readonly idProveedor: string;
-}
-
-/** Entrada completa para mapear una vista previa autorizada a una fila de factura. */
-export interface EntradaMapeoFacturaRf1 {
-  /** Datos fiscales extraídos del XML CFDI 4.0 de ingreso. */
-  readonly factura: DatosFacturaFiscalRf1;
-  /** Resolución SAP que debe revalidarse antes de insertar. */
-  readonly resolution: ResolucionFacturaRf1;
-  /** Estado permitido por la decisión funcional del propietario. */
-  readonly estatus: 'CONTABILIZADO' | 'PAGADA';
-  /** Instante capturado por el servidor y expresado en UTC. */
-  readonly fechaCarga: Date;
-  /** Referencias opcionales capturadas por el operador. */
-  readonly documentos?: DocumentosFacturaRf1;
-}
+export type {
+  DatosFacturaFiscalRf1,
+  DocumentosFacturaRf1,
+  EntradaMapeoFacturaRf1,
+  ResolucionFacturaRf1,
+} from '../../core/src/clients/rf1-insertion-ports.js';
 
 /** Fila cerrada con nombres de columna aprobados para el destino MySQL sintético. */
 export interface FilaFacturaRf1 {

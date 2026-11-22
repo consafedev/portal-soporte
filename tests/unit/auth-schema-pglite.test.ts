@@ -93,7 +93,7 @@ async function pruebaLedgerDentroDePortal(): Promise<void> {
     "SELECT sequence_name FROM information_schema.sequences WHERE sequence_schema = 'portal'",
   );
 
-  expect(versiones.rows).toEqual([{ cantidad: 8 }]);
+  expect(versiones.rows).toEqual([{ cantidad: 9 }]);
   expect(ledgerPublico.rows).toEqual([{ existe: false }]);
   expect(tablasPortalPublicas.rows).toEqual([{ cantidad: 0 }]);
   expect(secuenciasLedger.rows).toEqual([{ sequence_name: '__drizzle_migrations_id_seq' }]);

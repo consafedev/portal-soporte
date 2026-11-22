@@ -27,6 +27,7 @@ import { registrarRutasAccesoClientes } from './routes/client-access-routes.js';
 import type { ServicioAccesoCliente } from './clients/client-access-service.js';
 import type { ServicioVistaPreviaRf1 } from './clients/rf1-preview-service.js';
 import { registrarRutasVistaPreviaRf1 } from './routes/rf1-preview-routes.js';
+import type { ServicioInsercionRf1 } from './clients/rf1-insertion-service.js';
 
 const CAMPOS_SENSIBLES_LOG = [
   'req.headers.cookie',
@@ -39,6 +40,7 @@ const CAMPOS_SENSIBLES_LOG = [
   'req.body.newPassword',
   'req.body.passwordHash',
   'req.body.token',
+  'req.body.confirmationToken',
   'req.body',
   'res.headers["set-cookie"]',
 ];
@@ -71,6 +73,8 @@ export interface DependenciasServidorAuth {
   readonly accesoClientes?: ServicioAccesoCliente;
   /** Servicio opcional de vista previa RF-1 de solo lectura y tamaño acotado. */
   readonly vistaPreviaRf1?: ServicioVistaPreviaRf1;
+  /** Servicio opcional de inserción detrás del gate global operativo. */
+  readonly insercionRf1?: ServicioInsercionRf1;
   /** Generador opcional de IDs de solicitud para aislar trazas sintéticas de integración. */
   readonly generarIdSolicitud?: () => string;
 }
@@ -204,6 +208,7 @@ export async function crearServidorAuth(
       configuracion: dependencias.configuracion,
       sesiones: dependencias.sesiones,
       vistaPrevia: dependencias.vistaPreviaRf1,
+      insercion: dependencias.insercionRf1,
       auditoria: dependencias.auditoria,
       reloj: dependencias.reloj,
     });

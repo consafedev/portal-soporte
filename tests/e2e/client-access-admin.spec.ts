@@ -158,6 +158,16 @@ test('ADMIN administra asignaciones y capacidad de vista previa sin mostrar secr
   await expect(capacidadLectura).toBeChecked();
   await expect(page.locator('.aviso-exito')).toContainText('La capacidad de lectura se actualizó.');
 
+  const capacidadEjecucion = seccionAcceso.getByRole('checkbox', {
+    name: 'Permitir inserción RF-1',
+  });
+  await expect(capacidadEjecucion).not.toBeChecked();
+  await capacidadEjecucion.check();
+  await expect(capacidadEjecucion).toBeChecked();
+  await expect(page.locator('.aviso-exito')).toContainText(
+    'La capacidad de ejecución por cliente se actualizó.',
+  );
+
   const respuesta = await page.evaluate(async (clientId) => {
     const consulta = await fetch(`/api/v1/admin/clients/${clientId}/access`, {
       credentials: 'same-origin',
@@ -176,7 +186,7 @@ test('ADMIN administra asignaciones y capacidad de vista previa sin mostrar secr
   ).toBe(true);
   expect(
     respuesta.capacidades.some((fila) => fila.capabilityId === 'rf-1:execute' && fila.enabled),
-  ).toBe(false);
+  ).toBe(true);
   const respuestaRedactada = await page.evaluate(async (clientId) => {
     const consulta = await fetch(`/api/v1/admin/clients/${clientId}/access`, {
       credentials: 'same-origin',

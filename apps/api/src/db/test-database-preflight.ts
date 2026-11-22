@@ -205,7 +205,6 @@ const restriccionesMigradasEsperadas = [
   ['auth_throttle_windows', 'auth_throttle_windows_pkey', 'p'],
   ['client_capabilities', 'client_capabilities_changed_by_user_id_users_id_fk', 'f'],
   ['client_capabilities', 'client_capabilities_client_id_clients_id_fk', 'f'],
-  ['client_capabilities', 'client_capabilities_execute_disabled_check', 'c'],
   ['client_capabilities', 'client_capabilities_id_check', 'c'],
   ['client_capabilities', 'client_capabilities_pkey', 'p'],
   ['client_sap_environments', 'client_sap_environments_client_id_clients_id_fk', 'f'],
@@ -254,25 +253,16 @@ const restriccionesMigradasEsperadas = [
   tipo: tipo!,
 }));
 
-/** Objetos añadidos en 0007 que deben faltar antes de aplicar acceso por cliente. */
-const nombresRelacionesAccesoCliente = new Set([
-  'client_capabilities',
-  'client_capabilities_pkey',
-  'client_user_assignments',
-  'client_user_assignments_active_pair_unique',
-  'client_user_assignments_pkey',
-  'client_user_assignments_user_id_idx',
-]);
-const restriccionesPreviasAccesoClienteEsperadas = restriccionesMigradasEsperadas.filter(
-  (restriccion) =>
-    restriccion.tabla !== 'client_capabilities' && restriccion.tabla !== 'client_user_assignments',
-);
-const relacionesPreviasAccesoClienteEsperadas = relacionesMigradasEsperadas.filter(
-  (relacion) => !nombresRelacionesAccesoCliente.has(relacion.nombre),
-);
-const tablasPreviasAccesoClienteEsperadas = nombresTablasAplicacion.filter(
-  (nombre) => nombre !== 'client_capabilities' && nombre !== 'client_user_assignments',
-);
+/** Estado exacto de 0007 justo antes de retirar la restricción de execute en 0008. */
+const restriccionesPreviasRf1ExecuteEsperadas = [
+  ...restriccionesMigradasEsperadas,
+  {
+    esquema: 'portal',
+    tabla: 'client_capabilities',
+    nombre: 'client_capabilities_execute_disabled_check',
+    tipo: 'c',
+  },
+].sort(compararRestricciones);
 
 /**
  * Consulta y valida en modo read-only la identidad del rol PostgreSQL de pruebas.
@@ -600,7 +590,7 @@ export function validarMismaInstanciaBasePrueba(
 }
 
 /**
- * Acepta una base vacía, el predecesor exacto de la migración 0007 o el esquema actual vacío.
+ * Acepta una base nueva, el estado exacto anterior a 0008 o el esquema actual vacío.
  * @param estado Inventario de catálogos y conteos obtenidos en modo read-only.
  * @param hashesEsperados Hashes de migración calculados desde los archivos versionados.
  * @returns Estado vacío, inmediatamente anterior a una migración o ya migrado.
@@ -617,9 +607,6 @@ export function validarEstadoEsquemaBasePrueba(
   const relaciones = [...estado.relaciones].sort(compararObjetosEsquema);
   const restricciones = [...estado.restricciones].sort(compararRestricciones);
   const restriccionesEsperadas = [...restriccionesMigradasEsperadas].sort(compararRestricciones);
-  const restriccionesPreviasEsperadas = [...restriccionesPreviasAccesoClienteEsperadas].sort(
-    compararRestricciones,
-  );
   const filasSinDatos =
     estado.filas.usuarios === 0 &&
     estado.filas.sesiones === 0 &&
@@ -669,19 +656,11 @@ export function validarEstadoEsquemaBasePrueba(
     esquemas.length === 2 && esquemas[0] === 'portal' && esquemas[1] === 'public';
   const tablasActualesEsperadas =
     JSON.stringify(tablas) === JSON.stringify([...tablasEsperadas].sort(compararObjetosEsquema));
-  const tablasPreviasEsperadas = [
-    '__drizzle_migrations',
-    ...tablasPreviasAccesoClienteEsperadas,
-  ].map((nombre) => ({ esquema: 'portal', nombre, tipo: 'BASE TABLE' }));
-  const tablasActualesPreviasEsperadas =
-    JSON.stringify(tablas) ===
-    JSON.stringify([...tablasPreviasEsperadas].sort(compararObjetosEsquema));
   const relacionesActualesEsperadas =
     JSON.stringify(relaciones) ===
     JSON.stringify([...relacionesMigradasEsperadas].sort(compararObjetosEsquema));
-  const relacionesActualesPreviasEsperadas =
-    JSON.stringify(relaciones) ===
-    JSON.stringify([...relacionesPreviasAccesoClienteEsperadas].sort(compararObjetosEsquema));
+  const restriccionesPreviasRf1ExecuteActuales =
+    JSON.stringify(restricciones) === JSON.stringify(restriccionesPreviasRf1ExecuteEsperadas);
   const restriccionesActualesEsperadas =
     JSON.stringify(restricciones) === JSON.stringify(restriccionesEsperadas);
   const secuenciasEsperadasExactas =
@@ -689,18 +668,18 @@ export function validarEstadoEsquemaBasePrueba(
     JSON.stringify([...secuenciasEsperadas].sort(compararObjetosEsquema));
   const ledgerActualEsperado = coincidenHashesDeMigracion(hashes, hashesEsperados);
   const ledgerAnteriorEsperado = coincidenHashesDeMigracion(hashes, hashesEsperados.slice(0, -1));
-  const esquemaPrevioSeguroParaMigrar =
+  const esquemaPrevioRf1ExecuteSeguro =
     hashesEsperados.length > 0 &&
     esquemasPortalEsperados &&
-    tablasActualesPreviasEsperadas &&
+    tablasActualesEsperadas &&
     secuenciasEsperadasExactas &&
-    relacionesActualesPreviasEsperadas &&
-    JSON.stringify(restricciones) === JSON.stringify(restriccionesPreviasEsperadas) &&
+    relacionesActualesEsperadas &&
+    restriccionesPreviasRf1ExecuteActuales &&
     ledgerAnteriorEsperado &&
     objetosAdicionalesLimpios &&
     filasSinDatos &&
     estado.filas.invariantes === 1;
-  if (esquemaPrevioSeguroParaMigrar) {
+  if (esquemaPrevioRf1ExecuteSeguro) {
     return 'migracion-pendiente';
   }
 
@@ -719,7 +698,6 @@ export function validarEstadoEsquemaBasePrueba(
     const diferencias = [
       ...(esquemasPortalEsperados ? [] : ['esquemas']),
       ...(tablasActualesEsperadas ? [] : ['tablas']),
-      ...(tablasActualesPreviasEsperadas || tablasActualesEsperadas ? [] : ['tablas previas']),
       ...(secuenciasEsperadasExactas ? [] : ['secuencias']),
       ...(relacionesActualesEsperadas ? [] : ['índices y relaciones']),
       ...(restriccionesActualesEsperadas ? [] : ['restricciones']),

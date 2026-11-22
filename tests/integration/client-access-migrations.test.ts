@@ -118,18 +118,10 @@ async function probarRestriccionesEnPostgresReal(): Promise<void> {
                (${clientId}, 'rf-1:execute', false, ${adminId})
       `;
 
-      await transaccion.unsafe('SAVEPOINT rf1_execute_desactivado');
-      let ejecucionRechazada = false;
-      try {
-        await transaccion`
-          UPDATE portal.client_capabilities SET enabled = true
-          WHERE client_id = ${clientId} AND capability_id = 'rf-1:execute'
-        `;
-      } catch {
-        ejecucionRechazada = true;
-        await transaccion.unsafe('ROLLBACK TO SAVEPOINT rf1_execute_desactivado');
-      }
-      expect(ejecucionRechazada).toBe(true);
+      await transaccion`
+        UPDATE portal.client_capabilities SET enabled = true
+        WHERE client_id = ${clientId} AND capability_id = 'rf-1:execute'
+      `;
 
       const filas = await transaccion<
         { activas: number; capacidadesLectura: number; ejecucionHabilitada: boolean }[]
@@ -142,7 +134,7 @@ async function probarRestriccionesEnPostgresReal(): Promise<void> {
           (SELECT enabled FROM portal.client_capabilities
            WHERE client_id = ${clientId} AND capability_id = 'rf-1:execute') AS "ejecucionHabilitada"
       `;
-      expect(filas[0]).toEqual({ activas: 1, capacidadesLectura: 1, ejecucionHabilitada: false });
+      expect(filas[0]).toEqual({ activas: 1, capacidadesLectura: 1, ejecucionHabilitada: true });
 
       throw marcadorRollback;
     });

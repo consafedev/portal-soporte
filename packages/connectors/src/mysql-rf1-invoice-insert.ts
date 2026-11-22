@@ -1,9 +1,16 @@
 import {
   ErrorMapeoFacturaRf1,
   mapearFacturaParaInsercionRf1,
-  type EntradaMapeoFacturaRf1,
   type FilaFacturaRf1,
 } from './mysql-rf1-invoice-mapper.js';
+import type {
+  EntradaMapeoFacturaRf1,
+  ResultadoInsercionFacturaRf1,
+  SesionInsercionRf1,
+  DecisionAutorizacionEscrituraRf1,
+} from '../../core/src/clients/rf1-insertion-ports.js';
+export type { ResultadoInsercionFacturaRf1 } from '../../core/src/clients/rf1-insertion-ports.js';
+export type { EntradaMapeoFacturaRf1 } from '../../core/src/clients/rf1-insertion-ports.js';
 
 /** Sentencias estáticas permitidas por la sesión de inserción RF-1. */
 export type ConsultaFacturaRf1 =
@@ -40,22 +47,6 @@ export interface EjecutorTransaccionFacturaRf1 {
   cerrar(): Promise<void>;
 }
 
-/** Resultado individual de una operación de inserción RF-1. */
-export interface ResultadoInsercionFacturaRf1 {
-  /** Estado verificable sin incluir errores del driver ni contenido fiscal. */
-  readonly status:
-    'INSERTADA_VERIFICADA' | 'YA_EXISTE' | 'RECHAZADA' | 'ERROR_REVERTIDO' | 'INDETERMINADO';
-  /** Código estable para describir un rechazo controlado. */
-  readonly errorCode?:
-    | 'RF1_CONTEXT_MISMATCH'
-    | 'RF1_CATALOG_UNAVAILABLE'
-    | 'RF1_SUPPLIER_NOT_FOUND'
-    | 'RF1_SUPPLIER_AMBIGUOUS'
-    | 'RF1_INSERT_MAPPING_INVALID'
-    | 'RF1_INSERT_DECIMAL_SCALE_UNSUPPORTED'
-    | 'RF1_SESSION_BUSY';
-}
-
 const SQL_SOCIEDADES =
   'SELECT sociedad, ambienteSap FROM sap_sociedad WHERE rfc = ? LIMIT 101' as const;
 const SQL_PROVEEDORES =
@@ -67,7 +58,12 @@ const SQL_VERIFICAR =
   'SELECT uuid, sociedad, estatus, totalFAC, creadoPor FROM factura WHERE uuid = ? LIMIT 1' as const;
 const NUMERO_PARAMETROS_INSERT = 33;
 
-/** Comprueba que SQL y aridad pertenezcan al conjunto estático de escritura RF-1. */
+/**
+ * Comprueba que SQL y aridad pertenezcan al conjunto estático de escritura RF-1.
+ * @param consulta Sentencia fija que solicita ejecutar el adaptador.
+ * @param cantidadParametros Número de parámetros enlazados a esa sentencia.
+ * @returns `true` si coinciden tanto la sentencia enumerada como su aridad aprobada.
+ */
 export function esConsultaFacturaRf1Permitida(
   consulta: string,
   cantidadParametros: number,
@@ -82,12 +78,18 @@ export function esConsultaFacturaRf1Permitida(
 }
 
 /** Ejecuta una sola factura con revalidación SAP, transacción y verificación posterior. */
-export class SesionInsercionMysqlRf1 {
+export class SesionInsercionMysqlRf1 implements SesionInsercionRf1 {
   private ocupado = false;
   private cerrada = false;
   private readonly tiempoMaximoConsultaMs: number;
 
-  /** Crea una sesión fija para una conexión/perfil; no acepta SQL, host ni tabla variables. */
+  /**
+   * Crea una sesión fija para una conexión/perfil; no acepta SQL, host ni tabla variables.
+   * @param ejecutor Adaptador transaccional que aplica el allowlist SQL y parámetros enlazados.
+   * @param tiempoMaximoConsultaMs Tiempo máximo por sentencia, limitado a 15 segundos.
+   * @returns Instancia de sesión que se cierra al terminar la operación actual.
+   * @throws Error si el timeout no es entero positivo dentro del límite permitido.
+   */
   public constructor(
     private readonly ejecutor: EjecutorTransaccionFacturaRf1,
     tiempoMaximoConsultaMs: number = 5_000,
@@ -102,8 +104,17 @@ export class SesionInsercionMysqlRf1 {
     this.tiempoMaximoConsultaMs = tiempoMaximoConsultaMs;
   }
 
-  /** Revalida catálogo/UUID e inserta una factura, con un único resultado por llamada. */
-  public async insertar(entrada: EntradaMapeoFacturaRf1): Promise<ResultadoInsercionFacturaRf1> {
+  /**
+   * Revalida catálogo/UUID, consulta permisos y escribe una factura por llamada.
+   * @param entrada Datos fiscales y contexto SAP recibidos desde el servicio de aplicación.
+   * @param autorizarEscrituraVigente Guard PostgreSQL y perfil consultado justo antes del INSERT fijo.
+   * @returns Resultado transaccional individual con estado verificable.
+   * @effects Confirma o revierte una transacción antes de cerrar esta operación.
+   */
+  public async insertar(
+    entrada: EntradaMapeoFacturaRf1,
+    autorizarEscrituraVigente?: () => Promise<DecisionAutorizacionEscrituraRf1>,
+  ): Promise<ResultadoInsercionFacturaRf1> {
     if (this.cerrada) {
       return { status: 'RECHAZADA', errorCode: 'RF1_CATALOG_UNAVAILABLE' };
     }
@@ -146,6 +157,24 @@ export class SesionInsercionMysqlRf1 {
           const rollbackCorrecto = await this.revertirSeguro();
           transaccionActiva = false;
           return rollbackCorrecto ? { status: 'YA_EXISTE' } : { status: 'INDETERMINADO' };
+        }
+
+        const decisionEscritura =
+          autorizarEscrituraVigente === undefined
+            ? 'AUTORIZADA'
+            : await autorizarEscrituraVigente();
+        if (decisionEscritura !== 'AUTORIZADA') {
+          const rollbackCorrecto = await this.revertirSeguro();
+          transaccionActiva = false;
+          return rollbackCorrecto
+            ? {
+                status: 'RECHAZADA',
+                errorCode:
+                  decisionEscritura === 'ACCESO_REVOCADO'
+                    ? 'RF1_ACCESS_REVOKED'
+                    : 'RF1_PROFILE_CHANGED',
+              }
+            : { status: 'INDETERMINADO' };
         }
 
         insertarIniciado = true;

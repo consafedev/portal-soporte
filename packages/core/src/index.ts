@@ -6,3 +6,4 @@ export * from './clients/ports.js';
 export * from './clients/client-access-ports.js';
 export * from './clients/secret-custody-ports.js';
 export * from './clients/connection-profile-ports.js';
+export * from './clients/rf1-insertion-ports.js';

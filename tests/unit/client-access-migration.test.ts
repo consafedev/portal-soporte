@@ -86,7 +86,7 @@ async function comprobarMigracionAditiva(): Promise<void> {
     "SELECT to_regclass('public.client_user_assignments') IS NOT NULL AS existe",
   );
 
-  expect(versiones.rows).toEqual([{ cantidad: 8 }]);
+  expect(versiones.rows).toEqual([{ cantidad: 9 }]);
   expect(tablas.rows.map((fila) => fila.nombre)).toEqual(
     [
       'audit_events',
@@ -145,7 +145,7 @@ async function comprobarRestriccionesReferenciales(): Promise<void> {
   ).rejects.toThrow();
 }
 
-/** Aplica deny-by-default, allowlist de capacidades y bloqueo de ejecución RF-1. */
+/** Aplica deny-by-default y permite habilitar capacidades conocidas de forma explícita. */
 async function comprobarCapacidadesPorDefecto(): Promise<void> {
   const ids = await crearIdentidadesSinteticas();
   await base.query(
@@ -163,18 +163,22 @@ async function comprobarCapacidadesPorDefecto(): Promise<void> {
     { capability_id: 'rf-1:execute', enabled: false },
     { capability_id: 'rf-1:read', enabled: false },
   ]);
+  await base.query(
+    `UPDATE portal.client_capabilities SET enabled = true
+     WHERE client_id = $1 AND capability_id = 'rf-1:execute'`,
+    [ids.clientId],
+  );
+  const ejecucionHabilitada = await base.query<{ enabled: boolean }>(
+    `SELECT enabled FROM portal.client_capabilities
+     WHERE client_id = $1 AND capability_id = 'rf-1:execute'`,
+    [ids.clientId],
+  );
+  expect(ejecucionHabilitada.rows).toEqual([{ enabled: true }]);
   await expect(
     base.query(
       `INSERT INTO portal.client_capabilities (client_id, capability_id, changed_by_user_id)
        VALUES ($1, 'rf-1:unknown', $2)`,
       [ids.clientId, ids.adminId],
-    ),
-  ).rejects.toThrow();
-  await expect(
-    base.query(
-      `UPDATE portal.client_capabilities SET enabled = true
-       WHERE client_id = $1 AND capability_id = 'rf-1:execute'`,
-      [ids.clientId],
     ),
   ).rejects.toThrow();
 }
@@ -205,7 +209,7 @@ function definirPruebasMigracionAccesoCliente(): void {
     comprobarRestriccionesReferenciales,
   );
   it(
-    'crea capacidades apagadas y bloquea IDs desconocidos o execute',
+    'crea capacidades apagadas y permite execute solo con asignación explícita',
     comprobarCapacidadesPorDefecto,
   );
   it('rechaza actor y fecha de revocación incoherentes', comprobarMetadatosDeRevocacionCoherentes);

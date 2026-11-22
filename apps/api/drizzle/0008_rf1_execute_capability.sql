@@ -1,0 +1,1 @@
+ALTER TABLE "portal"."client_capabilities" DROP CONSTRAINT "client_capabilities_execute_disabled_check";

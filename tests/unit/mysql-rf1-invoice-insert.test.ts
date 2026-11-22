@@ -168,6 +168,41 @@ describe('SesionInsercionMysqlRf1', () => {
     );
   });
 
+  it('reválida autorización justo antes del INSERT y revierte si el acceso fue revocado', async () => {
+    const ejecutor = crearEjecutor();
+    const sesion = new SesionInsercionMysqlRf1(ejecutor);
+    const autorizacionVigente = vi.fn(async () => 'ACCESO_REVOCADO' as const);
+
+    await expect(sesion.insertar(factura, autorizacionVigente)).resolves.toEqual({
+      status: 'RECHAZADA',
+      errorCode: 'RF1_ACCESS_REVOKED',
+    });
+
+    expect(autorizacionVigente).toHaveBeenCalledOnce();
+    expect(ejecutor.eventos).toContain('ROLLBACK');
+    expect(ejecutor.ejecutar).not.toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO factura'),
+      expect.anything(),
+    );
+  });
+
+  it('revierte si el perfil de destino cambia antes del INSERT', async () => {
+    const ejecutor = crearEjecutor();
+    const sesion = new SesionInsercionMysqlRf1(ejecutor);
+    const autorizacionVigente = vi.fn(async () => 'PERFIL_CAMBIADO' as const);
+
+    await expect(sesion.insertar(factura, autorizacionVigente)).resolves.toEqual({
+      status: 'RECHAZADA',
+      errorCode: 'RF1_PROFILE_CHANGED',
+    });
+
+    expect(ejecutor.eventos).toContain('ROLLBACK');
+    expect(ejecutor.ejecutar).not.toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO factura'),
+      expect.anything(),
+    );
+  });
+
   it('marca ERROR_REVERTIDO cuando el INSERT falla y el rollback termina', async () => {
     const ejecutor = crearEjecutor({
       ejecutar: vi.fn(async (consulta: ConsultaFacturaRf1) => {

@@ -231,6 +231,9 @@ async function prepararFixtures(): Promise<void> {
     async abrirLecturaRf1(): Promise<never> {
       throw new Error('RF1_CONNECTOR_NOT_CONFIGURED');
     },
+    async abrirInsercionRf1(): Promise<never> {
+      throw new Error('RF1_CONNECTOR_NOT_CONFIGURED');
+    },
   };
   const perfiles = new ServicioPerfilesConexion(
     new RepositorioPerfilesConexionPostgres(base),
@@ -526,7 +529,7 @@ describe('rutas de acceso por cliente sobre PostgreSQL aislado', () => {
     expect(cambiarCapacidad.statusCode).toBe(403);
   });
 
-  it('rf-1:execute permanece denegada y la revocación rige con la misma sesión', async () => {
+  it('ADMIN puede asignar rf-1:execute y la revocación rige con la misma sesión', async () => {
     const cookie = cookieSupport ?? '';
     const intentoHabilitarInserción = await exigirAplicacion().inject({
       method: 'PUT',
@@ -567,7 +570,7 @@ describe('rutas de acceso por cliente sobre PostgreSQL aislado', () => {
       headers: { cookie },
     });
 
-    expect(intentoHabilitarInserción.statusCode).toBe(403);
+    expect(intentoHabilitarInserción.statusCode).toBe(204);
     expect(antesDeRevocar.statusCode).toBe(200);
     expect(deshabilitarLectura.statusCode).toBe(204);
     expect(lecturaDeshabilitada.statusCode).toBe(403);

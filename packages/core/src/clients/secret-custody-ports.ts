@@ -1,3 +1,6 @@
+import type { SesionInsercionRf1 } from './rf1-insertion-ports.js';
+export type { SesionInsercionRf1 } from './rf1-insertion-ports.js';
+
 /** Versión recuperable de una clave maestra entregada al servicio de custodia. */
 export interface VersionClaveMaestra {
   /** Identificador público de rotación; no contiene material secreto. */
@@ -172,6 +175,18 @@ export interface ClientConnectionBroker {
     secretos: Uint8Array,
     senal: AbortSignal,
   ): Promise<SesionLecturaRf1>;
+  /**
+   * Abre una sesión MySQL transaccional RF-1 acotada al inserto aprobado.
+   * @param perfil Perfil activo que ya fue autorizado por el servicio de aplicación.
+   * @param secretos Buffer mutable de credenciales cifradas descifradas; el broker lo borra.
+   * @param senal Cancelación de la solicitud autenticada.
+   * @returns Sesión limitada que el llamador debe cerrar en `finally`.
+   */
+  abrirInsercionRf1(
+    perfil: PerfilConexionPrueba,
+    secretos: Uint8Array,
+    senal: AbortSignal,
+  ): Promise<SesionInsercionRf1>;
 }
 
 /** Provee copias de las llaves maestras activas e históricas sin persistirlas en PostgreSQL. */

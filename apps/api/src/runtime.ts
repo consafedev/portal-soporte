@@ -5,6 +5,7 @@ import {
   cargarClaveHmacIntentos,
   cargarConfiguracionAuth,
   cargarConfiguracionSmtpAuth,
+  cargarConfiguracionInsercionRf1,
 } from './config.js';
 import { ServicioCorreoNoConfigurado, crearAdaptadorCorreoSmtp } from './auth/mailer.js';
 import { Argon2PasswordHasher } from './auth/argon2-password-hasher.js';
@@ -26,6 +27,7 @@ import { cargarRuntimePerfilesConexion } from './clients/connection-runtime-conf
 import { ServicioAccesoCliente } from './clients/client-access-service.js';
 import { PostgresClientAccessRepository } from './clients/postgres-client-access-repository.js';
 import { ServicioVistaPreviaRf1 } from './clients/rf1-preview-service.js';
+import { ServicioInsercionRf1 } from './clients/rf1-insertion-service.js';
 
 /** Runtime compuesto que expone HTTP privado y un cierre coordinado de recursos. */
 export interface RuntimeAuth {
@@ -54,6 +56,7 @@ export async function crearRuntimeAuth(
   variables: NodeJS.ProcessEnv = process.env,
 ): Promise<RuntimeAuth> {
   const configuracion = cargarConfiguracionAuth(variables);
+  const insercionRf1Habilitada = cargarConfiguracionInsercionRf1(variables);
   const runtimePerfiles = cargarRuntimePerfilesConexion(variables);
   const database = crearClienteBaseDatosAuth(variables);
 
@@ -100,6 +103,14 @@ export async function crearRuntimeAuth(
       repositorio,
       reloj,
     );
+    const insercionRf1 = new ServicioInsercionRf1(
+      accesoClientes,
+      perfilesConexion,
+      vistaPreviaRf1,
+      repositorio,
+      reloj,
+      insercionRf1Habilitada,
+    );
     const preferencias = new ServicioPreferenciasUsuario(
       new RepositorioPreferenciasUsuarioPostgres(database),
     );
@@ -117,6 +128,7 @@ export async function crearRuntimeAuth(
       perfilesConexion,
       accesoClientes,
       vistaPreviaRf1,
+      insercionRf1,
       preferencias,
       ...(generarIdSolicitud === undefined ? {} : { generarIdSolicitud }),
     });

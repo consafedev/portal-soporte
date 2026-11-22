@@ -5,10 +5,7 @@ import {
   establecerCapacidadClienteSchema,
   estadoCapacidadClienteAdminSchema,
 } from '../../packages/contracts/src/clients.js';
-import {
-  ServicioAccesoCliente,
-  ErrorAccesoCliente,
-} from '../../apps/api/src/clients/client-access-service.js';
+import { ServicioAccesoCliente } from '../../apps/api/src/clients/client-access-service.js';
 import type {
   EstadoAutorizacionCliente,
   RepositorioAccesoCliente,
@@ -143,21 +140,24 @@ async function probarAdminDenegadoSinCapacidad(): Promise<void> {
   });
 }
 
-/** Mantiene RF-1 execute apagado y rechaza cualquier capacidad no allowlisted. */
-async function probarCapacidadesNoEjecutables(): Promise<void> {
+/** Permite asignar rf-1:execute desde ADMIN y exige el estado vigente al SUPPORT. */
+async function probarCapacidadDeEjecucionAdministrable(): Promise<void> {
   const { servicio, repositorio } = crearServicio();
 
   await expect(
     servicio.establecerCapacidad(CLIENT_ID, 'rf-1:execute', true, actorAdmin),
-  ).rejects.toBeInstanceOf(ErrorAccesoCliente);
-  await expect(servicio.exigir(actorSupport, CLIENT_ID, 'rf-1:execute')).rejects.toMatchObject({
-    code: 'CLIENT_ACCESS_DENIED',
-    statusCode: 403,
-  });
+  ).resolves.toBeUndefined();
+  await expect(servicio.exigir(actorSupport, CLIENT_ID, 'rf-1:execute')).resolves.toBeUndefined();
   await expect(
     servicio.establecerCapacidad(CLIENT_ID, 'rf-1:unknown' as never, true, actorAdmin),
   ).rejects.toMatchObject({ code: 'CAPABILITY_UNKNOWN', statusCode: 400 });
-  expect(repositorio.establecerCapacidad).not.toHaveBeenCalled();
+  expect(repositorio.establecerCapacidad).toHaveBeenCalledTimes(1);
+  expect(repositorio.establecerCapacidad).toHaveBeenCalledWith(
+    CLIENT_ID,
+    'rf-1:execute',
+    true,
+    actorAdmin,
+  );
 }
 
 /** Requiere usuario ADMIN activo antes de permitir la administración del catálogo. */
@@ -196,7 +196,7 @@ async function probarValidacionDeIdentificadores(): Promise<void> {
   expect(repositorio.consultarEstadoAutorizacion).not.toHaveBeenCalled();
 }
 
-/** Comprueba que los contratos excluyan secretos y que execute solo se represente apagada. */
+/** Comprueba que los contratos de asignación excluyan secretos y reporten ambas capacidades. */
 function probarContratosRedactados(): void {
   const instante = '2026-11-21T12:00:00.000Z';
   const asignacionValida = {
@@ -229,7 +229,7 @@ function probarContratosRedactados(): void {
       enabled: true,
       changedAt: instante,
     }),
-  ).toBe(false);
+  ).toBe(true);
 }
 
 /** Define la suite de autorización por cliente con repositorios aislados. */
@@ -239,17 +239,17 @@ function definirPruebasAccesoCliente(): void {
   it('permite a SUPPORT asignado usar lectura habilitada', probarSupportAutorizado);
   it('deniega SUPPORT sin asignación, capacidad o estado vigente', probarDenegacionesDeAcceso);
   it('deniega RF-1 a ADMIN si falta la capacidad del cliente', probarAdminDenegadoSinCapacidad);
-  it('rechaza execute y capacidades desconocidas', probarCapacidadesNoEjecutables);
+  it(
+    'permite a ADMIN asignar rf-1:execute y exige el permiso en solicitudes actuales',
+    probarCapacidadDeEjecucionAdministrable,
+  );
   it('exige un ADMIN activo para conceder acceso', probarMutacionesSoloAdminActivo);
   it(
     'permite reactivar el historial tras revocar el acceso anterior',
     probarReasignacionTrasRevocacion,
   );
   it('valida UUID antes de consultar el repositorio', probarValidacionDeIdentificadores);
-  it(
-    'mantiene DTO redactados y rf-1:execute deshabilitada en los contratos',
-    probarContratosRedactados,
-  );
+  it('mantiene DTO redactados y permite reportar la capacidad actual', probarContratosRedactados);
 }
 
 describe('servicio de acceso al cliente y capacidades', definirPruebasAccesoCliente);

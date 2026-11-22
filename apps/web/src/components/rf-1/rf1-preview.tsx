@@ -1,9 +1,16 @@
 'use client';
 
-import { useEffect, useState, type ChangeEvent, type JSX } from 'react';
+import {
+  useEffect,
+  useState,
+  type ChangeEvent,
+  type JSX,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
 import type {
   EstatusVistaPreviaRf1Contrato,
   ResultadoArchivoVistaPreviaRf1Contrato,
+  ResultadoInsercionRf1Contrato,
   SeleccionSociedadArchivoRf1Contrato,
 } from '@portal-soporte/contracts/clients';
 import {
@@ -16,7 +23,7 @@ import {
   listarClientesAutorizados,
   listarPerfilesConexionCliente,
 } from '../../lib/client-access-api';
-import { previsualizarRf1 } from '../../lib/rf1-preview-api';
+import { ejecutarRf1, previsualizarRf1 } from '../../lib/rf1-preview-api';
 import { useUsuarioAutenticado } from '../auth/auth-user-context';
 
 const MAXIMO_ARCHIVOS = 100;
@@ -51,12 +58,20 @@ interface ResultadoConArchivo {
   readonly resultado: ResultadoArchivoVistaPreviaRf1Contrato;
 }
 
+/** Resultado de inserción vinculado al archivo local sin persistir su nombre. */
+interface ResultadoInsercionConArchivo {
+  /** Nombre local presentado únicamente en esta sesión de navegador. */
+  readonly nombreArchivo: string;
+  /** Resultado acotado que devuelve el motor transaccional RF-1. */
+  readonly resultado: ResultadoInsercionRf1Contrato;
+}
+
 /** Par elegido dentro del catálogo autorizado, ligado en estado local al índice del archivo. */
 type ParSociedadRf1 = Pick<SeleccionSociedadArchivoRf1Contrato, 'sociedad' | 'ambienteSap'>;
 
-/** Presenta lectura RF-1 por archivos, sin persistir XML ni habilitar inserciones.
- * @returns Vista accesible para seleccionar cliente, perfil, XML y pares del catálogo real.
- * @effects Conserva archivos y elecciones solo en memoria y solicita únicamente vistas previas.
+/** Presenta vista previa RF-1 y confirmación de inserción detrás de permisos y gate backend.
+ * @returns Vista accesible para seleccionar cliente, perfil, XML y pares del catálogo autorizado.
+ * @effects Conserva archivos y elecciones solo en memoria; el servidor decide si permite confirmar.
  */
 export function VistaPreviaRf1(): JSX.Element {
   const usuario = useUsuarioAutenticado();
@@ -71,12 +86,18 @@ export function VistaPreviaRf1(): JSX.Element {
   const [estatus, setEstatus] = useState<EstatusVistaPreviaRf1Contrato>('PAGADA');
   const [archivos, setArchivos] = useState<readonly File[]>([]);
   const [resultados, setResultados] = useState<readonly ResultadoConArchivo[]>([]);
+  const [tokenConfirmacion, setTokenConfirmacion] = useState<string | null>(null);
+  const [ejecucionDisponible, setEjecucionDisponible] = useState(false);
+  const [resultadosInsercion, setResultadosInsercion] = useState<
+    readonly ResultadoInsercionConArchivo[]
+  >([]);
   const [seleccionesSociedad, setSeleccionesSociedad] = useState<
     Readonly<Record<number, ParSociedadRf1>>
   >({});
   const [cargandoClientes, setCargandoClientes] = useState(true);
   const [cargandoDetalle, setCargandoDetalle] = useState(false);
   const [analizando, setAnalizando] = useState(false);
+  const [insertando, setInsertando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
 
@@ -168,6 +189,7 @@ export function VistaPreviaRf1(): JSX.Element {
     const seleccion = Array.from(evento.currentTarget.files ?? []);
     setArchivos([]);
     setResultados([]);
+    invalidarConfirmacionInsercion();
     setSeleccionesSociedad({});
     setAviso(null);
     setError(null);
@@ -194,6 +216,7 @@ export function VistaPreviaRf1(): JSX.Element {
     setPerfilId('');
     setArchivos([]);
     setResultados([]);
+    invalidarConfirmacionInsercion();
     setSeleccionesSociedad({});
     setAviso(null);
     setError(null);
@@ -214,6 +237,7 @@ export function VistaPreviaRf1(): JSX.Element {
     }
 
     setAnalizando(true);
+    invalidarConfirmacionInsercion();
     setError(null);
     setAviso(null);
     if (selecciones.length === 0) {
@@ -222,9 +246,10 @@ export function VistaPreviaRf1(): JSX.Element {
     }
     try {
       const respuesta = await previsualizarRf1(clienteId, perfilId, estatus, archivos, selecciones);
-      setSeleccionesSociedad({});
+      setTokenConfirmacion(respuesta.confirmationToken);
+      setEjecucionDisponible(respuesta.executionAvailable);
       setResultados(
-        respuesta.map((resultado, indice) => ({
+        respuesta.resultados.map((resultado, indice) => ({
           nombreArchivo: archivos[indice]?.name ?? `Archivo ${indice + 1}`,
           indiceArchivo: indice,
           resultado,
@@ -235,6 +260,13 @@ export function VistaPreviaRf1(): JSX.Element {
     } finally {
       setAnalizando(false);
     }
+  }
+
+  /** Borra ticket y resultados de cualquier lote anterior antes de cambiar contexto o entrada. */
+  function invalidarConfirmacionInsercion(): void {
+    setTokenConfirmacion(null);
+    setEjecucionDisponible(false);
+    setResultadosInsercion([]);
   }
 
   /** Inicia el análisis desde el botón accesible sin dejar rechazos sin manejar. */
@@ -251,6 +283,7 @@ export function VistaPreviaRf1(): JSX.Element {
     indiceArchivo: number,
     sociedad: ParSociedadRf1 | undefined,
   ): void {
+    invalidarConfirmacionInsercion();
     setSeleccionesSociedad((actuales) => {
       const siguientes = { ...actuales };
       if (sociedad === undefined) {
@@ -276,6 +309,55 @@ export function VistaPreviaRf1(): JSX.Element {
     void analizarArchivos(selecciones);
   }
 
+  /**
+   * Ejecuta solamente un lote READY con confirmación opaca y CSRF de la sesión actual.
+   * @returns Promesa que concluye después de presentar un resultado por archivo.
+   * @effects Envía los XML al endpoint específico solo con gate, token y autorización disponibles.
+   */
+  async function manejarInsercion(): Promise<void> {
+    if (
+      tokenConfirmacion === null ||
+      !ejecucionDisponible ||
+      !todosLosResultadosListos ||
+      insertando
+    ) {
+      return;
+    }
+    setInsertando(true);
+    setError(null);
+    setAviso(null);
+    try {
+      const selecciones = Object.entries(seleccionesSociedad).map(([indice, sociedad]) => ({
+        indiceArchivo: Number(indice),
+        ...sociedad,
+      }));
+      const respuesta = await ejecutarRf1(
+        clienteId,
+        perfilId,
+        estatus,
+        archivos,
+        tokenConfirmacion,
+        selecciones,
+      );
+      setResultadosInsercion(
+        respuesta.map((resultado, indice) => ({
+          nombreArchivo: archivos[indice]?.name ?? `Archivo ${indice + 1}`,
+          resultado,
+        })),
+      );
+      setTokenConfirmacion(null);
+      setEjecucionDisponible(false);
+      setAviso(
+        'La solicitud de inserción terminó. Revisa el resultado individual de cada archivo.',
+      );
+    } catch (rechazo: unknown) {
+      invalidarConfirmacionInsercion();
+      setError(mensajeError(rechazo));
+    } finally {
+      setInsertando(false);
+    }
+  }
+
   const indicesSociedadPendientes = resultados.flatMap(({ indiceArchivo, resultado }) =>
     resultado.status === 'NEEDS_SELECTION' ? [indiceArchivo] : [],
   );
@@ -284,6 +366,8 @@ export function VistaPreviaRf1(): JSX.Element {
     indicesSociedadPendientes.every(
       (indiceArchivo) => seleccionesSociedad[indiceArchivo] !== undefined,
     );
+  const todosLosResultadosListos =
+    resultados.length > 0 && resultados.every(({ resultado }) => resultado.status === 'READY');
 
   return (
     <div className="pagina-contenido pagina-rf1">
@@ -296,7 +380,8 @@ export function VistaPreviaRf1(): JSX.Element {
       </header>
 
       <p className="aviso-informativo aviso-rf1" role="note">
-        Solo vista previa; no se modifica la base.
+        La vista previa es de solo lectura; cualquier inserción requiere confirmación explícita y
+        permisos vigentes.
       </p>
 
       {error !== null ? (
@@ -327,7 +412,12 @@ export function VistaPreviaRf1(): JSX.Element {
           <div className="formulario-rf1">
             <div className="campo">
               <label htmlFor="rf1-cliente">Cliente</label>
-              <select id="rf1-cliente" value={clienteId} onChange={manejarCambioCliente}>
+              <select
+                id="rf1-cliente"
+                value={clienteId}
+                onChange={manejarCambioCliente}
+                disabled={insertando}
+              >
                 <option value="">Selecciona un cliente</option>
                 {clientes.map((cliente) => (
                   <option key={cliente.id} value={cliente.id}>
@@ -362,10 +452,11 @@ export function VistaPreviaRf1(): JSX.Element {
                   <select
                     id="rf1-perfil"
                     value={perfilId}
-                    disabled={cargandoDetalle || perfiles.length === 0}
+                    disabled={cargandoDetalle || insertando || perfiles.length === 0}
                     onChange={(evento) => {
                       setPerfilId(evento.currentTarget.value);
                       setResultados([]);
+                      invalidarConfirmacionInsercion();
                       setSeleccionesSociedad({});
                     }}
                   >
@@ -394,8 +485,10 @@ export function VistaPreviaRf1(): JSX.Element {
                     onChange={(evento) => {
                       setEstatus(evento.currentTarget.value as EstatusVistaPreviaRf1Contrato);
                       setResultados([]);
+                      invalidarConfirmacionInsercion();
                       setSeleccionesSociedad({});
                     }}
+                    disabled={insertando}
                   >
                     <option value="PAGADA">Pagada</option>
                     <option value="CONTABILIZADO">Contabilizada</option>
@@ -411,6 +504,7 @@ export function VistaPreviaRf1(): JSX.Element {
                       accept=".xml,application/xml,text/xml"
                       multiple
                       onChange={seleccionarArchivos}
+                      disabled={insertando}
                     />
                     <p className="texto-secundario">
                       Hasta {MAXIMO_ARCHIVOS} archivos XML, {formatearBytes(MAXIMO_BYTES_ARCHIVO)}{' '}
@@ -435,7 +529,11 @@ export function VistaPreviaRf1(): JSX.Element {
                   className="boton-primario"
                   type="button"
                   disabled={
-                    cargandoDetalle || analizando || perfilId.length === 0 || archivos.length === 0
+                    cargandoDetalle ||
+                    analizando ||
+                    insertando ||
+                    perfilId.length === 0 ||
+                    archivos.length === 0
                   }
                   onClick={manejarAnalisis}
                 >
@@ -470,6 +568,51 @@ export function VistaPreviaRf1(): JSX.Element {
               </button>
             </div>
           ) : null}
+          {todosLosResultadosListos ? (
+            <section className="panel-confirmacion-rf1" aria-labelledby="rf1-confirmar-titulo">
+              <h2 id="rf1-confirmar-titulo">Inserción de facturas</h2>
+              <p>
+                Se solicitará insertar {resultados.length}{' '}
+                {resultados.length === 1 ? 'factura' : 'facturas'} como{' '}
+                {estatus === 'PAGADA' ? 'PAGADA' : 'CONTABILIZADO'} en el perfil seleccionado.
+                Revisa los resultados anteriores antes de confirmar.
+              </p>
+              {!ejecucionDisponible || tokenConfirmacion === null ? (
+                <p className="texto-secundario" role="note">
+                  La inserción está deshabilitada para este cliente o por la compuerta global del
+                  servidor.
+                </p>
+              ) : null}
+              <button
+                className="boton-primario"
+                type="button"
+                disabled={!ejecucionDisponible || tokenConfirmacion === null || insertando}
+                onClick={() => void manejarInsercion()}
+              >
+                {insertando
+                  ? 'Insertando…'
+                  : `Confirmar inserción de ${resultados.length} ${resultados.length === 1 ? 'factura' : 'facturas'}`}
+              </button>
+              {insertando ? (
+                <p className="texto-secundario" role="status" aria-live="polite">
+                  Procesando el lote en orden; cada factura recibe su propio resultado.
+                </p>
+              ) : null}
+            </section>
+          ) : null}
+          {resultadosInsercion.length > 0 ? (
+            <section aria-labelledby="rf1-resultados-insercion-titulo">
+              <h2 id="rf1-resultados-insercion-titulo">Resultado de inserción</h2>
+              <ul className="lista-resultados-insercion-rf1" role="status">
+                {resultadosInsercion.map(({ nombreArchivo, resultado }, indice) => (
+                  <li key={`${nombreArchivo}-${indice}`}>
+                    <strong>{nombreArchivo}</strong>
+                    <span>{etiquetaResultadoInsercion(resultado)}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
         </>
       ) : null}
     </div>
@@ -496,7 +639,16 @@ function TablaResultados({
   return (
     <section className="seccion-resultados-rf1" aria-labelledby="rf1-resultados-titulo">
       <h2 id="rf1-resultados-titulo">Resultados</h2>
-      <div className="contenedor-tabla-rf1">
+      <p className="ayuda-tabla-rf1">
+        Desplaza la tabla horizontalmente para consultar todas las columnas.
+      </p>
+      <div
+        className="contenedor-tabla-rf1"
+        role="region"
+        aria-label="Tabla de resultados RF-1, desplázate horizontalmente para ver todas las columnas"
+        tabIndex={0}
+        onKeyDown={manejarTecladoTablaResultados}
+      >
         <table aria-label="Resultados de vista previa RF-1">
           <thead>
             <tr>
@@ -526,6 +678,37 @@ function TablaResultados({
       </div>
     </section>
   );
+}
+
+/** Desplaza las columnas de la tabla cuando la región accesible recibe el foco.
+ * @param evento - Tecla del navegador dentro de la región de resultados RF-1.
+ * @returns Nada; ignora teclas ajenas a la navegación horizontal.
+ * @effects Ajusta `scrollLeft` y cancela la acción predeterminada en teclas atendidas.
+ */
+function manejarTecladoTablaResultados(evento: ReactKeyboardEvent<HTMLDivElement>): void {
+  const region = evento.currentTarget;
+  const distancia = Math.max(80, Math.round(region.clientWidth * 0.8));
+
+  switch (evento.key) {
+    case 'ArrowRight':
+      region.scrollLeft += distancia;
+      evento.preventDefault();
+      break;
+    case 'ArrowLeft':
+      region.scrollLeft -= distancia;
+      evento.preventDefault();
+      break;
+    case 'Home':
+      region.scrollLeft = 0;
+      evento.preventDefault();
+      break;
+    case 'End':
+      region.scrollLeft = region.scrollWidth;
+      evento.preventDefault();
+      break;
+    default:
+      break;
+  }
 }
 
 /** Renderiza resultado y, si aplica, el selector nativo limitado al catálogo recibido.
@@ -684,4 +867,26 @@ function etiquetaEstado(resultado: ResultadoArchivoVistaPreviaRf1Contrato): stri
     return 'Pendiente de selección';
   }
   return 'Bloqueada';
+}
+
+/**
+ * Traduce cada resultado de escritura a una frase breve sin detalles de MySQL.
+ * @param resultado Estado individual redactado que devolvió el backend.
+ * @returns Etiqueta en español sin SQL, credenciales ni mensajes del driver.
+ */
+function etiquetaResultadoInsercion(resultado: ResultadoInsercionRf1Contrato): string {
+  switch (resultado.status) {
+    case 'INSERTADA_VERIFICADA':
+      return 'Insertada y verificada';
+    case 'YA_EXISTE':
+      return 'El UUID ya existe; no se insertó';
+    case 'ERROR_REVERTIDO':
+      return 'Error; la transacción se revirtió';
+    case 'INDETERMINADO':
+      return 'Resultado indeterminado; requiere revisión antes de reintentar';
+    case 'RECHAZADA':
+      return resultado.errorCode === 'RF1_ACCESS_REVOKED'
+        ? 'Acceso revocado; no se insertó'
+        : 'Operación rechazada';
+  }
 }

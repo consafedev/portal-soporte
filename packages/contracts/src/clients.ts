@@ -425,13 +425,13 @@ export const estadoCapacidadClienteAdminSchema = Type.Union(
       {
         clientId: Type.String({ pattern: PATRON_UUID_CLIENTE }),
         capabilityId: Type.Literal('rf-1:execute'),
-        enabled: Type.Literal(false),
+        enabled: Type.Boolean(),
         changedAt: Type.Union([Type.String({ pattern: PATRON_FECHA_CLIENTE }), Type.Null()]),
       },
       { additionalProperties: false },
     ),
   ],
-  { description: 'Capacidad persistida; rf-1:execute solo puede aparecer deshabilitada.' },
+  { description: 'Capacidad persistida; ejecución requiere además el gate global del servidor.' },
 );
 
 /** Tipo de respuesta con el estado actual de una capacidad por cliente. */
@@ -579,6 +579,49 @@ export const resultadosVistaPreviaRf1Schema = Type.Array(resultadoArchivoVistaPr
 
 /** Tipo de respuesta HTTP con resultados por CFDI en el lote de lectura. */
 export type ResultadosVistaPreviaRf1Contrato = Static<typeof resultadosVistaPreviaRf1Schema>;
+
+/** Respuesta del endpoint de vista previa con disponibilidad explícita de ejecución. */
+export const respuestaVistaPreviaRf1Schema = Type.Object(
+  {
+    resultados: resultadosVistaPreviaRf1Schema,
+    executionAvailable: Type.Boolean(),
+    confirmationToken: Type.Union([Type.String({ pattern: '^[A-Za-z0-9_-]{43}$' }), Type.Null()]),
+  },
+  {
+    additionalProperties: false,
+    description: 'Vista previa sin caché y confirmación opaca opcional de un solo uso.',
+  },
+);
+
+/** Tipo de respuesta HTTP de preview y disponibilidad de inserción. */
+export type RespuestaVistaPreviaRf1Contrato = Static<typeof respuestaVistaPreviaRf1Schema>;
+
+/** Resultado permitido de ejecución por factura, sin detalles del conector ni credenciales. */
+export const resultadoInsercionRf1Schema = Type.Object(
+  {
+    status: Type.Union([
+      Type.Literal('INSERTADA_VERIFICADA'),
+      Type.Literal('YA_EXISTE'),
+      Type.Literal('RECHAZADA'),
+      Type.Literal('ERROR_REVERTIDO'),
+      Type.Literal('INDETERMINADO'),
+    ]),
+    errorCode: Type.Optional(Type.String({ pattern: '^RF1_[A-Z0-9_]{1,64}$' })),
+  },
+  { additionalProperties: false },
+);
+
+/** Colección de estados individuales devueltos tras solicitar ejecución RF-1. */
+export const resultadosInsercionRf1Schema = Type.Array(resultadoInsercionRf1Schema, {
+  minItems: 1,
+  maxItems: 100,
+});
+
+/** Tipo de un resultado de inserción por factura. */
+export type ResultadoInsercionRf1Contrato = Static<typeof resultadoInsercionRf1Schema>;
+
+/** Tipo de lista de resultados de inserción RF-1. */
+export type ResultadosInsercionRf1Contrato = Static<typeof resultadosInsercionRf1Schema>;
 
 /** Tipo de entrada de escritura de una capacidad por cliente. */
 export type SolicitudEstablecerCapacidadCliente = Static<typeof establecerCapacidadClienteSchema>;
