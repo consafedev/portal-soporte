@@ -1,6 +1,6 @@
 # Procedimiento operativo — Recuperación del llavero de clientes
 
-**Estado:** procedimiento preparado; no provisionado ni probado en Debian.
+**Estado:** keyring provisionado; recuperación independiente, activación de runtime, rollback exacto y reactivación final verificados el 2026-11-22. No se han creado perfiles ni sobres de clientes.
 **Ámbito:** PS-005.2; llaves maestras de cifrado de credenciales de conexiones.
 **Última revisión:** 2026-11-21.
 
@@ -59,4 +59,33 @@ Antes de almacenar credenciales, el responsable de operaciones debe aprobar la u
 - Si no se han creado sobres, deshabilitar la custodia y retirar únicamente el archivo nuevo siguiendo su ruta exacta y una revisión operativa.
 - Si ya existen sobres, no borrar ni recrear el llavero. Restaurar todas las versiones requeridas desde el respaldo aprobado y validar con una copia de BD aislada.
 - Si hay sospecha de exposición de una llave, preservar evidencia, revocar el acceso al archivo y planificar reenvoltura/rotación; retirar una versión solo después de verificar cobertura.
-- Estado actual: no hay evidencia de llavero productivo provisionado, credenciales de clientes guardadas ni respaldo de llavero recuperable probado por esta tarea.
+- No se habilita este mecanismo para SUPPORT ni para descifrado de perfiles salvo por operaciones de negocio autorizadas del backend.
+
+## Preflight PS-005.3 — 2026-11-21
+
+- Identidad validada mediante la llave SSH dedicada y `StrictHostKeyChecking`: `serverAlcazar` (`daniel@10.18.170.44`).
+- `portal-soporte-api.service`: `active`; archivo protegido de entorno `/etc/portal-soporte/api.env`.
+- No están configuradas `PORTAL_MASTER_KEYRING_PATH` ni `PORTAL_MASTER_KEYRING_GID`.
+- Consulta agregada de solo lectura en `portal_soporte.portal.client_connection_profiles`: 0 perfiles y 0 referencias a versiones de llave. No se seleccionó ni leyó ningún sobre.
+- No se modificaron archivos, servicios ni bases de datos. El preflight repetible quedó en `.superpowers/sdd/2026-11-21-ps0053-keyring-fixtures/task-1-preflight.ps1` (archivo local ignorado).
+- Resultado: no hay llaves ni sobres existentes que puedan sobrescribirse; el aprovisionamiento aún requiere completar y probar una copia independiente de recuperación antes de habilitar custodia.
+
+## Aprovisionamiento y recuperación verificada PS-005.3 — 2026-11-21
+
+- Servidor validado con llave SSH dedicada y comprobación estricta de host: `serverAlcazar` (`daniel@10.18.170.44`).
+- Archivo operativo: `/etc/portal-soporte/client-keyring.json`; versión `psk-20261121-a867d43d8f266051`; `root:portal-soporte`, modo `0640`, un enlace duro, 160 bytes. El directorio sigue siendo `root:portal-soporte`, modo `0750`.
+- La llave se creó únicamente después del preflight que encontró cero perfiles y cero referencias de versión. No se sobrescribió una llave preexistente; los perfiles siguen siendo cero.
+- Respaldo cifrado GPG AES-256, fuera del repositorio: `C:\Users\GLOUU\AppData\Local\PortalSoporte\KeyringRecovery\20261121T204519Z-1ef6f0c4\portal-client-keyring.json.gpg`.
+- La credencial de recuperación se guarda en Windows Credential Manager, bajo la cuenta local de la propietaria, con destino `PortalSoporte-KeyringRecovery-20261121T204519Z-1ef6f0c4`. No se guardó junto al archivo cifrado, en Git, WORKLOG ni chat.
+- Restauración verificada el 2026-11-21: el archivo cifrado se descifró hacia un directorio temporal exclusivo en Debian; el proveedor real `ProveedorClavesMaestrasArchivo` aceptó la versión restaurada y sus permisos. El `ServicioCifradoSecretos` cifró/descifró una carga sintética y rechazó el mismo sobre al cambiar el contexto autenticado. No se imprimieron bytes ni hashes; las cargas y directorios temporales se limpiaron y la comprobación posterior confirmó que no quedaron directorios remotos `restore-verify-*`.
+- La configuración de runtime aún no contiene `PORTAL_MASTER_KEYRING_PATH` ni `PORTAL_MASTER_KEYRING_GID`; no se ha habilitado custodia en API ni se han creado sobres de clientes.
+- Un primer intento de generar el respaldo dejó el archivo cifrado `C:\Users\GLOUU\AppData\Local\PortalSoporte\KeyringRecovery\20261121T203611Z-58865da0\portal-client-keyring.json.gpg` sin una credencial recuperable asociada. Se conserva sin alterarlo; no es el respaldo válido ni fue usado para restaurar.
+- Un directorio local de prueba anterior contiene únicamente material sintético; una solicitud de limpieza fue bloqueada por la política automática. Se deja sin tocar y se reporta como residuo de prueba, no como material productivo.
+
+## Activación final y rollback verificado — 2026-11-22
+
+- Se verificó de nuevo la recuperación independiente desde `C:\Users\GLOUU\AppData\Local\PortalSoporte\KeyringRecovery\20261121T204519Z-1ef6f0c4\portal-client-keyring.json.gpg`; el material restaurado se usó solo en un directorio remoto temporal exacto, con limpieza comprobada.
+- Se ejerció una prueba de rollback restaurando byte por byte `/etc/portal-soporte/api.env` desde `/etc/portal-soporte/api.env.ps0053-20261122T071752Z.bak`; la API arrancó con el proveedor desactivado y los healthchecks locales pasaron.
+- Después se habilitó la configuración final mediante `PORTAL_MASTER_KEYRING_PATH` y `PORTAL_MASTER_KEYRING_GID`; la copia protegida previa es `/etc/portal-soporte/api.env.ps0053-20261122T072519Z.bak` (`root:portal-soporte`, modo `0640`). Solo se reiniciaron `portal-soporte-api.service` y `portal-soporte-web.service`.
+- Tras la reactivación, ambos servicios quedaron `active`, `/login` y CSRF locales respondieron 200 y los listeners siguieron en `127.0.0.1:18840/18841`. El runtime cargó la configuración del archivo real; el servicio cifró/descifró datos sintéticos y rechazó un AAD distinto.
+- El keyring tiene un respaldo recuperable independiente. No se creó ningún sobre, perfil ni credencial de cliente; la allowlist operacional de destinos continúa vacía. Esta verificación no autoriza ni habilita conexiones a bases de clientes.
