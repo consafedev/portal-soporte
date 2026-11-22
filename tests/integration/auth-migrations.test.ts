@@ -79,15 +79,15 @@ async function verificarPostgresAislado(): Promise<void> {
     SELECT
       (SELECT count(*)::int FROM information_schema.tables WHERE table_schema = 'portal' AND table_name <> '__drizzle_migrations') AS "tablasPortal",
       to_regclass('portal.__drizzle_migrations') IS NOT NULL AS "ledgerPortal",
-      (SELECT count(*)::int FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('audit_events', 'auth_invariants', 'auth_throttle_windows', 'client_connection_profiles', 'client_sap_environments', 'clients', 'recovery_tokens', 'sessions', 'users')) AS "tablasAuthPublicas"
+      (SELECT count(*)::int FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('audit_events', 'auth_invariants', 'auth_throttle_windows', 'client_capabilities', 'client_connection_profiles', 'client_sap_environments', 'client_user_assignments', 'clients', 'recovery_tokens', 'sessions', 'users')) AS "tablasAuthPublicas"
   `;
   if (
-    estadoMigrado?.tablasPortal !== 9 ||
+    estadoMigrado?.tablasPortal !== 11 ||
     !estadoMigrado.ledgerPortal ||
     estadoMigrado.tablasAuthPublicas !== 0
   ) {
     throw new Error(
-      'La configuración global no aisló las nueve tablas del Portal y su ledger dentro de portal.',
+      'La configuración global no aisló las once tablas del Portal y su ledger dentro de portal.',
     );
   }
 }
@@ -257,6 +257,8 @@ async function pruebaMigracionLimpia(): Promise<void> {
       'users',
       'clients',
       'client_connection_profiles',
+      'client_capabilities',
+      'client_user_assignments',
       'client_sap_environments',
     ].sort(),
   );
@@ -277,7 +279,7 @@ async function pruebaMigracionRepetible(): Promise<void> {
     SELECT count(*)::int AS cantidad FROM portal.auth_invariants
   `;
 
-  expect(versiones[0]?.cantidad).toBe(7);
+  expect(versiones[0]?.cantidad).toBe(8);
   expect(invariantes[0]?.cantidad).toBe(1);
 }
 

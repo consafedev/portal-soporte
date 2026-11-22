@@ -15,7 +15,7 @@ export interface RuntimePerfilesConexion {
   readonly custodia: ServicioCifradoSecretos | null;
   /** Destinos de red fijados desde configuración operacional protegida. */
   readonly politica: PoliticaDestinosConexion;
-  /** Broker limitado a una conexión y una consulta constante de solo lectura. */
+  /** Broker limitado a una conexión y consultas RF-1 preparadas de solo lectura. */
   readonly broker: ClientConnectionBrokerMySql;
 }
 

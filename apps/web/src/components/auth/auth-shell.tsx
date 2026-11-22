@@ -147,6 +147,12 @@ export function MarcoAutenticado({
           <Link href="/dashboard" aria-current={rutaActual === '/dashboard' ? 'page' : undefined}>
             Inicio
           </Link>
+          <Link
+            href="/modules/rf-1"
+            aria-current={rutaActual === '/modules/rf-1' ? 'page' : undefined}
+          >
+            RF-1
+          </Link>
           {usuario.role === 'ADMIN' ? (
             <>
               <Link

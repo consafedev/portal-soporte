@@ -16,6 +16,7 @@ import type {
   ContextoSobreSecreto,
   PerfilConexionPrueba,
   ResultadoPruebaConexion,
+  SesionLecturaRf1,
 } from '../../../../packages/core/src/clients/secret-custody-ports.js';
 import type { RelojAuth } from '../../../../packages/core/src/auth/ports.js';
 import type { PoliticaDestinosConexion, ServicioCifradoSecretos } from '@portal-soporte/connectors';
@@ -33,8 +34,13 @@ export class ErrorPerfilesConexion extends Error {
       | 'CLIENT_NOT_FOUND'
       | 'SECRET_CUSTODY_DISABLED'
       | 'SECRET_CUSTODY_UNAVAILABLE'
-      | 'SECRET_PACKAGE_TOO_LARGE',
-    public readonly statusCode: 400 | 404 | 409 | 413 | 422 | 503,
+      | 'SECRET_PACKAGE_TOO_LARGE'
+      | 'SECRET_PACKAGE_INVALID'
+      | 'CONNECTOR_BUSY'
+      | 'CONNECTION_FAILED'
+      | 'CONNECTION_TIMEOUT'
+      | 'REQUEST_ABORTED',
+    public readonly statusCode: 400 | 404 | 409 | 413 | 422 | 502 | 503 | 504,
   ) {
     super(code);
     this.name = 'ErrorPerfilesConexion';
@@ -225,6 +231,48 @@ export class ServicioPerfilesConexion {
     return resultado;
   }
 
+  /**
+   * Descifra temporalmente un perfil activo y abre lecturas RF-1 limitadas.
+   * El llamador debe autorizar cliente, rol y capacidad vigente antes de invocar este método.
+   * @param clientId Cliente al que pertenece el perfil.
+   * @param profileId Perfil activo asociado al cliente.
+   * @param senal Cancelación de la operación que debe propagarse al socket.
+   * @returns Sesión de solo lectura que el llamador debe cerrar en `finally`.
+   * @throws ErrorPerfilesConexion si el perfil, destino o custodia no están disponibles.
+   */
+  public async abrirLecturaRf1(
+    clientId: string,
+    profileId: string,
+    senal: AbortSignal,
+  ): Promise<SesionLecturaRf1> {
+    const perfil = await this.repositorio.obtenerParaPrueba(clientId, profileId);
+    if (perfil === null) {
+      throw new ErrorPerfilesConexion('PROFILE_NOT_FOUND', 404);
+    }
+    this.exigirDestinoPermitido(
+      perfil.destinoMySqlId,
+      perfil.gatewaySshId === null ? undefined : perfil.gatewaySshId,
+    );
+    const custodia = this.exigirCustodia();
+    let secreto: Buffer | null = null;
+    try {
+      secreto = await custodia.descifrar(perfil.sobre, crearContextoSobre(clientId, profileId));
+      const solicitud: PerfilConexionPrueba = {
+        id: perfil.id,
+        clientId: perfil.clientId,
+        tipo: perfil.tipo,
+        destinoMySqlId: perfil.destinoMySqlId,
+        ...(perfil.gatewaySshId === null ? {} : { gatewaySshId: perfil.gatewaySshId }),
+        baseDatos: perfil.baseDatos,
+      };
+      return await this.broker.abrirLecturaRf1(solicitud, secreto, senal);
+    } catch (error: unknown) {
+      throw convertirErrorLecturaRf1(error);
+    } finally {
+      secreto?.fill(0);
+    }
+  }
+
   /** Comprueba y resuelve destinos desde allowlist operacional, nunca desde host API. */
   private exigirDestinoPermitido(destinoMySqlId: string, gatewaySshId?: string): void {
     if (
@@ -353,4 +401,40 @@ function obtenerCodigoErrorCustodia(error: unknown): string | undefined {
     ].includes(code)
     ? code
     : undefined;
+}
+
+/** Traduce fallos de custodia y red a errores públicos sin copiar detalles internos. */
+function convertirErrorLecturaRf1(error: unknown): ErrorPerfilesConexion {
+  if (error instanceof ErrorPerfilesConexion) {
+    return error;
+  }
+  const codigoCustodia = obtenerCodigoErrorCustodia(error);
+  if (codigoCustodia !== undefined) {
+    const noDisponible =
+      codigoCustodia === 'KEY_VERSION_UNAVAILABLE' || codigoCustodia === 'MASTER_KEY_UNAVAILABLE';
+    return new ErrorPerfilesConexion(
+      noDisponible ? 'SECRET_CUSTODY_UNAVAILABLE' : 'SECRET_PACKAGE_INVALID',
+      noDisponible ? 503 : 422,
+    );
+  }
+  const codigo = error instanceof Error ? error.message : '';
+  if (codigo === 'CONNECTOR_BUSY') {
+    return new ErrorPerfilesConexion('CONNECTOR_BUSY', 503);
+  }
+  if (codigo === 'RF1_CONNECTION_TIMEOUT') {
+    return new ErrorPerfilesConexion('CONNECTION_TIMEOUT', 504);
+  }
+  if (codigo === 'RF1_SESSION_ABORTED') {
+    return new ErrorPerfilesConexion('REQUEST_ABORTED', 400);
+  }
+  if (codigo === 'PROFILE_INVALID') {
+    return new ErrorPerfilesConexion('PROFILE_CONFIGURATION_INVALID', 422);
+  }
+  if (codigo === 'DESTINATION_NOT_ALLOWED') {
+    return new ErrorPerfilesConexion('DESTINATION_NOT_ALLOWED', 422);
+  }
+  if (codigo === 'INVALID_CREDENTIALS' || codigo === 'SSH_KEY_FORMAT_UNSUPPORTED') {
+    return new ErrorPerfilesConexion('SECRET_PACKAGE_INVALID', 422);
+  }
+  return new ErrorPerfilesConexion('CONNECTION_FAILED', 502);
 }

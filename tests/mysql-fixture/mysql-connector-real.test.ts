@@ -138,6 +138,34 @@ async function probarConexion(
   return { code: resultado.code, secretos: credenciales };
 }
 
+/** Ejecuta las lecturas RF-1 contra el catálogo exclusivamente sintético del fixture. */
+async function probarLecturasRf1(perfil: PerfilConexionPrueba): Promise<void> {
+  const secretos = crearCredenciales({ ssh: perfil.tipo === 'MYSQL_SSH' });
+  const broker = crearBroker({}, perfil);
+  const sesion = await broker.abrirLecturaRf1(perfil, secretos, new AbortController().signal);
+  try {
+    const sociedades = await sesion.buscarSociedadesPorRfc(' xaxx010101000 ');
+    expect(sociedades).toHaveLength(2);
+    expect(new Set(sociedades.map((fila) => `${fila.sociedad}:${fila.ambienteSap}`))).toEqual(
+      new Set(['1000:E1P', '2000:OPE']),
+    );
+    await expect(
+      sesion.buscarProveedoresPorContexto('xaxx010101000', '1000', 'e1p'),
+    ).resolves.toEqual([{ idProveedor: 'PROV000001' }]);
+    await expect(
+      sesion.buscarProveedoresPorContexto('XAXX010101000', '2000', 'OPE'),
+    ).resolves.toEqual([{ idProveedor: 'PROV000002' }]);
+    await expect(
+      sesion.buscarProveedoresPorContexto('COSC8001137NA', '1000', 'E1P'),
+    ).resolves.toEqual([{ idProveedor: 'PROV000003' }, { idProveedor: 'PROV000004' }]);
+    await expect(sesion.existeUuid('550e8400-e29b-41d4-a716-446655440001')).resolves.toBe(true);
+    await expect(sesion.existeUuid('550e8400-e29b-41d4-a716-446655440002')).resolves.toBe(false);
+  } finally {
+    await sesion.cerrar();
+  }
+  expect([...secretos].every((byte) => byte === 0)).toBe(true);
+}
+
 /** Verifica selectivo TCP/TLS directo, credenciales erróneas y validación de CA. */
 async function probarTcpTlsDirecto(): Promise<void> {
   const correcto = await probarConexion();
@@ -290,7 +318,13 @@ describe('conector MySQL real con servicios sintéticos efímeros', () => {
     'ejecuta SELECT 1 con TCP/TLS y falla de forma controlada con CA o credenciales inválidas',
     probarTcpTlsDirecto,
   );
+  it('resuelve catálogos RF-1 con TCP/TLS y cuenta MySQL de solo lectura', async () => {
+    await probarLecturasRf1(perfilBase);
+  });
   it('ejecuta SELECT 1 por SSH y TLS con llave PEM', probarTunelPem);
+  it('resuelve catálogos RF-1 a través de SSH y TLS', async () => {
+    await probarLecturasRf1({ ...perfilBase, tipo: 'MYSQL_SSH', gatewaySshId: idGateway });
+  });
   it('ejecuta SELECT 1 por SSH y TLS con llave PPK v2 RSA', probarTunelPpk);
   it('rechaza fingerprint SSH incorrecta y destinos fuera de allowlist', rechazarHuellaYDestino);
   it(

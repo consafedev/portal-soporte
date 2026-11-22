@@ -44,12 +44,14 @@ function crearFactories(
   readonly ssh: FabricaTunelSsh;
   readonly mysqlDatos: DatosConexionMySql[];
   readonly consultas: string[];
+  readonly consultasRf1: { readonly sql: string; readonly parametros: readonly string[] }[];
   readonly tunelesCreados: number[];
   readonly cierresMySql: number[];
   readonly cierresSsh: number[];
 } {
   const mysqlDatos: DatosConexionMySql[] = [];
   const consultas: string[] = [];
+  const consultasRf1: { readonly sql: string; readonly parametros: readonly string[] }[] = [];
   const tunelesCreados: number[] = [];
   const cierresMySql: number[] = [];
   const cierresSsh: number[] = [];
@@ -64,6 +66,10 @@ function crearFactories(
         async consultar(sql): Promise<void> {
           consultas.push(sql);
           await consulta();
+        },
+        async ejecutarRf1(consulta, parametros): Promise<readonly unknown[]> {
+          consultasRf1.push({ sql: consulta, parametros });
+          return consulta.includes('factura') ? [{ encontrado: 1 }] : [];
         },
         async cerrar(): Promise<void> {
           cierresMySql.push(1);
@@ -88,7 +94,16 @@ function crearFactories(
     },
   };
 
-  return { mysql, ssh, mysqlDatos, consultas, tunelesCreados, cierresMySql, cierresSsh };
+  return {
+    mysql,
+    ssh,
+    mysqlDatos,
+    consultas,
+    consultasRf1,
+    tunelesCreados,
+    cierresMySql,
+    cierresSsh,
+  };
 }
 
 /** Crea una credencial sintética que debe ser borrada por el broker al terminar. */
@@ -140,6 +155,30 @@ function crearBroker(factories: ReturnType<typeof crearFactories>): ClientConnec
 }
 
 describe('ClientConnectionBrokerMySql', () => {
+  it('abre sesión RF-1 tipada, borra el paquete de entrada y libera recursos al cerrar', async () => {
+    const factories = crearFactories();
+    const secretos = crearSecretos();
+    const broker = crearBroker(factories);
+
+    const sesion = await broker.abrirLecturaRf1(
+      perfilDirecto,
+      secretos,
+      new AbortController().signal,
+    );
+    const existe = await sesion.existeUuid('550e8400-e29b-41d4-a716-446655440001');
+    await sesion.cerrar();
+
+    expect(existe).toBe(true);
+    expect(factories.consultasRf1).toEqual([
+      {
+        sql: 'SELECT 1 AS encontrado FROM factura WHERE uuid = ? LIMIT 1',
+        parametros: ['550E8400-E29B-41D4-A716-446655440001'],
+      },
+    ]);
+    expect(factories.cierresMySql).toEqual([1]);
+    expect([...secretos].every((byte) => byte === 0)).toBe(true);
+  });
+
   it('usa destino fijado, TLS verificado y solo ejecuta SELECT 1 en modo directo', async () => {
     const factories = crearFactories();
     const secretos = crearSecretos();

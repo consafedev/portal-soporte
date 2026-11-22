@@ -255,6 +255,10 @@ async function prepararAdministracion(): Promise<void> {
       secretos.fill(0);
       return { code: 'MYSQL_CONNECTION_FAILED', completedAt: reloj.ahora() };
     },
+    /** Impide abrir una conexión externa accidental fuera del fixture aprobado. */
+    async abrirLecturaRf1(): Promise<never> {
+      throw new Error('RF1_CONNECTOR_NOT_CONFIGURED');
+    },
   };
   const perfilesConexion = new ServicioPerfilesConexion(
     new RepositorioPerfilesConexionPostgres(exigirBasePrueba()),

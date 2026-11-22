@@ -17,6 +17,7 @@ import type {
   GatewaySshPermitido,
   TunelSshPrueba,
 } from './mysql-connection-broker.js';
+import type { ConsultaFijaRf1 } from './mysql-rf1-catalog.js';
 
 /** Carga la API CommonJS completa de ssh2 sin depender de exports ESM sintéticos. */
 const cargarModuloCommonJs = createRequire(import.meta.url);
@@ -58,6 +59,23 @@ export class FabricaConexionMysql2 implements FabricaConexionMySql {
           }
           await conexion?.query('SELECT 1');
         },
+        /**
+         * Ejecuta una sentencia RF-1 preparada de la lista estática.
+         * @param consulta Sentencia constante autorizada.
+         * @param parametros Valores ligados por mysql2.
+         * @returns Filas del conjunto de resultados, sin forma controlable por el usuario.
+         * @throws Error con código constante si la consulta no pertenece al conjunto aprobado.
+         */
+        async ejecutarRf1(
+          consulta: ConsultaFijaRf1,
+          parametros: readonly string[],
+        ): Promise<readonly unknown[]> {
+          if (!consultaRf1Permitida(consulta, parametros.length)) {
+            throw new Error('MYSQL_QUERY_NOT_ALLOWED');
+          }
+          const [filas] = await conexion!.execute(consulta, [...parametros]);
+          return Array.isArray(filas) ? (filas as readonly unknown[]) : [];
+        },
         async cerrar(): Promise<void> {
           if (cerrada) {
             return;
@@ -81,6 +99,24 @@ export class FabricaConexionMysql2 implements FabricaConexionMySql {
       throw error;
     }
   }
+}
+
+/**
+ * Rechaza cualquier consulta o cantidad de parámetros ajena al catálogo RF-1 fijo.
+ * @param consulta Identificador constante de la consulta.
+ * @param cantidadParametros Cantidad de valores enlazados por la sesión.
+ * @returns Si consulta y aridad pertenecen al conjunto aprobado.
+ */
+function consultaRf1Permitida(consulta: ConsultaFijaRf1, cantidadParametros: number): boolean {
+  return (
+    (consulta === 'SELECT sociedad, ambienteSap FROM sap_sociedad WHERE rfc = ? LIMIT 101' &&
+      cantidadParametros === 1) ||
+    (consulta ===
+      'SELECT idProveedor FROM sap_proveedor WHERE rfc = ? AND sociedad = ? AND ambienteSap = ? LIMIT 2' &&
+      cantidadParametros === 3) ||
+    (consulta === 'SELECT 1 AS encontrado FROM factura WHERE uuid = ? LIMIT 1' &&
+      cantidadParametros === 1)
+  );
 }
 
 /** Fábrica SSH que fija el gateway, verifica su host key y crea solo un forward MySQL. */

@@ -1,5 +1,6 @@
 import fastify, { LogController, type FastifyInstance } from 'fastify';
 import fastifyCookie from '@fastify/cookie';
+import fastifyMultipart from '@fastify/multipart';
 import type {
   EscritorAuditoriaAuth,
   RelojAuth,
@@ -22,6 +23,10 @@ import { registrarRutasAdminClientes } from './routes/admin-client-routes.js';
 import type { ServicioPreferenciasUsuario } from '../../../packages/core/src/preferences/service.js';
 import type { ServicioPerfilesConexion } from './clients/connection-profile-service.js';
 import { registrarRutasAdminPerfilesConexion } from './routes/admin-connection-profile-routes.js';
+import { registrarRutasAccesoClientes } from './routes/client-access-routes.js';
+import type { ServicioAccesoCliente } from './clients/client-access-service.js';
+import type { ServicioVistaPreviaRf1 } from './clients/rf1-preview-service.js';
+import { registrarRutasVistaPreviaRf1 } from './routes/rf1-preview-routes.js';
 
 const CAMPOS_SENSIBLES_LOG = [
   'req.headers.cookie',
@@ -62,6 +67,10 @@ export interface DependenciasServidorAuth {
   readonly clientes?: ServicioClientesPortal;
   /** Servicio opcional ADMIN para perfiles; recibe secretos solo en operaciones de escritura. */
   readonly perfilesConexion?: ServicioPerfilesConexion;
+  /** Servicio opcional de asignaciones y capacidades por cliente. */
+  readonly accesoClientes?: ServicioAccesoCliente;
+  /** Servicio opcional de vista previa RF-1 de solo lectura y tamaño acotado. */
+  readonly vistaPreviaRf1?: ServicioVistaPreviaRf1;
   /** Generador opcional de IDs de solicitud para aislar trazas sintéticas de integración. */
   readonly generarIdSolicitud?: () => string;
 }
@@ -159,6 +168,42 @@ export async function crearServidorAuth(
       configuracion: dependencias.configuracion,
       sesiones: dependencias.sesiones,
       perfiles: dependencias.perfilesConexion,
+      auditoria: dependencias.auditoria,
+      reloj: dependencias.reloj,
+    });
+  }
+  if (
+    dependencias.accesoClientes !== undefined &&
+    dependencias.clientes !== undefined &&
+    dependencias.perfilesConexion !== undefined
+  ) {
+    await registrarRutasAccesoClientes(aplicacion, {
+      configuracion: dependencias.configuracion,
+      sesiones: dependencias.sesiones,
+      acceso: dependencias.accesoClientes,
+      clientes: dependencias.clientes,
+      perfiles: dependencias.perfilesConexion,
+      auditoria: dependencias.auditoria,
+      reloj: dependencias.reloj,
+    });
+  }
+  if (dependencias.vistaPreviaRf1 !== undefined) {
+    await aplicacion.register(fastifyMultipart, {
+      throwFileSizeLimit: true,
+      limits: {
+        files: 100,
+        fields: 0,
+        parts: 100,
+        fileSize: 5 * 1024 * 1024,
+        fieldNameSize: 16,
+        fieldSize: 0,
+        headerPairs: 64,
+      },
+    });
+    await registrarRutasVistaPreviaRf1(aplicacion, {
+      configuracion: dependencias.configuracion,
+      sesiones: dependencias.sesiones,
+      vistaPrevia: dependencias.vistaPreviaRf1,
       auditoria: dependencias.auditoria,
       reloj: dependencias.reloj,
     });

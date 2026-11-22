@@ -41,6 +41,18 @@ WHERE rfc = ?
 
 **Nota:** el SQL anterior es una referencia documental, no un script listo para ejecutar en producción. La elección de collation/normalización se verificará con el DDL. Cero interpolación de RFC en SQL. No usar `marcado_borrado` o `contabilizar` como filtro de actividad.
 
+### Transporte de selección explícita por archivo
+
+La primera petición de vista previa omite selección societaria. Si una factura responde `NEEDS_SELECTION`, el backend devuelve únicamente los pares `(sociedad, ambienteSap)` obtenidos en esa consulta autorizada. La interfaz permite elegir entre esos pares y reenvía el mismo lote de archivos en memoria mediante el campo multipart opcional `seleccionesSociedad`, con este contrato:
+
+```json
+[
+  { "indiceArchivo": 1, "sociedad": "2000", "ambienteSap": "ERP-DEV" }
+]
+```
+
+`indiceArchivo` es cero basado y se refiere al orden de los campos `files` del mismo multipart; no se usa el nombre del archivo como identidad porque puede repetirse. El campo debe ser un arreglo JSON de 1 a 100 elementos, con índice entero dentro del lote y sin índices duplicados. La selección debe contener únicamente `indiceArchivo`, `sociedad` y `ambienteSap`. El backend valida su forma y límites antes de abrir el broker y el dominio verifica otra vez que el par exacto siga presente en `sap_sociedad` de la misma conexión autorizada. Una opción ajena al catálogo produce `RF1_CONTEXT_MISMATCH`; no se infiere sociedad ni ambiente a partir del nombre del cliente, el entorno PROD/TEST o campos enviados por el navegador. El flujo no persiste XML ni realiza DML.
+
 ## Casos de prueba obligatorios
 
 | Caso | Datos sintéticos de catálogo | Esperado |

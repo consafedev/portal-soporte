@@ -119,6 +119,10 @@ export interface EstadoEsquemaBasePrueba {
     readonly ambientesSap: number;
     /** Filas sintéticas de perfiles cifrados creadas exclusivamente por las pruebas. */
     readonly perfilesConexion: number;
+    /** Filas de asignaciones de clientes creadas exclusivamente por las pruebas. */
+    readonly asignacionesCliente: number;
+    /** Filas de capacidades de clientes creadas exclusivamente por las pruebas. */
+    readonly capacidadesCliente: number;
   };
 }
 
@@ -126,8 +130,10 @@ const nombresTablasAplicacion = [
   'audit_events',
   'auth_invariants',
   'auth_throttle_windows',
+  'client_capabilities',
   'client_sap_environments',
   'client_connection_profiles',
+  'client_user_assignments',
   'clients',
   'recovery_tokens',
   'sessions',
@@ -148,6 +154,8 @@ const relacionesMigradasEsperadas = [
   ['auth_throttle_expires_at_idx', 'i'],
   ['auth_throttle_windows', 'r'],
   ['auth_throttle_windows_pkey', 'i'],
+  ['client_capabilities', 'r'],
+  ['client_capabilities_pkey', 'i'],
   ['client_sap_environments', 'r'],
   ['client_sap_environments_client_code_unique', 'i'],
   ['client_sap_environments_client_id_idx', 'i'],
@@ -158,6 +166,10 @@ const relacionesMigradasEsperadas = [
   ['client_connection_profiles_client_id_idx', 'i'],
   ['client_connection_profiles_pkey', 'i'],
   ['client_connection_profiles_status_idx', 'i'],
+  ['client_user_assignments', 'r'],
+  ['client_user_assignments_active_pair_unique', 'i'],
+  ['client_user_assignments_pkey', 'i'],
+  ['client_user_assignments_user_id_idx', 'i'],
   ['clients', 'r'],
   ['clients_display_name_idx', 'i'],
   ['clients_pkey', 'i'],
@@ -191,6 +203,11 @@ const restriccionesMigradasEsperadas = [
   ['auth_throttle_windows', 'auth_throttle_expiration_check', 'c'],
   ['auth_throttle_windows', 'auth_throttle_scope_check', 'c'],
   ['auth_throttle_windows', 'auth_throttle_windows_pkey', 'p'],
+  ['client_capabilities', 'client_capabilities_changed_by_user_id_users_id_fk', 'f'],
+  ['client_capabilities', 'client_capabilities_client_id_clients_id_fk', 'f'],
+  ['client_capabilities', 'client_capabilities_execute_disabled_check', 'c'],
+  ['client_capabilities', 'client_capabilities_id_check', 'c'],
+  ['client_capabilities', 'client_capabilities_pkey', 'p'],
   ['client_sap_environments', 'client_sap_environments_client_id_clients_id_fk', 'f'],
   ['client_sap_environments', 'client_sap_environments_code_check', 'c'],
   ['client_sap_environments', 'client_sap_environments_name_check', 'c'],
@@ -206,6 +223,12 @@ const restriccionesMigradasEsperadas = [
   ['client_connection_profiles', 'client_connection_profiles_destination_check', 'c'],
   ['client_connection_profiles', 'client_connection_profiles_database_check', 'c'],
   ['client_connection_profiles', 'client_connection_profiles_gateway_check', 'c'],
+  ['client_user_assignments', 'client_user_assignments_client_id_clients_id_fk', 'f'],
+  ['client_user_assignments', 'client_user_assignments_granted_by_user_id_users_id_fk', 'f'],
+  ['client_user_assignments', 'client_user_assignments_pkey', 'p'],
+  ['client_user_assignments', 'client_user_assignments_revocation_metadata_check', 'c'],
+  ['client_user_assignments', 'client_user_assignments_revoked_by_user_id_users_id_fk', 'f'],
+  ['client_user_assignments', 'client_user_assignments_user_id_users_id_fk', 'f'],
   ['clients', 'clients_created_by_user_id_users_id_fk', 'f'],
   ['clients', 'clients_name_check', 'c'],
   ['clients', 'clients_pkey', 'p'],
@@ -231,24 +254,24 @@ const restriccionesMigradasEsperadas = [
   tipo: tipo!,
 }));
 
-/** Restricciones exactas del esquema previo a la migración de clientes y ambientes SAP. */
-const restriccionesPreviasPerfilesEsperadas = restriccionesMigradasEsperadas.filter(
-  (restriccion) => restriccion.tabla !== 'client_connection_profiles',
-);
-
-/** Objetos agregados por la migración de clientes que deben faltar antes de aplicarla. */
-const nombresRelacionesPerfiles = new Set([
-  'client_connection_profiles',
-  'client_connection_profiles_client_name_unique',
-  'client_connection_profiles_client_id_idx',
-  'client_connection_profiles_pkey',
-  'client_connection_profiles_status_idx',
+/** Objetos añadidos en 0007 que deben faltar antes de aplicar acceso por cliente. */
+const nombresRelacionesAccesoCliente = new Set([
+  'client_capabilities',
+  'client_capabilities_pkey',
+  'client_user_assignments',
+  'client_user_assignments_active_pair_unique',
+  'client_user_assignments_pkey',
+  'client_user_assignments_user_id_idx',
 ]);
-const relacionesPreviasPerfilesEsperadas = relacionesMigradasEsperadas.filter(
-  (relacion) => !nombresRelacionesPerfiles.has(relacion.nombre),
+const restriccionesPreviasAccesoClienteEsperadas = restriccionesMigradasEsperadas.filter(
+  (restriccion) =>
+    restriccion.tabla !== 'client_capabilities' && restriccion.tabla !== 'client_user_assignments',
 );
-const tablasPreviasPerfilesEsperadas = nombresTablasAplicacion.filter(
-  (nombre) => nombre !== 'client_connection_profiles',
+const relacionesPreviasAccesoClienteEsperadas = relacionesMigradasEsperadas.filter(
+  (relacion) => !nombresRelacionesAccesoCliente.has(relacion.nombre),
+);
+const tablasPreviasAccesoClienteEsperadas = nombresTablasAplicacion.filter(
+  (nombre) => nombre !== 'client_capabilities' && nombre !== 'client_user_assignments',
 );
 
 /**
@@ -381,16 +404,18 @@ export async function verificarIdentidadBasePrueba(
               JOIN pg_namespace AS esquema ON esquema.oid = tabla.relnamespace
               WHERE esquema.nspname = 'portal'
                 AND tabla.relkind IN ('r', 'p', 'v', 'm', 'f')
-                AND tabla.relname = ANY(ARRAY['audit_events', 'auth_invariants', 'auth_throttle_windows', 'client_connection_profiles', 'client_sap_environments', 'clients', 'recovery_tokens', 'sessions', 'users'])
-            ) IN (0, 6, 8, 9)
+                AND tabla.relname = ANY(ARRAY['audit_events', 'auth_invariants', 'auth_throttle_windows', 'client_capabilities', 'client_connection_profiles', 'client_sap_environments', 'client_user_assignments', 'clients', 'recovery_tokens', 'sessions', 'users'])
+            ) IN (0, 6, 8, 9, 11)
             AND NOT EXISTS (
               SELECT 1
               FROM (VALUES
                 ('audit_events', false, true, false, false),
                 ('auth_invariants', true, false, true, false),
                 ('auth_throttle_windows', true, true, true, true),
+                ('client_capabilities', true, true, true, false),
                 ('client_connection_profiles', true, true, true, false),
                 ('client_sap_environments', true, true, true, false),
+                ('client_user_assignments', true, true, true, false),
                 ('clients', true, true, true, false),
                 ('recovery_tokens', true, true, true, false),
                 ('sessions', true, true, true, false),
@@ -416,7 +441,7 @@ export async function verificarIdentidadBasePrueba(
               JOIN pg_namespace AS esquema ON esquema.oid = tabla.relnamespace
               WHERE esquema.nspname IN ('public', 'portal')
                 AND tabla.relkind IN ('r', 'p', 'v', 'm', 'f')
-                AND NOT (esquema.nspname = 'portal' AND tabla.relname = ANY(ARRAY['audit_events', 'auth_invariants', 'auth_throttle_windows', 'client_connection_profiles', 'client_sap_environments', 'clients', 'recovery_tokens', 'sessions', 'users']))
+                AND NOT (esquema.nspname = 'portal' AND tabla.relname = ANY(ARRAY['audit_events', 'auth_invariants', 'auth_throttle_windows', 'client_capabilities', 'client_connection_profiles', 'client_sap_environments', 'client_user_assignments', 'clients', 'recovery_tokens', 'sessions', 'users']))
                 AND (
                   has_table_privilege(current_user, tabla.oid, 'SELECT')
                   OR has_table_privilege(current_user, tabla.oid, 'INSERT')
@@ -443,7 +468,7 @@ export async function verificarIdentidadBasePrueba(
               JOIN pg_namespace AS esquema ON esquema.oid = tabla.relnamespace
               CROSS JOIN LATERAL aclexplode(COALESCE(tabla.relacl, acldefault('r', tabla.relowner))) AS acl
               WHERE esquema.nspname = 'portal'
-                AND tabla.relname = ANY(ARRAY['audit_events', 'auth_invariants', 'auth_throttle_windows', 'client_connection_profiles', 'client_sap_environments', 'clients', 'recovery_tokens', 'sessions', 'users'])
+                AND tabla.relname = ANY(ARRAY['audit_events', 'auth_invariants', 'auth_throttle_windows', 'client_capabilities', 'client_connection_profiles', 'client_sap_environments', 'client_user_assignments', 'clients', 'recovery_tokens', 'sessions', 'users'])
                 AND acl.grantee = rol.oid
                 AND acl.is_grantable
             )
@@ -575,7 +600,7 @@ export function validarMismaInstanciaBasePrueba(
 }
 
 /**
- * Acepta una base vacía, el predecesor exacto de la migración de perfil o el esquema actual vacío.
+ * Acepta una base vacía, el predecesor exacto de la migración 0007 o el esquema actual vacío.
  * @param estado Inventario de catálogos y conteos obtenidos en modo read-only.
  * @param hashesEsperados Hashes de migración calculados desde los archivos versionados.
  * @returns Estado vacío, inmediatamente anterior a una migración o ya migrado.
@@ -592,7 +617,7 @@ export function validarEstadoEsquemaBasePrueba(
   const relaciones = [...estado.relaciones].sort(compararObjetosEsquema);
   const restricciones = [...estado.restricciones].sort(compararRestricciones);
   const restriccionesEsperadas = [...restriccionesMigradasEsperadas].sort(compararRestricciones);
-  const restriccionesPreviasEsperadas = [...restriccionesPreviasPerfilesEsperadas].sort(
+  const restriccionesPreviasEsperadas = [...restriccionesPreviasAccesoClienteEsperadas].sort(
     compararRestricciones,
   );
   const filasSinDatos =
@@ -602,7 +627,10 @@ export function validarEstadoEsquemaBasePrueba(
     estado.filas.limitadores === 0 &&
     estado.filas.auditoria === 0 &&
     estado.filas.clientes === 0 &&
-    estado.filas.ambientesSap === 0;
+    estado.filas.ambientesSap === 0 &&
+    estado.filas.perfilesConexion === 0 &&
+    estado.filas.asignacionesCliente === 0 &&
+    estado.filas.capacidadesCliente === 0;
 
   const esquemasBaseVacia =
     (esquemas.length === 1 && esquemas[0] === 'public') ||
@@ -641,9 +669,10 @@ export function validarEstadoEsquemaBasePrueba(
     esquemas.length === 2 && esquemas[0] === 'portal' && esquemas[1] === 'public';
   const tablasActualesEsperadas =
     JSON.stringify(tablas) === JSON.stringify([...tablasEsperadas].sort(compararObjetosEsquema));
-  const tablasPreviasEsperadas = ['__drizzle_migrations', ...tablasPreviasPerfilesEsperadas].map(
-    (nombre) => ({ esquema: 'portal', nombre, tipo: 'BASE TABLE' }),
-  );
+  const tablasPreviasEsperadas = [
+    '__drizzle_migrations',
+    ...tablasPreviasAccesoClienteEsperadas,
+  ].map((nombre) => ({ esquema: 'portal', nombre, tipo: 'BASE TABLE' }));
   const tablasActualesPreviasEsperadas =
     JSON.stringify(tablas) ===
     JSON.stringify([...tablasPreviasEsperadas].sort(compararObjetosEsquema));
@@ -652,7 +681,7 @@ export function validarEstadoEsquemaBasePrueba(
     JSON.stringify([...relacionesMigradasEsperadas].sort(compararObjetosEsquema));
   const relacionesActualesPreviasEsperadas =
     JSON.stringify(relaciones) ===
-    JSON.stringify([...relacionesPreviasPerfilesEsperadas].sort(compararObjetosEsquema));
+    JSON.stringify([...relacionesPreviasAccesoClienteEsperadas].sort(compararObjetosEsquema));
   const restriccionesActualesEsperadas =
     JSON.stringify(restricciones) === JSON.stringify(restriccionesEsperadas);
   const secuenciasEsperadasExactas =
@@ -839,6 +868,8 @@ export async function verificarEstadoEsquemaBasePrueba(
       clientes: 0,
       ambientesSap: 0,
       perfilesConexion: 0,
+      asignacionesCliente: 0,
+      capacidadesCliente: 0,
     };
     if (
       tablas.some((tabla) => tabla.esquema === 'portal' && tabla.nombre === '__drizzle_migrations')
@@ -887,6 +918,23 @@ export async function verificarEstadoEsquemaBasePrueba(
       `;
       if (conteosPerfiles !== undefined) {
         filas = { ...filas, ...conteosPerfiles };
+      }
+    }
+    if (
+      tablas.some(
+        (tabla) => tabla.esquema === 'portal' && tabla.nombre === 'client_user_assignments',
+      ) &&
+      tablas.some((tabla) => tabla.esquema === 'portal' && tabla.nombre === 'client_capabilities')
+    ) {
+      const [conteosAcceso] = await sql<
+        { asignacionesCliente: number; capacidadesCliente: number }[]
+      >`
+        SELECT
+          (SELECT count(*)::integer FROM portal.client_user_assignments) AS "asignacionesCliente",
+          (SELECT count(*)::integer FROM portal.client_capabilities) AS "capacidadesCliente"
+      `;
+      if (conteosAcceso !== undefined) {
+        filas = { ...filas, ...conteosAcceso };
       }
     }
     return validarEstadoEsquemaBasePrueba(

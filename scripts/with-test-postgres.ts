@@ -429,6 +429,9 @@ async function concederPermisosAplicacionRemota(): Promise<void> {
         'GRANT SELECT, INSERT, UPDATE ON TABLE portal.clients, portal.client_sap_environments TO portal_test_app',
       );
       await transaccion.unsafe(
+        'GRANT SELECT, INSERT, UPDATE ON TABLE portal.client_user_assignments, portal.client_capabilities TO portal_test_app',
+      );
+      await transaccion.unsafe(
         'GRANT SELECT, INSERT, UPDATE ON TABLE portal.client_connection_profiles TO portal_test_app',
       );
       await transaccion.unsafe(

@@ -10,7 +10,9 @@ import {
   auditEvents,
   authThrottleWindows,
   clientConnectionProfiles,
+  clientCapabilities,
   clientSapEnvironments,
+  clientUserAssignments,
   clients,
   recoveryTokens,
   sessions,
@@ -57,9 +59,13 @@ function pruebaEsquemaPortalDrizzle(): void {
     clients,
     clientSapEnvironments,
     clientConnectionProfiles,
+    clientUserAssignments,
+    clientCapabilities,
   ];
 
   expect(tablas.map((tabla) => getTableConfig(tabla).schema)).toEqual([
+    'portal',
+    'portal',
     'portal',
     'portal',
     'portal',
@@ -81,13 +87,13 @@ async function pruebaLedgerDentroDePortal(): Promise<void> {
     "SELECT to_regclass('public.__drizzle_migrations') IS NOT NULL AS existe",
   );
   const tablasPortalPublicas = await database.query<{ cantidad: number }>(
-    "SELECT count(*)::int AS cantidad FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('audit_events', 'auth_invariants', 'auth_throttle_windows', 'client_connection_profiles', 'client_sap_environments', 'clients', 'recovery_tokens', 'sessions', 'users')",
+    "SELECT count(*)::int AS cantidad FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('audit_events', 'auth_invariants', 'auth_throttle_windows', 'client_capabilities', 'client_connection_profiles', 'client_sap_environments', 'client_user_assignments', 'clients', 'recovery_tokens', 'sessions', 'users')",
   );
   const secuenciasLedger = await database.query<{ sequence_name: string }>(
     "SELECT sequence_name FROM information_schema.sequences WHERE sequence_schema = 'portal'",
   );
 
-  expect(versiones.rows).toEqual([{ cantidad: 7 }]);
+  expect(versiones.rows).toEqual([{ cantidad: 8 }]);
   expect(ledgerPublico.rows).toEqual([{ existe: false }]);
   expect(tablasPortalPublicas.rows).toEqual([{ cantidad: 0 }]);
   expect(secuenciasLedger.rows).toEqual([{ sequence_name: '__drizzle_migrations_id_seq' }]);
@@ -105,6 +111,8 @@ async function pruebaTablasDeIdentidad(): Promise<void> {
     getTableName(clients),
     getTableName(clientSapEnvironments),
     getTableName(clientConnectionProfiles),
+    getTableName(clientUserAssignments),
+    getTableName(clientCapabilities),
   ];
   const filas = await database.query<{ table_name: string }>(
     "SELECT table_name FROM information_schema.tables WHERE table_schema = 'portal' AND table_name <> '__drizzle_migrations'",
