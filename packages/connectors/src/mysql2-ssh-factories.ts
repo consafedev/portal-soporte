@@ -10,6 +10,7 @@ import type { Client as ClienteSsh2, ConnectConfig } from 'ssh2';
 import type {
   AutenticacionSshPrueba,
   ConexionMySqlPrueba,
+  ConexionMySqlTransaccionalRf1,
   DatosConexionMySql,
   DestinoMySqlPermitido,
   FabricaConexionMySql,
@@ -18,6 +19,11 @@ import type {
   TunelSshPrueba,
 } from './mysql-connection-broker.js';
 import type { ConsultaFijaRf1 } from './mysql-rf1-catalog.js';
+import {
+  esConsultaFacturaRf1Permitida,
+  type ConsultaFacturaRf1,
+  type ResultadoConsultaFacturaRf1,
+} from './mysql-rf1-invoice-insert.js';
 
 /** Carga la API CommonJS completa de ssh2 sin depender de exports ESM sintéticos. */
 const cargarModuloCommonJs = createRequire(import.meta.url);
@@ -31,6 +37,22 @@ export class FabricaConexionMysql2 implements FabricaConexionMySql {
     datos: DatosConexionMySql,
     senal: AbortSignal,
   ): Promise<ConexionMySqlPrueba> {
+    return this.conectarInterno(datos, senal);
+  }
+
+  /** Abre una conexión transaccional RF-1 que requiere autorización en una capa superior. */
+  public async conectarParaInsercion(
+    datos: DatosConexionMySql,
+    senal: AbortSignal,
+  ): Promise<ConexionMySqlTransaccionalRf1> {
+    return this.conectarInterno(datos, senal);
+  }
+
+  /** Construye recursos compartidos y aplica límites de SQL y transacción. */
+  private async conectarInterno(
+    datos: DatosConexionMySql,
+    senal: AbortSignal,
+  ): Promise<ConexionMySqlTransaccionalRf1> {
     const socket =
       datos.stream === undefined ? await abrirSocketTcpFijado(datos, senal) : datos.stream;
     const silenciarErrorTemprano = (): void => undefined;
@@ -50,6 +72,7 @@ export class FabricaConexionMysql2 implements FabricaConexionMySql {
       }
 
       let cerrada = false;
+      let transaccionActiva = false;
       const abortar = (): void => conexion?.destroy();
       senal.addEventListener('abort', abortar, { once: true });
       return {
@@ -76,6 +99,63 @@ export class FabricaConexionMysql2 implements FabricaConexionMySql {
           const [filas] = await conexion!.execute(consulta, [...parametros]);
           return Array.isArray(filas) ? (filas as readonly unknown[]) : [];
         },
+        async iniciarTransaccion(): Promise<void> {
+          if (cerrada || transaccionActiva) {
+            throw new Error('RF1_TRANSACTION_STATE_INVALID');
+          }
+          await conexion!.beginTransaction();
+          transaccionActiva = true;
+        },
+        /** Ejecuta únicamente SQL fijo de catálogo, UUID, inserción y verificación RF-1. */
+        async ejecutar(
+          consulta: ConsultaFacturaRf1,
+          parametros: readonly (string | null)[],
+        ): Promise<ResultadoConsultaFacturaRf1> {
+          const lecturaVerificacionPosterior =
+            consulta ===
+            'SELECT uuid, sociedad, estatus, totalFAC, creadoPor FROM factura WHERE uuid = ? LIMIT 1';
+          if (
+            cerrada ||
+            (!transaccionActiva && !lecturaVerificacionPosterior) ||
+            !esConsultaFacturaRf1Permitida(consulta, parametros.length)
+          ) {
+            throw new Error('MYSQL_QUERY_NOT_ALLOWED');
+          }
+          const [resultado] = await conexion!.execute(consulta, [...parametros]);
+          if (Array.isArray(resultado)) {
+            return { rows: resultado as readonly unknown[], affectedRows: 0 };
+          }
+          const affectedRows =
+            typeof resultado === 'object' && resultado !== null && 'affectedRows' in resultado
+              ? resultado.affectedRows
+              : 0;
+          return {
+            rows: [],
+            affectedRows: typeof affectedRows === 'number' ? affectedRows : 0,
+          };
+        },
+        async confirmarTransaccion(): Promise<void> {
+          if (cerrada || !transaccionActiva) {
+            throw new Error('RF1_TRANSACTION_STATE_INVALID');
+          }
+          try {
+            await conexion!.commit();
+            transaccionActiva = false;
+          } catch {
+            throw new Error('RF1_COMMIT_FAILED');
+          }
+        },
+        async revertirTransaccion(): Promise<void> {
+          if (!transaccionActiva) {
+            return;
+          }
+          try {
+            await conexion!.rollback();
+            transaccionActiva = false;
+          } catch {
+            throw new Error('RF1_ROLLBACK_FAILED');
+          }
+        },
         async cerrar(): Promise<void> {
           if (cerrada) {
             return;
@@ -83,6 +163,14 @@ export class FabricaConexionMysql2 implements FabricaConexionMySql {
           cerrada = true;
           senal.removeEventListener('abort', abortar);
           senal.removeEventListener('abort', cancelar);
+          if (transaccionActiva) {
+            try {
+              await conexion?.rollback();
+              transaccionActiva = false;
+            } catch {
+              conexion?.destroy();
+            }
+          }
           try {
             await conexion?.end();
           } catch {

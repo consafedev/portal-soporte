@@ -38,6 +38,8 @@ Durante ese corte inicial `soporte.consafedev.qzz.io` no resolvía por DNS y coi
 
 ## 3. Instalación interna vigente
 
+> Esta sección conserva el corte histórico del 2026-11-20. El release vigente después de PS-005 está registrado en §10; los datos de release, migraciones y rollback de esta sección quedaron superados por ese registro.
+
 El 2026-11-20 se activó el merge de `main` SHA `42f4fd50428ef15fc3334f09eef8dd2c0d05408e`, con `NODE_ENV=production` y el origen HTTPS canónico configurados. El hostname está publicado a través del túnel autorizado; web, API y PostgreSQL mantienen listeners/conexiones locales. El release anterior `c86af469bdb8f9d10a940ecce29d0e64110a1a57` se conserva para rollback. La publicación funcional no certifica preparación productiva plena.
 
 | Recurso | Configuración efectiva | Límite de aislamiento |
@@ -172,8 +174,8 @@ Rollback de publicación, únicamente con autorización: retirar solo el registr
 
 | Elemento | Estado en esta revisión | Evidencia / siguiente control |
 |---|---|---|
-| Servicios del Portal en Debian | Release `42f4fd50428ef15fc3334f09eef8dd2c0d05408e` activo en modo producción; ambos `active` y `enabled` | Listener privado `127.0.0.1:18840/18841`; comprobaciones de host, CSRF, cookie y consulta DB descritas arriba |
-| PostgreSQL `portal_soporte` | Conectividad de runtime verificada; sin DDL/migraciones | Rol de runtime `portal_app`; esquema preexistente conservado |
+| Servicios del Portal en Debian | Release `a3980d47c2fac104b856e51eb13e1b99155f5c26` activo; ambas unidades `active` | Listener privado `127.0.0.1:18840/18841`; `/login` y CSRF locales 200, servicios sin reinicios automáticos observados |
+| PostgreSQL `portal_soporte` | Migración aditiva 0007 aplicada por `portal_migrator` | Runtime `portal_app`; DML acotado a las dos tablas nuevas, sin `DELETE` y sin privilegios de `CREATE`; `PUBLIC` no recibió ACL |
 | Rutas existentes `consafedev` y `renios` | Preservadas | `consafedev.qzz.io` → `127.0.0.1:3002` y `renios.consafedev.qzz.io` → `127.0.0.1:18804`; mantienen su orden y responden por HTTPS |
 | Hostname `soporte.consafedev.qzz.io` | Publicado por el túnel autorizado | CNAME al UUID real de `consafedev-root`; HTTPS `/login` y CSRF 200, endpoint admin anónimo 401, escritura sin CSRF 403 |
 | Otros túneles y hostnames | Sin cambios | Solo se reinició `cloudflared-consafedev.service`; los PID de `cloudflared.service` y `cloudflared-xmlclean.service` no cambiaron |
@@ -196,7 +198,47 @@ Verificación externa desde Windows: CNAME/A/AAAA resueltos; TLS verificado por 
 
 Rollback ya preparado: retirar solo el CNAME de `soporte.consafedev.qzz.io`, restaurar el respaldo únicamente si la configuración actual aún coincide con el hash conocido y no hay cambios concurrentes, y reiniciar solo `cloudflared-consafedev.service`. No revertir registros, orden ni servicios existentes.
 
+## 12. PS-007/PS-008 — Release con asignaciones y preview (2026-11-22)
+
+El merge de PR #5 es `a3980d47c2fac104b856e51eb13e1b99155f5c26`; se sincronizó `main` y se creó el release reproducible con SHA de archivo canónico `efe4012509303aab576f14069de68fad0709d760f365d1b422f3a947af68d11c`. El release está activo en `/opt/portal-soporte/releases/a3980d47c2fac104b856e51eb13e1b99155f5c26`; el rollback previo está en `/var/backups/portal-soporte/release-a3980d47c2fac104b856e51eb13e1b99155f5c26-pre-activation`.
+
+La migración 0007 tiene SHA-256 `684e9c7601d3fcb4c002fbd3407bb2d6295b62b405047d668f8a8869b24b2016` y se aplicó solo a `portal_soporte`. Las migraciones 0004–0006 permanecen idénticas. `portal_app` carece de privilegios administrativos y de `CREATE`; las tablas nuevas permiten solo las operaciones DML aprobadas, sin `DELETE`. El respaldo cifrado vigente está en `C:\Users\GLOUU\AppData\Local\PortalSoporte\Backups\ps007_20261122T060847Z\portal_soporte_ps007_20261122T060847Z.dump.gpg`, SHA-256 `85bb9b7af935b9ad2a5ba11d5e25fa9d9a4054b032faf913651ec45c8347a9da`; integridad GPG y catálogo comprobados, restauración completa de esta copia específica NO EJECUTADA.
+
+Después de desplegar y reiniciar únicamente las dos unidades propias, ambas quedaron activas, `/login`/CSRF respondieron 200 y los listeners siguieron en localhost. Las comprobaciones públicas anónimas confirmaron login/CSRF 200 y rutas privadas 401; los hostnames `consafedev.qzz.io` y `renios.consafedev.qzz.io` mantuvieron su respuesta. No hubo cambios de Cloudflare, DNS, UFW, servicios ajenos ni DML en bases de clientes.
+
+La suite en datos sintéticos registró unitarias 340/340, integración PostgreSQL aislada `portal_soporte_test` 91/91 y E2E 19/19. `lint`, typecheck, build, Prettier de los archivos modificados, Secretlint y el control de dependencias sin hallazgos `high`/`critical` pasaron. MySQL/SSH transaccional de esta rama aún no se ejecutó localmente por falta de Docker Engine; se verificará por CI.
+
+Limitación de uso: `portal_soporte` tiene 0 clientes, 0 perfiles, 0 asignaciones y 0 capacidades; la allowlist de destinos está vacía. No se puede completar preview pública mediante un destino conectado hasta disponer de recursos sintéticos autorizados. No se verificó una sesión pública autenticada ADMIN/SUPPORT en este release.
+
 ## 8. Fuentes técnicas
 
 - Cloudflare Tunnel, configuración local de ingress: https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/local-management/configuration-file/
 - Next.js, autohospedaje y proxy: https://nextjs.org/docs/app/guides/self-hosting
+
+## 10. Release PS-005 y respaldo/restauración (2026-11-21)
+
+Tras la fusión del PR #4, el release `8f4d4ba6ef88cae3873fff9be7143a95f93f9b07` se construyó desde `main` y quedó activo en Debian 12 (`serverAlcazar`). `/opt/portal-soporte/current` apunta a `/opt/portal-soporte/releases/8f4d4ba6ef88cae3873fff9be7143a95f93f9b07`. La API Fastify y Next.js continúan en sus unidades propias; ambas están activas, con cero reinicios observados y listeners limitados a `127.0.0.1:18841` y `127.0.0.1:18840`. PostgreSQL permanece en `portal_soporte` mediante `portal_app`; el ledger del migrador contiene siete versiones. El proceso de aplicación no ejecuta como `portal_migrator`.
+
+Se verificaron los SHA-256 canónicos antes de migrar: 0004 `4969b8243160b6467f3bc02430d4d57ff9d2f6ef1a31d22d7e8216f98622743f`, 0005 `c1a8b0fae7a8c0643279eaac3b62562e7fae48203684d97a29866c09dfffd025` y 0006 `d79958d51d09795aaaabcfca5166e1afc224ccf6fb9169a1d4fa431b97e9c759`. Solo las migraciones pendientes 0005/0006 se aplicaron, en orden, mediante el Drizzle runner autorizado con `portal_migrator`. El `CREATE` temporal en `portal_soporte` fue revocado al terminar. `portal_app` no tiene privilegio de crear bases. No se usó el rol migrador en runtime.
+
+Antes de migrar se generó un backup consistente cifrado con GPG AES-256, sin dejar dump en claro, y se verificó recuperación completa en la base temporal ya autorizada. El artefacto local está en `C:\Users\GLOUU\AppData\Local\PortalSoporte\Backups\ps005_20261121T102500Z\portal_soporte_ps005_20261121T102500Z.dump.gpg`; la copia Debian está en `/var/backups/portal-soporte/portal_soporte_ps005_20261121T102500Z.dump.gpg`. El SHA-256 del ciphertext es `d547801dc342fa3e0cbc93def79fc6519edba3023ef9686f897c02325792e9ba`; las copias coinciden. GPG verificó el descifrado en flujo y `pg_restore --list`; la comparación restaurada validó siete tablas, 42 filas agregadas, índices, constraints y ledger, sin imprimir valores. No se conectó la aplicación a la restauración. Se volvió a comprobar nombre, OID y ausencia de sesiones antes de eliminar únicamente la base temporal. El origen `portal_soporte` permaneció disponible.
+
+Después del cambio, `/login` y CSRF respondieron 200; una consulta anónima a la API ADMIN devolvió 401. La verificación HTTPS pública de `https://soporte.consafedev.qzz.io/login` y CSRF pasó, y `consafedev.qzz.io`/`renios.consafedev.qzz.io` siguieron respondiendo. No se efectuó un login ADMIN manual contra este nuevo release; la cobertura automatizada ADMIN/SUPPORT se ejecutó con datos sintéticos aislados. No se cambiaron Cloudflare, DNS, UFW, PostgreSQL global ni servicios ajenos.
+
+El rollback del release consiste en restaurar los dos `override.conf` propios de las unidades a su contenido previo (o quitarlos únicamente si se confirma que fueron creados por este despliegue), ejecutar `systemctl daemon-reload`, volver `current` al release `c6baae1973acd3721d76f9fde448f05ef78225fb` y reiniciar solamente `portal-soporte-api.service` y `portal-soporte-web.service`. Las migraciones 0005/0006 son aditivas y no se revierten: el release anterior no utiliza esas tablas. Conservar ambas versiones y el respaldo cifrado. No borrar directorios de releases ni cambiar el túnel durante el rollback.
+
+### Resultado y límites de PS-005
+
+El release activo se construyó con Node 24.22.3 y pnpm 12.21.0; build y checks pertinentes pasaron. Los tests remotos aislados reportaron integración 61/61 y E2E 12/12. El smoke final read-only constató ambas unidades `active`, sin reinicios, listeners localhost, `/login` 200, CSRF 200, API ADMIN anónima 401 y ledger 7. La sesión administrativa real no se volvió a probar interactivamente en este release.
+
+La función de perfiles que requieren cifrado permanece deshabilitada hasta que el propietario apruebe y configure una custodia independiente y recuperable del keyring. SMTP sigue apagado; MFA se excluye por AP-013. El riesgo UFW 5432 permanece aceptado sin cambios; `esbuild` moderado y seguimiento de `picomatch` continúan según `DEPENDENCY_SECURITY.md` (revisión 2026-12-10 UTC; vence aceptación 2026-12-17 UTC). PPK v3/DSA continúan sin soporte.
+
+## 11. PS-005.3 — Verificación de custodia y rollback de runtime (2026-11-21)
+
+Se provisionó el keyring `/etc/portal-soporte/client-keyring.json`, versión `psk-20261121-a867d43d8f266051`, `root:portal-soporte`, modo `0640`, un enlace duro, 160 bytes. No había perfiles ni referencias de llave; no se modificó PostgreSQL ni se accedió a destinos de clientes. La copia GPG AES-256 fue restaurada bajo un directorio temporal exclusivo y validada por el proveedor real de llaves y por un cifrado/descifrado sintético; el cambio de cliente/perfil en AAD fue rechazado. La custodia independiente de recuperación y sus rutas se documentan en `KEYRING_RECOVERY.md`.
+
+Para validar el runtime se guardó byte por byte `/etc/portal-soporte/api.env` como `/etc/portal-soporte/api.env.ps0053-20261121T210434Z.bak`, con propietario/grupo `root:portal-soporte` y modo `0640`. Se agregaron temporalmente solo `PORTAL_MASTER_KEYRING_PATH` y `PORTAL_MASTER_KEYRING_GID`; se reiniciaron por nombre exacto `portal-soporte-api.service` y `portal-soporte-web.service`. La API cargó el keyring, el servicio de cifrado pasó AES-GCM sintético y fallo cerrado ante AAD distinto. Durante la ventana de comprobación, ambas unidades quedaron activas, `/login` y `/api/v1/auth/csrf` respondieron 200 en localhost usando el Host/Proto público, no hubo coincidencias en el escaneo de asignaciones sensibles ni errores críticos de arranque, y ambos puertos continuaron limitados a loopback.
+
+Se ejerció el rollback exacto desde el respaldo; la comparación byte por byte confirmó la restauración y el proceso API volvió a carecer de las variables del keyring. Tras reiniciar exclusivamente las dos unidades del Portal, ambas siguieron `active`, `/login` y CSRF respondieron 200, los listeners fueron `127.0.0.1:18840` y `127.0.0.1:18841`, y el preflight confirmó cero perfiles y cero referencias de llave. `NRestarts=0` antes y después (contador systemd de reinicios automáticos); se ejecutaron dos reinicios manuales intencionales de cada unidad. El respaldo de configuración se conserva en `/etc/portal-soporte/api.env.ps0053-20261121T210434Z.bak`, protegido con `0640`; contiene configuración sensible y no debe copiarse fuera de la ruta restringida.
+
+**Estado actual:** archivo de llave provisionado y respaldo recuperable probado; runtime de custodia deshabilitado intencionalmente por rollback. No se creó ni descifró ningún sobre de cliente. El artefacto cifrado del primer intento, sin credencial de recuperación asociada, se conserva separado y no es utilizable como respaldo válido. El directorio local de fixture sintético rechazado por limpieza automática se mantiene sin tocar. El keyring podrá volver a activarse cuando la función de conexiones del Portal lo requiera y el procedimiento de recuperación esté disponible para operaciones.
