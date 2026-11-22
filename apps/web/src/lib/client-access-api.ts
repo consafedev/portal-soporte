@@ -1,10 +1,14 @@
 import {
   accesoClienteAdminSchema,
+  listaAmbientesSapClienteAdminSchema,
   listaClientesAccesiblesSchema,
+  listaPerfilesConexionAccesiblesSchema,
   type CapacidadClienteContrato,
+  type AmbienteSapClienteAdminContrato,
   type AccesoClienteAdminContrato,
   type ClienteAccesibleContrato,
 } from '@portal-soporte/contracts/clients';
+import type { Static } from '@sinclair/typebox';
 import {
   ErrorApiClientes,
   obtenerTokenCsrf,
@@ -15,6 +19,11 @@ import {
 /** Métodos HTTP permitidos para concesiones, revocaciones y capacidad de lectura. */
 type MetodoMutacionAcceso = 'PUT' | 'DELETE';
 
+/** Tipo de perfil de conexión visible para una operación autorizada. */
+export type PerfilConexionAccesibleContrato = Static<
+  typeof import('@portal-soporte/contracts/clients').perfilConexionAccesibleSchema
+>;
+
 /**
  * Recupera los clientes permitidos por la sesión y sus capacidades vigentes.
  *
@@ -23,6 +32,38 @@ type MetodoMutacionAcceso = 'PUT' | 'DELETE';
  */
 export function listarClientesAutorizados(): Promise<readonly ClienteAccesibleContrato[]> {
   return solicitarApi('/api/v1/clients', listaClientesAccesiblesSchema);
+}
+
+/**
+ * Recupera ambientes SAP solo cuando el servidor confirma acceso vigente al cliente.
+ *
+ * @param clientId - UUID del cliente seleccionado en la sesión autenticada.
+ * @returns Ambientes redactados que pertenecen al cliente solicitado.
+ * @throws ErrorApiClientes si se revocó el acceso o la respuesta no cumple el contrato.
+ */
+export function listarAmbientesSapCliente(
+  clientId: string,
+): Promise<readonly AmbienteSapClienteAdminContrato[]> {
+  return solicitarApi(
+    `/api/v1/clients/${encodeURIComponent(clientId)}/sap-environments`,
+    listaAmbientesSapClienteAdminSchema,
+  );
+}
+
+/**
+ * Recupera perfiles utilizables sin exponer destinos, usuarios ni material secreto.
+ *
+ * @param clientId - UUID del cliente seleccionado en la sesión autenticada.
+ * @returns Perfiles accesibles limitados a identificador y entorno lógico.
+ * @throws ErrorApiClientes si se revocó el acceso o la respuesta contiene campos extra.
+ */
+export function listarPerfilesConexionCliente(
+  clientId: string,
+): Promise<readonly PerfilConexionAccesibleContrato[]> {
+  return solicitarApi(
+    `/api/v1/clients/${encodeURIComponent(clientId)}/connection-profiles`,
+    listaPerfilesConexionAccesiblesSchema,
+  );
 }
 
 /**

@@ -3,7 +3,7 @@ import {
   type EstatusVistaPreviaRf1Contrato,
   type ResultadosVistaPreviaRf1Contrato,
 } from '@portal-soporte/contracts/clients';
-import { ErrorApiClientes, leerRespuesta, obtenerTokenCsrf } from './client-admin-api.js';
+import { ErrorApiClientes, leerRespuesta, obtenerTokenCsrf } from './client-admin-api.ts';
 
 /**
  * Envía CFDI en memoria al endpoint same-origin y valida resultados sin aceptar secretos.

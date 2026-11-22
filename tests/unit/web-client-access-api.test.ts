@@ -3,7 +3,9 @@ import {
   concederAccesoCliente,
   establecerCapacidadCliente,
   listarAsignacionesCliente,
+  listarAmbientesSapCliente,
   listarClientesAutorizados,
+  listarPerfilesConexionCliente,
   revocarAccesoCliente,
 } from '../../apps/web/src/lib/client-access-api.js';
 
@@ -44,6 +46,54 @@ describe('cliente HTTP same-origin para permisos de cliente', () => {
       method: 'GET',
       credentials: 'same-origin',
       cache: 'no-store',
+    });
+  });
+
+  it('consulta ambientes autorizados por cliente y valida la pertenencia del DTO', async () => {
+    const ambientes = [
+      {
+        id: USER_ID,
+        clientId: CLIENT_ID,
+        codigo: 'QA-01',
+        nombre: 'Ambiente de pruebas',
+        estado: 'ACTIVE',
+        createdAt: '2026-11-21T12:00:00Z',
+        updatedAt: '2026-11-21T12:00:00Z',
+      },
+    ];
+    fetchMock.mockResolvedValueOnce(crearRespuestaJson(ambientes));
+
+    await expect(listarAmbientesSapCliente(CLIENT_ID)).resolves.toEqual(ambientes);
+    expect(fetchMock).toHaveBeenCalledWith(`/api/v1/clients/${CLIENT_ID}/sap-environments`, {
+      method: 'GET',
+      credentials: 'same-origin',
+      cache: 'no-store',
+    });
+  });
+
+  it('consulta perfiles redactados sin aceptar sobres cifrados ni datos de destino', async () => {
+    const perfil = {
+      id: USER_ID,
+      clientId: CLIENT_ID,
+      nombre: 'Conexión de laboratorio',
+      tipo: 'MYSQL_TCP',
+      entorno: 'TEST',
+      estado: 'ACTIVE',
+    };
+    fetchMock.mockResolvedValueOnce(crearRespuestaJson([perfil]));
+
+    await expect(listarPerfilesConexionCliente(CLIENT_ID)).resolves.toEqual([perfil]);
+    expect(fetchMock).toHaveBeenCalledWith(`/api/v1/clients/${CLIENT_ID}/connection-profiles`, {
+      method: 'GET',
+      credentials: 'same-origin',
+      cache: 'no-store',
+    });
+
+    fetchMock.mockResolvedValueOnce(
+      crearRespuestaJson([{ ...perfil, secretEnvelope: { ciphertext: 'secreto' } }]),
+    );
+    await expect(listarPerfilesConexionCliente(CLIENT_ID)).rejects.toMatchObject({
+      code: 'INVALID_RESPONSE',
     });
   });
 
