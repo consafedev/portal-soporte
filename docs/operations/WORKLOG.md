@@ -1965,3 +1965,12 @@ eload, se reinició únicamente cloudflared-consafedev.service; procesos web, AP
 - **UI/UX:** no hubo cambios visuales; Apple Design no aplica en este incremento.
 - **Próximo paso:** publicar commit y crear PR revisable contra main; revisar Actions, especialmente el fixture MySQL/SSH transaccional. El propietario realizará el merge manual. PS-007/PS-008 continúan EN_REVISION y PS-009 EN_CURSO.
 - **Estado:** instalación RF-1 de preview activa; suite sintética de transacción lista para validación CI, no apta para uso productivo.
+
+
+### [2026-11-22T02:19:45-06:00] PS-009 — PUBLICACIÓN DE RAMA Y BLOQUEO DE PR
+- **Agente/tarea/rama/HEAD:** Codex · PS-009 · `codex/ps-009-invoice-insertions` · remoto y local `f7ce27ffc807088c4fccf05df33f4f66120d8350`; incluye commits `579bbf14f9c5352ed4b0ec666e861a167e0789cb` y `f7ce27f...`.
+- **Publicación:** `git push -u origin codex/ps-009-invoice-insertions` terminó correctamente sin force. `git ls-remote` confirmó branch remoto en `f7ce27ffc807088c4fccf05df33f4f66120d8350` y `origin/main` todavía en el merge PR #5 `a3980d47c2fac104b856e51eb13e1b99155f5c26`.
+- **Pull Request/CI:** el conector GitHub devolvió `USER_NOT_LOGGED_IN`; `gh` no está instalado. La lectura de GCM en modo no interactivo no proporcionó una credencial reutilizable, por lo que no se publicó token ni se abrió un PR. La API pública reportó que no hay PR abierto para esta rama y ningún run de Actions asociado a este head. No se intentó merge.
+- **Límites conservados:** la rama está publicada y lista para revisión; se mantienen todas las limitaciones y pruebas de la entrada anterior. Fixture MySQL/SSH transaccional, CI de PR y revisión humana siguen pendientes; no se fusiona ni despliega.
+- **Próximo paso:** abrir `https://github.com/consafedev/portal-soporte/pull/new/codex/ps-009-invoice-insertions` desde una sesión GitHub activa o volver a conectar el GitHub app para que se pueda crear el PR y revisar Actions. El propietario conserva el merge manual.
+- **Estado:** PS-009 `EN_CURSO`; rama remota publicada; PR pendiente por falta de sesión GitHub disponible en las herramientas.
