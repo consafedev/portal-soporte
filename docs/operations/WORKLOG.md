@@ -2060,3 +2060,12 @@ eload, se reinició únicamente cloudflared-consafedev.service; procesos web, AP
 - Decisiones y límites: AP-013/AP-014 conservadas. Gate global cerrado por defecto; 0008 se validó solo en portal_soporte_test. No se habilitó DML real, no se desplegó el incremento, y no se cambió Cloudflare, DNS, UFW ni servicios ajenos.
 - Próximo paso: publicar la rama sin force, abrir PR contra main y revisar Actions. Mantener PS-009 EN_REVISION hasta revisión humana y checks verdes. La aprobación de piloto queda pendiente de destino, DDL y VT-01–VT-09.
 - Estado: EN_CURSO, a la espera de PR y CI.
+### [2026-11-22T06:45:19-06:00] PS-009 — PR #7 Y CI COMPLETOS; LISTO PARA REVISIÓN
+- Rama/base: codex/ps-009-rf1-execution-gate, base d2e741645cd79528827d70772df236a5ca5b76e6; HEAD 5ba70dc3c7a2b251f4d0e9dc6618f6b1054896a7.
+- PR: #7 abierto contra main, sin reviews, pendiente de revisión/merge manual del propietario: https://github.com/consafedev/portal-soporte/pull/7.
+- GitHub Actions confirmado para el HEAD: push run #57 / 45023051774 SUCCESS en 2m47s; pull_request run #58 / 45023511831 SUCCESS en 2m54s. En ambos: “Calidad y seguridad básica” y “Conectores MySQL y SSH con fixture sintético” SUCCESS. El fixture sintético de Actions cubrió el bloqueo local por falta de Docker Engine.
+- Verificación local ya registrada: unitarias 46 archivos/361 pruebas PASS; PostgreSQL aislado 9 archivos/91 pruebas PASS y migración CLI PASS; E2E remoto aislado 19/19 PASS; build, typecheck, lint, formato focalizado, verify:skills y Secretlint PASS. Auditoría: 1 moderada, 0 altas/críticas; revisión de CI PASS. Formato global Windows no ejecutado satisfactoriamente por discrepancias CRLF/LF de línea base, sin reformateo masivo.
+- Migración: 0008 aditiva aplicada solo a portal_soporte_test; migraciones 0004–0007 intactas. Producción sigue en release a3980d47c2fac104b856e51eb13e1b99155f5c26, con 0007 y sin 0008. No se desplegó el incremento ni se ejecutó DML en portal_soporte o en bases de clientes.
+- Seguridad y límites: PORTAL_RF1_INSERTION_ENABLED sigue cerrado por defecto. AP-013/AP-014 conservadas; SMTP deshabilitado. La base permanente no tiene clientes, perfiles, asignaciones ni capacidades; faltan destino/DDL autorizados y VT-01–VT-09, por lo que no se solicita habilitar piloto. Riesgo moderado de dependencia permanece documentado.
+- Acción: dejar PS-009 en EN_REVISION; solicitar revisión humana del PR. No merge, despliegue, migración productiva, cambio de Cloudflare/DNS/firewall ni acceso a bases de clientes.
+- Estado: EN_REVISION.
