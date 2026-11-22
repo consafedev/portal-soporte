@@ -215,6 +215,8 @@ generar_llaves_ssh_sinteticas() {
 
 # Crea solo la red, base, gateway y certificados efímeros identificados por esta ejecución.
 iniciar_contenedores_aislados() {
+  # El proceso mysql debe atravesar el bind mount; el padre temporal permanece privado en modo 0700.
+  chmod 0755 "${directorio_tls}"
   docker network create "${red}" >/dev/null
   if ! docker run --detach --name "${contenedor_mysql}" --network "${red}" \
     --network-alias mysql.fixture.invalid --publish 127.0.0.1::3306 \
