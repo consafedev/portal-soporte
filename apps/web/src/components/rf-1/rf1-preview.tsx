@@ -2,15 +2,12 @@
 
 import { useEffect, useState, type ChangeEvent, type JSX } from 'react';
 import type {
-  ClienteAdminContrato,
-  ClienteAccesibleContrato,
   EstatusVistaPreviaRf1Contrato,
   ResultadoArchivoVistaPreviaRf1Contrato,
 } from '@portal-soporte/contracts/clients';
 import {
   ErrorApiClientes,
   listarAmbientesSapAdmin,
-  listarClientesAdmin,
   listarPerfilesConexionAdmin,
 } from '../../lib/client-admin-api';
 import {
@@ -78,8 +75,7 @@ export function VistaPreviaRf1(): JSX.Element {
     /** Solicita la lista del lado servidor y filtra estados inactivos en la presentación. */
     async function cargarClientes(): Promise<void> {
       try {
-        const respuesta: readonly ClienteAdminContrato[] | readonly ClienteAccesibleContrato[] =
-          esAdmin ? await listarClientesAdmin() : await listarClientesAutorizados();
+        const respuesta = await listarClientesAutorizados();
         if (vigente) {
           setClientes(
             respuesta
@@ -103,7 +99,7 @@ export function VistaPreviaRf1(): JSX.Element {
     return () => {
       vigente = false;
     };
-  }, [esAdmin]);
+  }, []);
 
   /** Consulta ambientes y perfiles del cliente seleccionado y descarta respuestas obsoletas. */
   useEffect(() => {

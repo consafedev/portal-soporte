@@ -28,6 +28,12 @@ const CLIENTE_VISUAL: ClienteAdminContrato = {
   updatedAt: '2026-11-21T00:00:00.000Z',
 };
 
+const CLIENTE_ACCESIBLE_VISUAL = {
+  id: CLIENT_ID,
+  nombre: CLIENTE_VISUAL.nombre,
+  estado: 'ACTIVE',
+};
+
 const AMBIENTE_VISUAL: AmbienteSapClienteAdminContrato = {
   id: '550e8400-e29b-41d4-a716-446655440040',
   clientId: CLIENT_ID,
@@ -101,7 +107,7 @@ test('ADMIN revisa la vista previa en escritorio y móvil con tema accesible', a
     }
     await responderJson({ theme: tema })(ruta);
   });
-  await page.route('**/api/v1/admin/clients', responderJson([CLIENTE_VISUAL]));
+  await page.route('**/api/v1/clients', responderJson([CLIENTE_ACCESIBLE_VISUAL]));
   await page.route(
     `**/api/v1/admin/clients/${CLIENT_ID}/sap-environments`,
     responderJson([AMBIENTE_VISUAL]),

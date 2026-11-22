@@ -42,9 +42,11 @@ interface ObservacionPreview {
 }
 
 const idCliente = randomUUID();
+const idClienteSinCapacidad = randomUUID();
 const idAmbiente = randomUUID();
 const idPerfil = randomUUID();
 const nombreCliente = `Cliente preview ${randomUUID().slice(0, 8)}`;
+const nombreClienteSinCapacidad = `Cliente sin lectura ${randomUUID().slice(0, 8)}`;
 let baseDatos: BaseDatosAuth | null = null;
 let baseDatosMigrador: BaseDatosAuth | null = null;
 let cuentaAdmin: CuentaPreviewE2e | null = null;
@@ -86,6 +88,12 @@ test.beforeAll(async () => {
   await baseDatos.insert(clients).values({
     id: idCliente,
     displayName: nombreCliente,
+    status: 'ACTIVE',
+    createdByUserId: cuentaAdmin.id,
+  });
+  await baseDatos.insert(clients).values({
+    id: idClienteSinCapacidad,
+    displayName: nombreClienteSinCapacidad,
     status: 'ACTIVE',
     createdByUserId: cuentaAdmin.id,
   });
@@ -140,7 +148,9 @@ test.afterAll(async () => {
     await baseDatosMigrador
       .delete(clientSapEnvironments)
       .where(eq(clientSapEnvironments.clientId, idCliente));
-    await baseDatosMigrador.delete(clients).where(eq(clients.id, idCliente));
+    await baseDatosMigrador
+      .delete(clients)
+      .where(inArray(clients.id, [idCliente, idClienteSinCapacidad]));
 
     if (idsUsuarios.length > 0) {
       await baseDatosMigrador
@@ -251,6 +261,15 @@ test('ADMIN selecciona un cliente activo y obtiene una fila lista para revisión
   await instalarRespuestaPreview(page, [resultadoListo()], observaciones);
   await iniciarSesion(page, cuentaAdmin);
   await page.getByRole('link', { name: 'RF-1' }).click();
+  await expect(
+    page.getByLabel('Cliente').getByRole('option', { name: nombreCliente, exact: true }),
+  ).toHaveCount(1);
+  await expect(
+    page.getByLabel('Cliente').getByRole('option', {
+      name: nombreClienteSinCapacidad,
+      exact: true,
+    }),
+  ).toHaveCount(0);
   await page.getByLabel('Cliente').selectOption(idCliente);
   await page.getByLabel('Perfil de conexión').selectOption(idPerfil);
   await expect(page.getByText('Entorno operativo: Pruebas', { exact: true })).toBeVisible();
