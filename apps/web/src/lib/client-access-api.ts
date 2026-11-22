@@ -10,7 +10,7 @@ import {
   obtenerTokenCsrf,
   solicitarApi,
   traducirErrorHttp,
-} from './client-admin-api.js';
+} from './client-admin-api.ts';
 
 /** Métodos HTTP permitidos para concesiones, revocaciones y capacidad de lectura. */
 type MetodoMutacionAcceso = 'PUT' | 'DELETE';

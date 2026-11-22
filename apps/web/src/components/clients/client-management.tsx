@@ -14,6 +14,7 @@ import {
   listarAmbientesSapAdmin,
   listarClientesAdmin,
 } from '../../lib/client-admin-api';
+import { AdministracionAccesoCliente } from './client-access-management';
 import { AdministracionPerfilesConexion } from './connection-profile-management';
 
 /** Presenta el catálogo de clientes y ambientes SAP con operaciones protegidas por ADMIN. */
@@ -458,6 +459,14 @@ function TarjetaCliente({
             clientId={cliente.id}
             clienteActivo={cliente.estado === 'ACTIVE'}
           />
+          {abierto ? (
+            <AdministracionAccesoCliente
+              clientId={cliente.id}
+              clienteActivo={cliente.estado === 'ACTIVE'}
+              onError={reportarError}
+              onSaved={notificar}
+            />
+          ) : null}
         </div>
       </details>
     </article>
