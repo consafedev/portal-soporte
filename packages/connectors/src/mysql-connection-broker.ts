@@ -10,6 +10,7 @@ import type {
   SesionLecturaRf1,
 } from '../../core/src/clients/secret-custody-ports.js';
 import { SesionMysqlRf1, type ConsultaFijaRf1 } from './mysql-rf1-catalog.js';
+import type { EjecutorTransaccionFacturaRf1 } from './mysql-rf1-invoice-insert.js';
 
 /** Destino MySQL fijo, con hostname TLS y dirección IP previamente aprobada. */
 export type DestinoMySqlPermitido = DestinoMySqlAutorizado;
@@ -78,6 +79,10 @@ export interface ConexionMySqlPrueba {
   /** Interrumpe la conexión cuando se cancela o vence el timeout. */
   abortar(): void;
 }
+
+/** Extiende la conexión de lectura solo para el ejecutor transaccional RF-1. */
+export interface ConexionMySqlTransaccionalRf1
+  extends ConexionMySqlPrueba, EjecutorTransaccionFacturaRf1 {}
 
 /** Crea una única conexión MySQL con TLS obligatorio o stream SSH previamente validado. */
 export interface FabricaConexionMySql {

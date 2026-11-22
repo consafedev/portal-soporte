@@ -6,6 +6,7 @@ import {
   FabricaConexionMysql2,
   FabricaTunelSsh2,
   PoliticaDestinosConexion,
+  SesionInsercionMysqlRf1,
 } from '../../packages/connectors/src/index.js';
 import type {
   CodigoResultadoPruebaConexion,
@@ -13,6 +14,8 @@ import type {
   DestinoMySqlAutorizado,
   PerfilConexionPrueba,
 } from '../../packages/core/src/clients/secret-custody-ports.js';
+import type { DatosConexionMySql } from '../../packages/connectors/src/mysql-connection-broker.js';
+import type { EntradaMapeoFacturaRf1 } from '../../packages/connectors/src/mysql-rf1-invoice-mapper.js';
 
 interface ConfiguracionFixtureMysql {
   /** Host y puerto de loopback publicados para la conexión TLS directa. */
@@ -166,6 +169,76 @@ async function probarLecturasRf1(perfil: PerfilConexionPrueba): Promise<void> {
   expect([...secretos].every((byte) => byte === 0)).toBe(true);
 }
 
+/** Abre una sesión transaccional contra el único servidor MySQL sintético del fixture. */
+async function abrirSesionInsercionRf1(): Promise<SesionInsercionMysqlRf1> {
+  const datos: DatosConexionMySql = {
+    destino: {
+      id: idDestino,
+      hostname: hostMysql,
+      address: '127.0.0.1',
+      port: configuracion.mysqlHostPort,
+    },
+    database: configuracion.database,
+    mysqlUsername: configuracion.username,
+    mysqlPassword: configuracion.password,
+    tls: {
+      ca: readFileSync(configuracion.caPath, 'utf8'),
+      rejectUnauthorized: true,
+    },
+    timeoutMs: 5_000,
+  };
+  const conexion = await new FabricaConexionMysql2().conectarParaInsercion(
+    datos,
+    new AbortController().signal,
+  );
+  return new SesionInsercionMysqlRf1(conexion, 5_000);
+}
+
+/** Crea entrada fiscal sintética sin archivos XML ni datos de clientes reales. */
+function crearEntradaInsercionRf1(
+  uuid: string,
+  estatus: 'CONTABILIZADO' | 'PAGADA',
+): EntradaMapeoFacturaRf1 {
+  return {
+    factura: {
+      uuid,
+      rfcEmisor: 'COSC8001137NA',
+      rfcReceptor: 'XAXX010101000',
+      fecha: '2025-06-07T23:30:00-06:00',
+      subtotal: '1250.50',
+      descuento: '0',
+      moneda: 'MXN',
+      total: '1450.58',
+      referencia: 'AB-120',
+      tipoComprobante: 'I',
+      importeIvaFAC: '200.08',
+      retencionIsr: '0',
+      retencionIva: '0',
+      retencionIeps: '0',
+      serie: 'AB-',
+      folio: '120',
+      metodoPago: 'PUE',
+      formaPago: '03',
+    },
+    resolution: { sociedad: '1000', ambienteSap: 'E1P', idProveedor: 'PROV000001' },
+    estatus,
+    fechaCarga: new Date('2026-11-22T07:00:00.000Z'),
+    documentos: { documentoContable: null, entradaMercancia: null, ordenCompra: null },
+  };
+}
+
+/** Verifica un UUID mediante la ruta RF-1 de solo lectura y cierra la conexión. */
+async function existeUuidEnFixture(uuid: string): Promise<boolean> {
+  const secretos = crearCredenciales();
+  const broker = crearBroker();
+  const sesion = await broker.abrirLecturaRf1(perfilBase, secretos, new AbortController().signal);
+  try {
+    return await sesion.existeUuid(uuid);
+  } finally {
+    await sesion.cerrar();
+  }
+}
+
 /** Verifica selectivo TCP/TLS directo, credenciales erróneas y validación de CA. */
 async function probarTcpTlsDirecto(): Promise<void> {
   const correcto = await probarConexion();
@@ -297,6 +370,59 @@ async function expirarConexionSinSaludoMysql(): Promise<void> {
   expect([...resultado.secretos].every((byte) => byte === 0)).toBe(true);
 }
 
+/** Inserta estados aprobados, detecta duplicados concurrentes y confirma rollback sintético. */
+async function probarInsercionTransaccionalSintetica(): Promise<void> {
+  const pagada = await abrirSesionInsercionRf1();
+  try {
+    await expect(
+      pagada.insertar(crearEntradaInsercionRf1('550E8400-E29B-41D4-A716-446655440002', 'PAGADA')),
+    ).resolves.toEqual({ status: 'INSERTADA_VERIFICADA' });
+    await expect(
+      pagada.insertar(crearEntradaInsercionRf1('550E8400-E29B-41D4-A716-446655440002', 'PAGADA')),
+    ).resolves.toEqual({ status: 'YA_EXISTE' });
+  } finally {
+    await pagada.cerrar();
+  }
+
+  const contabilizado = await abrirSesionInsercionRf1();
+  try {
+    await expect(
+      contabilizado.insertar(
+        crearEntradaInsercionRf1('550E8400-E29B-41D4-A716-446655440003', 'CONTABILIZADO'),
+      ),
+    ).resolves.toEqual({ status: 'INSERTADA_VERIFICADA' });
+  } finally {
+    await contabilizado.cerrar();
+  }
+
+  const concurrentes = await Promise.all([abrirSesionInsercionRf1(), abrirSesionInsercionRf1()]);
+  try {
+    const resultados = await Promise.all(
+      concurrentes.map((sesion) =>
+        sesion.insertar(crearEntradaInsercionRf1('550E8400-E29B-41D4-A716-446655440005', 'PAGADA')),
+      ),
+    );
+    expect(resultados.map((resultado) => resultado.status).sort()).toEqual([
+      'INSERTADA_VERIFICADA',
+      'YA_EXISTE',
+    ]);
+  } finally {
+    await Promise.all(concurrentes.map((sesion) => sesion.cerrar()));
+  }
+
+  const rollback = await abrirSesionInsercionRf1();
+  try {
+    await expect(
+      rollback.insertar(
+        crearEntradaInsercionRf1('550E8400-E29B-41D4-A716-446655440004', 'CONTABILIZADO'),
+      ),
+    ).resolves.toEqual({ status: 'ERROR_REVERTIDO' });
+  } finally {
+    await rollback.cerrar();
+  }
+  await expect(existeUuidEnFixture('550E8400-E29B-41D4-A716-446655440004')).resolves.toBe(false);
+}
+
 /** Cierra el listener local del caso de timeout al terminar la suite aislada. */
 async function cerrarServidorSinRespuesta(): Promise<void> {
   if (servidorSinRespuesta === undefined) {
@@ -333,4 +459,8 @@ describe('conector MySQL real con servicios sintéticos efímeros', () => {
   );
   it('libera recursos y acepta conexiones SSH sucesivas', reusarTunelTrasCerrarRecursos);
   it('aborta por timeout un servidor sin saludo MySQL', expirarConexionSinSaludoMysql);
+  it(
+    'inserta sintéticos por transacción, detecta duplicados concurrentes y revierte errores',
+    probarInsercionTransaccionalSintetica,
+  );
 });

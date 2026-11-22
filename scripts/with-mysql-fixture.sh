@@ -274,7 +274,10 @@ iniciar_contenedores_aislados() {
     < "${raiz_repositorio}/tests/fixtures/mysql-rf1/seed.sql"
   {
     printf "CREATE USER 'portal_fixture_app'@'%%' IDENTIFIED BY '%s';\n" "${password_app}"
-    printf "GRANT SELECT ON portal_fixture.* TO 'portal_fixture_app'@'%%';\n"
+    printf "GRANT SELECT ON portal_fixture.sap_sociedad TO 'portal_fixture_app'@'%%';\n"
+    printf "GRANT SELECT ON portal_fixture.sap_proveedor TO 'portal_fixture_app'@'%%';\n"
+    printf "GRANT SELECT ON portal_fixture.factura TO 'portal_fixture_app'@'%%';\n"
+    printf "GRANT INSERT ON portal_fixture.factura TO 'portal_fixture_app'@'%%';\n"
   } > "${directorio_temporal}/fixture-user.sql"
   aplicar_permisos_restrictivos 0600 "${directorio_temporal}/fixture-user.sql" archivo
   docker exec --env "MYSQL_PWD=${password_root}" -i "${contenedor_mysql}" \
@@ -283,11 +286,17 @@ iniciar_contenedores_aislados() {
   privilegios="$(docker exec --env "MYSQL_PWD=${password_root}" "${contenedor_mysql}" \
     mysql --batch --skip-column-names --host=127.0.0.1 --user=root \
     --execute="SHOW GRANTS FOR 'portal_fixture_app'@'%'" 2>/dev/null)"
-  if [[ "$(grep -c 'GRANT SELECT ON' <<< "${privilegios}")" -ne 1 ]] \
-    || [[ "${privilegios}" != *'portal_fixture'* ]] \
-    || grep -Eiq 'ALL PRIVILEGES|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|GRANT OPTION|FILE|SUPER' \
+  local cantidad_grants
+  cantidad_grants="$(grep -c '^GRANT ' <<< "${privilegios}" || true)"
+  if [[ "${cantidad_grants}" -ne 5 ]] \
+    || ! grep -Eiq '^GRANT USAGE ON \*\.\* TO .portal_fixture_app.@.%.$' <<< "${privilegios}" \
+    || ! grep -Eiq '^GRANT SELECT ON .portal_fixture.\.sap_sociedad. TO .portal_fixture_app.@.%.$' <<< "${privilegios}" \
+    || ! grep -Eiq '^GRANT SELECT ON .portal_fixture.\.sap_proveedor. TO .portal_fixture_app.@.%.$' <<< "${privilegios}" \
+    || ! grep -Eiq '^GRANT SELECT ON .portal_fixture.\.factura. TO .portal_fixture_app.@.%.$' <<< "${privilegios}" \
+    || ! grep -Eiq '^GRANT INSERT ON .portal_fixture.\.factura. TO .portal_fixture_app.@.%.$' <<< "${privilegios}" \
+    || grep -Eiq 'ALL PRIVILEGES|UPDATE|DELETE|CREATE|ALTER|DROP|GRANT OPTION|FILE|SUPER' \
       <<< "${privilegios}"; then
-    echo 'MYSQL_FIXTURE_READ_ONLY_GRANT_INVALID' >&2
+    echo 'MYSQL_FIXTURE_MINIMAL_INSERT_GRANT_INVALID' >&2
     exit 3
   fi
 
