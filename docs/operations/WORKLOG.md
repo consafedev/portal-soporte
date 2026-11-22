@@ -1974,3 +1974,36 @@ eload, se reinició únicamente cloudflared-consafedev.service; procesos web, AP
 - **Límites conservados:** la rama está publicada y lista para revisión; se mantienen todas las limitaciones y pruebas de la entrada anterior. Fixture MySQL/SSH transaccional, CI de PR y revisión humana siguen pendientes; no se fusiona ni despliega.
 - **Próximo paso:** abrir `https://github.com/consafedev/portal-soporte/pull/new/codex/ps-009-invoice-insertions` desde una sesión GitHub activa o volver a conectar el GitHub app para que se pueda crear el PR y revisar Actions. El propietario conserva el merge manual.
 - **Estado:** PS-009 `EN_CURSO`; rama remota publicada; PR pendiente por falta de sesión GitHub disponible en las herramientas.
+
+### [2026-11-22T02:31:34-06:00] PS-009 / PS-005.3 — DIAGNÓSTICO FOCALIZADO DEL FIXTURE
+- Agente/tarea/rama/base: Codex · PS-009 y PS-005.3 · `codex/ps-009-invoice-insertions` · CI run `45002429933`, HEAD `a4b89333f03bc47489bc2a7f6fa4ca9ea462bf10`.
+- Objetivo: diagnosticar el job fallido del fixture MySQL/SSH y corregir únicamente la validación de grants si se confirma la causa; mantener TLS, SSH, permisos y limpieza del fixture.
+- Evidencia inicial: job `Conectores MySQL y SSH con fixture sintético` concluyó FAILURE, la anotación pública indica exit code 3; GitHub limita descarga del log detallado a administradores y la conexión GitHub de Codex no está disponible. El validator actual requiere 5 líneas SHOW GRANTS y dos líneas separadas para SELECT/INSERT en `factura`; MySQL 8.4 documenta que agrupa privilegios de la misma tabla en una sola sentencia SHOW GRANTS.
+- Alcance previsto: `scripts/with-mysql-fixture.sh`, helper/prueba unitaria focalizada, paso de CI si procede, WORKLOG y TASK_BOARD. No tocar infraestructura ni bases persistentes.
+- Comprobaciones: test focal del validator, sintaxis Bash, suite unitaria e integración relevante, lint/typecheck/build/secrets y CI remota. El fixture MySQL real local puede quedar NO EJECUTADO si Docker sigue indisponible.
+- Estado: EN_CURSO; resultado de la hipótesis aún por confirmar con la siguiente ejecución de CI.
+
+### [2026-11-22T02:43:10-06:00] PS-009 / PS-005.3 — VALIDACIÓN DE GRANTS Y DIAGNÓSTICO DE TRANSACCIÓN
+- Evidencia CI: run `45003818856` en HEAD `0662da5e8e10dc728dcac47d7495aecf5ce64e4e`; job de calidad/seguridad PASS. El job MySQL ya superó creación/readiness del contenedor y validación de permisos mínimos; falló en `probarInsercionTransaccionalSintetica` con `RF1_SUPPLIER_AMBIGUOUS` al esperar `INSERTADA_VERIFICADA`.
+- Causa: la entrada sintética usaba RFC emisor `COSC8001137NA` para sociedad 1000/E1P, donde el seed conserva deliberadamente dos proveedores ambiguos; además seleccionaba PROV000001, cuyo RFC es distinto. No es un defecto del broker ni del servicio de inserción.
+- Cambio de prueba: conservar el escenario ambiguo para preview y añadir un proveedor sintético único PROV000005/RFC AAA010101AAA para los casos transaccionales; alinear RFC e ID en la entrada y comprobar su lookup contextual.
+- Validación local: test del contrato de grants PASS; Bash -n PASS; el fixture completo NO EJECUTADO por `MYSQL_FIXTURE_REQUIRES_DOCKER_ENGINE`; la ejecución CI de `0662da5` alcanzó las pruebas con MySQL real efímero y produjo el diagnóstico anterior. Run completo: FAILURE por esa aserción.
+- Límites: solo fixtures sintéticos, sin acceso a bases de clientes ni escrituras externas. Próximo paso: typecheck, lint, secretos y nueva ejecución CI tras publicar el ajuste.
+
+### [2026-11-22T02:50:28-06:00] PS-009 / PS-005.3 — FIXTURE MYSQL VERDE; PR BLOQUEADO POR SESIÓN GITHUB
+- Agente/tarea/rama/HEAD de código: Codex · PS-009 / PS-005.3 · `codex/ps-009-invoice-insertions` · `bf2a2d4692ec645d40ecca6cf0c5737d0cbd5193`; base `main` merge PR #5 `a3980d47c2fac104b856e51eb13e1b99155f5c26`.
+- Causa 1 y corrección: MySQL 8.4 agrupa SELECT/INSERT de una tabla en SHOW GRANTS; el conteo antiguo de cinco líneas rechazaba la forma válida. Se sustituyó por validación de scopes más el conjunto exacto de filas TABLE_PRIVILEGES; el test acepta grants agrupados/separados y rechaza UPDATE, grants de esquema y permisos ausentes. La nueva CI pasó esa comprobación.
+- Causa 2 y corrección: el caso transaccional enviaba RFC `COSC8001137NA`, con dos proveedores válidos en 1000/E1P, y seleccionaba un id de otro RFC. El fixture ahora conserva los dos proveedores ambiguos para los casos negativos y agrega PROV000005/RFC `AAA010101AAA` para inserciones inequívocas.
+- GitHub Actions run `45004260979`, HEAD `bf2a2d4692ec645d40ecca6cf0c5737d0cbd5193`: SUCCESS. `Calidad y seguridad básica` SUCCESS (formato, lint, unitarias, integración PostgreSQL, CLI migraciones, build, typecheck, E2E, secretos y dependencias); `Conectores MySQL y SSH con fixture sintético` SUCCESS (incluye permisos mínimos, TCP/TLS, SSH/PEM, SELECT 1, RF-1 sintético, PAGADA/CONTABILIZADO, concurrencia, rollback, negativos y limpieza).
+- Verificación local: test de grants, `bash -n`, lint, typecheck, Secretlint y Prettier de los archivos cambiados PASS. `format:check` global local marcó 210 archivos existentes; no se reformateó masivamente. El fixture MySQL no pudo ejecutarse localmente porque Docker Engine no está activo; el fixture completo sí pasó en GitHub Actions.
+- Rama: commits focalizados `0662da5` y `bf2a2d4` publicados por push normal. No se usó force ni se modificaron migraciones, infraestructura o destinos de clientes.
+- PR: no creado. El conector GitHub devuelve `USER_NOT_LOGGED_IN`; `gh` no está instalado y el log detallado de Actions requiere admin. Enlace listo para abrir: `https://github.com/consafedev/portal-soporte/pull/new/codex/ps-009-invoice-insertions`. No se hizo merge.
+- Estado/límites: PS-009 continúa EN_CURSO hasta disponer del PR revisable. `rf-1:execute`/endpoint no están habilitados; VT-01..VT-09, AuthContext/capacidad, auditoría y conciliación siguen bloqueando DML real. Cero pruebas o escrituras sobre bases de clientes.
+
+### [2026-11-22T02:54:25-06:00] PS-009 — PR #6 ABIERTO PARA REVISIÓN
+- Rama/código: `codex/ps-009-invoice-insertions`; commits focalizados `0662da5` y `bf2a2d4`; base `main`=`a3980d47c2fac104b856e51eb13e1b99155f5c26`.
+- Pull Request: [#6](https://github.com/consafedev/portal-soporte/pull/6), abierto contra `main`, head `bf2a2d4692ec645d40ecca6cf0c5737d0cbd5193`. No se fusionó.
+- CI: push run `45004260979` SUCCESS en los dos jobs. GitHub inició checks adicionales por el evento pull_request en run `45004923673`; al momento de esta entrada ambos jobs seguían IN_PROGRESS.
+- Acceso GitHub: el conector del app seguía desconectado; la credencial local de Git Credential Manager estuvo disponible en modo no interactivo y se usó solo para crear el PR. No se leyó ni reutilizó el token publicado en el chat y ningún secreto se imprimió o guardó en Git.
+- Alcance y límites: PR contiene el motor transaccional sintético y la corrección del fixture; sin endpoint, sin `rf-1:execute`, sin migración nueva, sin despliegue PS-009 y sin DML sobre clientes. VT-01..VT-09 y caso de uso con autorización/auditoría/conciliación siguen abiertos.
+- Estado: PS-009 EN_REVISION para el propietario; esperar los checks del PR y revisión humana. El propietario conserva el merge manual.
