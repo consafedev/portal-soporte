@@ -2,6 +2,7 @@ import {
   ClientConnectionBrokerMySql,
   FabricaConexionMysql2,
   FabricaTunelSsh2,
+  PoliticaDireccionesDestino,
   PoliticaDestinosConexion,
   ProveedorClavesMaestrasArchivo,
   ServicioCifradoSecretos,
@@ -37,6 +38,7 @@ export function cargarRuntimePerfilesConexion(
       new FabricaConexionMysql2(),
       new FabricaTunelSsh2(),
       5_000,
+      new PoliticaDireccionesDestino(),
     ),
   };
 }

@@ -15,6 +15,8 @@ export function calcularHuellaPerfilConexion(perfil: PerfilConexionCliente): str
     entorno: perfil.entorno,
     destinoMySqlId: perfil.destinoMySqlId,
     gatewaySshId: perfil.gatewaySshId,
+    destinoMySql: perfil.destinoMySql ?? null,
+    gatewaySsh: perfil.gatewaySsh ?? null,
     baseDatos: perfil.baseDatos,
     estado: perfil.estado,
     createdAt: perfil.createdAt.toISOString(),

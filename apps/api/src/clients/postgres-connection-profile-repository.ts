@@ -24,7 +24,12 @@ type FilaPerfilConexionMapeable = Pick<
   | 'profileType'
   | 'environment'
   | 'destinationId'
+  | 'destinationHostname'
+  | 'destinationPort'
   | 'gatewayId'
+  | 'gatewayHostname'
+  | 'gatewayPort'
+  | 'gatewayFingerprint'
   | 'databaseName'
   | 'status'
   | 'createdAt'
@@ -46,7 +51,12 @@ export class RepositorioPerfilesConexionPostgres implements RepositorioPerfilesC
         profileType: clientConnectionProfiles.profileType,
         environment: clientConnectionProfiles.environment,
         destinationId: clientConnectionProfiles.destinationId,
+        destinationHostname: clientConnectionProfiles.destinationHostname,
+        destinationPort: clientConnectionProfiles.destinationPort,
         gatewayId: clientConnectionProfiles.gatewayId,
+        gatewayHostname: clientConnectionProfiles.gatewayHostname,
+        gatewayPort: clientConnectionProfiles.gatewayPort,
+        gatewayFingerprint: clientConnectionProfiles.gatewayFingerprint,
         databaseName: clientConnectionProfiles.databaseName,
         status: clientConnectionProfiles.status,
         createdAt: clientConnectionProfiles.createdAt,
@@ -201,7 +211,12 @@ export class RepositorioPerfilesConexionPostgres implements RepositorioPerfilesC
           profileType: clientConnectionProfiles.profileType,
           environment: clientConnectionProfiles.environment,
           destinationId: clientConnectionProfiles.destinationId,
+          destinationHostname: clientConnectionProfiles.destinationHostname,
+          destinationPort: clientConnectionProfiles.destinationPort,
           gatewayId: clientConnectionProfiles.gatewayId,
+          gatewayHostname: clientConnectionProfiles.gatewayHostname,
+          gatewayPort: clientConnectionProfiles.gatewayPort,
+          gatewayFingerprint: clientConnectionProfiles.gatewayFingerprint,
           databaseName: clientConnectionProfiles.databaseName,
           status: clientConnectionProfiles.status,
           createdAt: clientConnectionProfiles.createdAt,
@@ -272,6 +287,12 @@ function mapearPerfilConexion(fila: FilaPerfilConexionMapeable): PerfilConexionC
     entorno: fila.environment,
     destinoMySqlId: fila.destinationId,
     gatewaySshId: fila.gatewayId,
+    destinoMySql: mapearEndpointPersistido(fila.destinationHostname, fila.destinationPort),
+    gatewaySsh: mapearGatewayPersistido(
+      fila.gatewayHostname,
+      fila.gatewayPort,
+      fila.gatewayFingerprint,
+    ),
     baseDatos: fila.databaseName,
     estado: fila.status,
     createdAt: fila.createdAt,

@@ -24,7 +24,7 @@ export interface GatewaySshPersistido extends EndpointConexionPersistido {
   readonly fingerprint: string;
 }
 
-/** Metadatos de un perfil que pueden entregarse a la interfaz administrativa. */
+/** Metadatos internos de un perfil; los endpoints solo pueden serializarse en rutas ADMIN. */
 export interface PerfilConexionCliente {
   /** UUID inmutable del perfil. */
   readonly id: string;
@@ -36,10 +36,14 @@ export interface PerfilConexionCliente {
   readonly tipo: TipoPerfilConexionCliente;
   /** Ambiente del sistema cliente. */
   readonly entorno: EntornoPerfilConexionCliente;
-  /** Identificador opaco del destino de red configurado por operaciones. */
+  /** Referencia interna de destino; permanece para compatibilidad con perfiles legacy. */
   readonly destinoMySqlId: string;
-  /** Identificador opaco del gateway autorizado, solo para MYSQL_SSH. */
+  /** Referencia interna de gateway legacy, solo para MYSQL_SSH. */
   readonly gatewaySshId: string | null;
+  /** Endpoint persistido para uso server-side y presentación ADMIN; no exponer a SUPPORT. */
+  readonly destinoMySql?: EndpointConexionPersistido | null;
+  /** Gateway y fingerprint persistidos; no exponer a SUPPORT. */
+  readonly gatewaySsh?: GatewaySshPersistido | null;
   /** Nombre de la base MySQL, sin hostname, usuario o contraseña. */
   readonly baseDatos: string;
   /** Estado lógico del perfil. */
@@ -72,11 +76,11 @@ export interface AltaPerfilConexionPersistido {
   readonly tipo: TipoPerfilConexionCliente;
   /** Ambiente del sistema cliente. */
   readonly entorno: EntornoPerfilConexionCliente;
-  /** Identificador del destino MySQL allowlisted. */
+  /** Referencia interna derivada del perfil; no representa aprobación por allowlist. */
   readonly destinoMySqlId: string;
   /** Endpoint nuevo por perfil; se omite solo mientras la capa de aplicación migra legacy. */
   readonly destinoMySql?: EndpointConexionPersistido | null;
-  /** Gateway allowlisted cuando la conexión usa SSH. */
+  /** Referencia interna derivada del perfil cuando se usa SSH. */
   readonly gatewaySshId: string | null;
   /** Endpoint y fingerprint SSH; null para conexión directa o perfil legacy. */
   readonly gatewaySsh?: GatewaySshPersistido | null;
@@ -94,11 +98,11 @@ export interface CambiosPerfilConexionPersistidos {
   readonly nombre?: string;
   /** Ambiente alternativo del sistema cliente. */
   readonly entorno?: EntornoPerfilConexionCliente;
-  /** Identificador de destino MySQL allowlisted. */
+  /** Referencia interna derivada del perfil; se conserva para filas legacy. */
   readonly destinoMySqlId?: string;
   /** Endpoint MySQL actualizado; null no se acepta para un perfil nuevo habilitado. */
   readonly destinoMySql?: EndpointConexionPersistido | null;
-  /** Gateway autorizado para conexiones SSH o null al cambiar a TCP. */
+  /** Referencia interna de gateway o null al retirar SSH. */
   readonly gatewaySshId?: string | null;
   /** Gateway actualizado, o null al retirar SSH; sin endpoint queda como perfil legacy. */
   readonly gatewaySsh?: GatewaySshPersistido | null;

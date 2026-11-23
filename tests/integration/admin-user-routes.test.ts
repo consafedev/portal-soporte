@@ -31,6 +31,7 @@ import {
 import type { MensajeCorreoAuth, RelojAuth } from '../../packages/core/src/auth/ports.js';
 import type {
   ClientConnectionBroker,
+  PerfilConexionPrueba,
   SobreSecretoCifrado,
 } from '../../packages/core/src/clients/secret-custody-ports.js';
 import { PoliticaDestinosConexion } from '../../packages/connectors/src/mysql-connection-broker.js';
@@ -83,6 +84,7 @@ const idsUsuariosCreados: string[] = [];
 const idsClientesCreados: string[] = [];
 const mensajesAdmin: MensajeCorreoAuth[] = [];
 const claveCustodiaSintetica = randomBytes(32);
+const solicitudesPerfilProbadas: PerfilConexionPrueba[] = [];
 
 /** Crea un cifrador de integración con material aleatorio que vive solo en memoria. */
 function crearCifradorIntegracion(): ServicioCifradoSecretos {
@@ -251,7 +253,8 @@ async function prepararAdministracion(): Promise<void> {
   const custodia = crearCifradorIntegracion();
   const brokerSintetico: ClientConnectionBroker = {
     /** Borra el paquete de credenciales sin abrir red y devuelve fallo explícitamente simulado. */
-    async probar(_perfil, secretos) {
+    async probar(perfil, secretos) {
+      solicitudesPerfilProbadas.push(perfil);
       secretos.fill(0);
       return { code: 'MYSQL_CONNECTION_FAILED', completedAt: reloj.ahora() };
     },
@@ -1217,7 +1220,7 @@ function definirPruebasAdmin(): void {
         nombre: 'MySQL de pruebas',
         tipo: 'MYSQL_TCP',
         entorno: 'TEST',
-        destinoMySql: { hostname: 'mysql.test.invalid', port: 3306 },
+        destinoMySql: { hostname: 'mysql.autoservicio.test', port: 3306 },
         baseDatos: 'base_sintetica',
         credenciales: { mysqlUsername: 'usuario_sintetico', mysqlPassword: secretoPrimario },
       },
@@ -1232,8 +1235,27 @@ function definirPruebasAdmin(): void {
       throw new Error('No se creó el perfil sintético de conexión.');
     }
     idPerfilPrueba = perfil.id;
+    const actualizacionPerfil = await exigirAplicacion().inject({
+      method: 'PATCH',
+      url: `/api/v1/admin/clients/${cliente.id}/connection-profiles/${perfil.id}`,
+      headers: await headersDeEscritura(admin),
+      payload: {
+        destinoMySql: { hostname: 'mysql.autoservicio.actualizado.test', port: 3307 },
+      },
+    });
+    const destinoActualizado = await exigirBasePrueba()
+      .select({
+        destinationHostname: clientConnectionProfiles.destinationHostname,
+        destinationPort: clientConnectionProfiles.destinationPort,
+      })
+      .from(clientConnectionProfiles)
+      .where(eq(clientConnectionProfiles.id, perfil.id));
     const perfilPersistido = await exigirBasePrueba()
-      .select({ secretEnvelope: clientConnectionProfiles.secretEnvelope })
+      .select({
+        secretEnvelope: clientConnectionProfiles.secretEnvelope,
+        destinationHostname: clientConnectionProfiles.destinationHostname,
+        destinationPort: clientConnectionProfiles.destinationPort,
+      })
       .from(clientConnectionProfiles)
       .where(eq(clientConnectionProfiles.id, perfil.id));
     const listado = await exigirAplicacion().inject({
@@ -1258,12 +1280,30 @@ function definirPruebasAdmin(): void {
       url: `/api/v1/admin/clients/${cliente.id}/connection-profiles/${perfil.id}/test`,
       headers: await headersDeEscritura(admin),
     });
+    const destinoAlterno = await exigirAplicacion().inject({
+      method: 'POST',
+      url: `/api/v1/admin/clients/${cliente.id}/connection-profiles/${perfil.id}/test`,
+      headers: await headersDeEscritura(admin),
+      payload: { destinoMySql: { hostname: 'mysql.alterno.test', port: 3306 } },
+    });
     const auditoria = await exigirBaseMigrador()
       .select({ action: auditEvents.action, metadata: auditEvents.metadata })
       .from(auditEvents)
       .where(sql`${auditEvents.metadata}->>'profileId' = ${perfil.id}`);
 
-    expect(perfil.destinoMySql).toEqual({ hostname: 'mysql.test.invalid', port: 3306 });
+    expect(perfil.destinoMySql).toEqual({ hostname: 'mysql.autoservicio.test', port: 3306 });
+    expect(actualizacionPerfil.statusCode).toBe(200);
+    expect(actualizacionPerfil.json()).toMatchObject({
+      destinoMySql: { hostname: 'mysql.autoservicio.actualizado.test', port: 3307 },
+    });
+    expect(destinoActualizado[0]).toEqual({
+      destinationHostname: 'mysql.autoservicio.actualizado.test',
+      destinationPort: 3307,
+    });
+    expect(perfilPersistido[0]).toMatchObject({
+      destinationHostname: 'mysql.autoservicio.actualizado.test',
+      destinationPort: 3307,
+    });
     expect(perfil).not.toHaveProperty('destinoMySqlId');
     expect(perfil).not.toHaveProperty('gatewaySshId');
     expect(altaPerfil.body).not.toContain(secretoPrimario);
@@ -1295,6 +1335,11 @@ function definirPruebasAdmin(): void {
     expect(reemplazoPersistidoCorrectamente).toBe(true);
     expect(pruebaSimulada.statusCode).toBe(200);
     expect(pruebaSimulada.json()).toMatchObject({ code: 'MYSQL_CONNECTION_FAILED' });
+    expect(solicitudesPerfilProbadas).toHaveLength(1);
+    expect(solicitudesPerfilProbadas[0]).toMatchObject({
+      destinoMySql: { hostname: 'mysql.autoservicio.actualizado.test', port: 3307 },
+    });
+    expect(destinoAlterno.statusCode).toBe(400);
     expect(JSON.stringify(auditoria)).not.toContain(secretoPrimario);
     expect(JSON.stringify(auditoria)).not.toContain(secretoReemplazo);
     expect(auditoria.map((evento) => evento.action)).toEqual(
@@ -1303,6 +1348,9 @@ function definirPruebasAdmin(): void {
         'CLIENT_CONNECTION_CREDENTIALS_REPLACED',
         'CLIENT_CONNECTION_TESTED',
       ]),
+    );
+    expect(auditoria.filter((evento) => evento.action === 'CLIENT_CONNECTION_TESTED')).toHaveLength(
+      1,
     );
   });
 

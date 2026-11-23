@@ -1,7 +1,10 @@
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { domainToASCII } from 'node:url';
-import type { EndpointConexionAdmin } from '../../contracts/src/clients.js';
+import type {
+  EndpointConexionAdmin,
+  GatewaySshConexionAdmin,
+} from '../../contracts/src/clients.js';
 
 /** Código estable que puede traducir la API sin incluir hostnames ni direcciones. */
 export type CodigoErrorPoliticaDestino =
@@ -49,6 +52,37 @@ export interface OpcionesPoliticaDireccionesDestino {
 const TIEMPO_MAXIMO_DNS_MS = 5_000;
 const MAXIMO_DIRECCIONES_DNS = 16;
 const PATRON_FINGERPRINT_SHA256 = /^SHA256:[A-Za-z0-9+/]{43}$/u;
+
+/** Normaliza un endpoint administrativo sin resolver DNS ni abrir conexiones.
+ * @param endpoint Hostname/IP y puerto introducidos por ADMIN.
+ * @returns Endpoint canónico que puede persistirse en el perfil.
+ * @throws ErrorPoliticaDestino si la sintaxis o el puerto no son válidos.
+ * @effects No consulta DNS ni realiza operaciones de red.
+ */
+export function normalizarEndpointConexionAdmin(
+  endpoint: EndpointConexionAdmin,
+): EndpointConexionAdmin {
+  return normalizarEndpoint(endpoint);
+}
+
+/** Normaliza un gateway SSH y exige la fingerprint que autentica su identidad.
+ * @param gateway Hostname, puerto y fingerprint configurados por ADMIN.
+ * @returns Gateway SSH canónico, sin resolver DNS ni abrir conexiones.
+ * @throws ErrorPoliticaDestino si el endpoint o la fingerprint no son válidos.
+ * @effects No consulta DNS ni realiza operaciones de red.
+ */
+export function normalizarGatewaySshConexionAdmin(
+  gateway: GatewaySshConexionAdmin,
+): GatewaySshConexionAdmin {
+  const endpoint = normalizarEndpoint(gateway);
+  if (
+    typeof gateway.fingerprint !== 'string' ||
+    !PATRON_FINGERPRINT_SHA256.test(gateway.fingerprint)
+  ) {
+    throw new ErrorPoliticaDestino('DESTINATION_INVALID');
+  }
+  return { ...endpoint, fingerprint: gateway.fingerprint };
+}
 
 /** Valida destinos MySQL directos, gateways SSH y targets protegidos por un túnel. */
 export class PoliticaDireccionesDestino {
