@@ -2509,3 +2509,23 @@ eload, se reinició únicamente cloudflared-consafedev.service; procesos web, AP
 - Integración PostgreSQL remota 93/93, E2E remoto 19/19, lint, typecheck, build, auditoría de dependencias y escaneo de secretos quedaron PASS. La revisión independiente read-only no encontró hallazgos adicionales.
 - format:check se volvió a ejecutar y FALLA en 211 archivos del workspace bajo Windows. Todos los archivos modificados pasan Prettier focal con EOL auto; git diff --check y check:secrets PASS. No se reformatearon archivos no relacionados.
 - Fixture MySQL/SSH sigue NO EJECUTADO por falta de Docker Engine. El plan de Task 6, puntos 6 y 8 está registrado; quedan commits, CI remoto/PR y revisión manual. PS-005.4 se mantiene EN_REVISION.
+
+### 2026-11-23T16:14:23-06:00 — Codex — PS-005.4 Task 6 — INICIO DE CORRECCIÓN CI
+- Rama/base: `codex/ps-0054-destinos-autoservicio`, HEAD `824bfc2762ca2c4d1b5e0b59d3f5f1b23d9581b2`, base `main` `0adacbe2f69d940ad8fd1941477d213c39bfdea5`; PR #9 permanece abierto.
+- Objetivo: corregir la falla confirmada del job `Ejecutar pruebas` sin alterar el alcance funcional de PS-005.4.
+- Alcance previsto: inicialización determinista del paquete `@portal-soporte/connectors` antes de Vitest; `package.json`, pruebas/CI solo si se demuestra necesario, WORKLOG y TASK_BOARD.
+- Evidencia inicial: ambos runs (push 45275548604 y pull_request 45276523160) fallan en dos archivos unitarios con `Failed to resolve entry for package "@portal-soporte/connectors"`; 403 tests reportados PASS y el fixture del run PR 11/11 PASS. El contrato exports importa `dist/connectors/src/index.js`, y el workflow ejecuta `pnpm test` antes de `pnpm build`.
+- Reproducción local focal 23/23 PASS con el artefacto `dist` ya disponible en este checkout; no representa un checkout limpio. Riesgo: validar que el script de test construya el workspace dependency en una instalación limpia y no dependa del artefacto local.
+- Verificaciones previstas: reproducción con build prerequisite, suite unitaria completa, format focal, lint/typecheck/build pertinentes, check:secrets y nuevo GitHub Actions. Sin modificación de producción, bases, clientes, Cloudflare, DNS, firewall o servicios.
+- UI/UX: no aplica.
+- Próximo paso: aplicar el cambio mínimo al comando `test`, ejecutar suite y publicar commit normal en la rama existente para CI.
+- Estado: EN_CURSO.
+
+### 2026-11-23T16:17:10-06:00 — Codex — PS-005.4 Task 6 — CORRECCIÓN DEL ORDEN DE TESTS
+- Causa raíz confirmada en GitHub: el workflow ejecutaba `pnpm test` antes de `pnpm build`; `@portal-soporte/connectors` exporta runtime desde `dist/connectors/src/index.js`, inexistente en checkout limpio. Fallaban imports de `connection-profile-service.ts` en `connection-profile-service.test.ts` y `rf1-insertion-service.test.ts`. El fallo es de preparación del paquete de workspace, no de aserciones funcionales. Dos runs fallidos: push 45275548604 y PR 45276523160; 403 resultados Vitest pasaron y fixture MySQL/SSH 11/11 pasó.
+- Corrección mínima: `package.json` hace que `pnpm test` construya primero `@portal-soporte/connectors` y ejecute Vitest después. No se alteró código de dominio, conexión, migraciones ni pruebas funcionales.
+- Verificación nueva: `corepack pnpm@12.21.0 test` PASS; build de connectors incluido y 48 archivos/426 tests PASS. Focal pre-cambio local 23/23 PASS con artefacto dist preexistente (no reproduce checkout limpio); el fallo limpio está reproducido por ambos runs de CI. `prettier --check package.json`, `git diff --check` y `check:secrets` PASS.
+- Estado GitHub al corregir: run push y run de PR anteriores FAILED en el mismo paso; el fixture pasó en ambos runs. Falta nuevo run en el SHA de corrección. PR #9 permanece abierto, sin merge.
+- Archivos: `package.json`, `docs/operations/WORKLOG.md`, `docs/operations/TASK_BOARD.md`. UI/UX: no aplica.
+- Próximo paso: validar diff/secretos, commit focalizado, push normal a la rama existente y esperar GitHub Actions del SHA nuevo. Mantener PS-005.4 EN_REVISION al entregar.
+- Estado: EN_CURSO.
