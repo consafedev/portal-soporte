@@ -35,6 +35,24 @@ const perfilDirecto: PerfilConexionPrueba = {
   baseDatos: 'base_sintetica',
 };
 
+describe('PoliticaDestinosConexion', () => {
+  it('resuelve destinos por hostname y puerto visibles en el formulario', () => {
+    const politica = new PoliticaDestinosConexion([destino], [gateway]);
+
+    expect(politica.buscarMySql('DB.TEST.INVALID', 3306)?.id).toBe(destino.id);
+    expect(politica.buscarMySql('db.test.invalid', 3307)).toBeUndefined();
+    expect(politica.buscarGatewaySsh('SSH.TEST.INVALID', 22)?.id).toBe(gateway.id);
+    expect(politica.buscarGatewaySsh('ssh.test.invalid', 2222)).toBeUndefined();
+  });
+
+  it('rechaza endpoints ambiguos en lugar de elegir una IP operacional', () => {
+    const destinoDuplicado = { ...destino, id: 'otro-id-interno', address: '192.0.2.99' };
+    const politica = new PoliticaDestinosConexion([destino, destinoDuplicado], []);
+
+    expect(politica.buscarMySql('db.test.invalid', 3306)).toBeUndefined();
+  });
+});
+
 /** Construye factories que registran únicamente datos sintéticos y el SQL fijo del broker. */
 function crearFactories(
   consulta: () => Promise<void> = async () => undefined,
