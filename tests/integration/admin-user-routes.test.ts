@@ -1354,6 +1354,38 @@ function definirPruebasAdmin(): void {
     );
   });
 
+  it('no prueba un perfil activo cuando el cliente está desactivado', async () => {
+    const admin = cookieAdmin;
+    const clientId = idClientePerfilPrueba;
+    const profileId = idPerfilPrueba;
+    if (admin === null || clientId === null || profileId === null) {
+      throw new Error('La prueba requiere el perfil sintético ADMIN creado previamente.');
+    }
+
+    await exigirBasePrueba()
+      .update(clients)
+      .set({ status: 'DISABLED' })
+      .where(eq(clients.id, clientId));
+    const solicitudesPrevias = solicitudesPerfilProbadas.length;
+    try {
+      const respuesta = await exigirAplicacion().inject({
+        method: 'POST',
+        url: `/api/v1/admin/clients/${clientId}/connection-profiles/${profileId}/test`,
+        headers: await headersDeEscritura(admin),
+      });
+
+      expect(respuesta.statusCode).toBe(404);
+      expect(respuesta.json()).toMatchObject({ code: 'PROFILE_NOT_FOUND' });
+      expect(solicitudesPerfilProbadas).toHaveLength(solicitudesPrevias);
+      expect(respuesta.body).not.toContain('mysql.autoservicio.actualizado.test');
+    } finally {
+      await exigirBasePrueba()
+        .update(clients)
+        .set({ status: 'ACTIVE' })
+        .where(eq(clients.id, clientId));
+    }
+  });
+
   it('deniega a SUPPORT leer o modificar perfiles de conexión y credenciales', async () => {
     const support = cookieSupport;
     const clientId = idClientePerfilPrueba;

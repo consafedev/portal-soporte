@@ -13,7 +13,7 @@ import type {
 import type { ActorAdministracionClientes } from '../../../../packages/core/src/clients/ports.js';
 import type { ResultadoPruebaConexion } from '../../../../packages/core/src/clients/secret-custody-ports.js';
 import type { BaseDatosAuth } from '../db/client.js';
-import { auditEvents, clientConnectionProfiles } from '../db/schema.js';
+import { auditEvents, clientConnectionProfiles, clients } from '../db/schema.js';
 
 /** Columnas de perfil que se pueden mapear sin cargar la credencial cifrada. */
 type FilaPerfilConexionMapeable = Pick<
@@ -237,23 +237,25 @@ export class RepositorioPerfilesConexionPostgres implements RepositorioPerfilesC
     });
   }
 
-  /** Recupera el sobre en memoria solo de un perfil activo y del cliente indicado. */
+  /** Recupera el sobre solo si el perfil y su cliente están activos y vinculados. */
   public async obtenerParaPrueba(
     clientId: string,
     profileId: string,
   ): Promise<PerfilConexionPersistido | null> {
     const [fila] = await this.database
-      .select()
+      .select({ perfil: clientConnectionProfiles })
       .from(clientConnectionProfiles)
+      .innerJoin(clients, eq(clients.id, clientConnectionProfiles.clientId))
       .where(
         and(
           eq(clientConnectionProfiles.clientId, clientId),
           eq(clientConnectionProfiles.id, profileId),
           eq(clientConnectionProfiles.status, 'ACTIVE'),
+          eq(clients.status, 'ACTIVE'),
         ),
       )
       .limit(1);
-    return fila === undefined ? null : mapearPerfilPersistido(fila);
+    return fila === undefined ? null : mapearPerfilPersistido(fila.perfil);
   }
 
   /** Registra un resultado sanitizado aun si el conector rechazó o agotó su tiempo. */
