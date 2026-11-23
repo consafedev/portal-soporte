@@ -69,6 +69,16 @@ function crearPerfil(): PerfilConexionCliente {
   };
 }
 
+/** Construye un perfil persistido legacy sin endpoints ni datos reales de conexión. */
+function crearPerfilPersistido(sobre: PerfilConexionPersistido['sobre']): PerfilConexionPersistido {
+  return {
+    ...crearPerfil(),
+    sobre,
+    destinoMySql: null,
+    gatewaySsh: null,
+  };
+}
+
 /** Construye un repositorio en memoria que registra auditoría sin persistencia externa. */
 function crearRepositorio(perfil: PerfilConexionPersistido): RepositorioPerfilesConexion & {
   readonly auditorias: ResultadoPruebaConexion[];
@@ -109,8 +119,7 @@ describe('ServicioPerfilesConexion', () => {
   it('resuelve host y puerto aprobados y no expone IDs operacionales en el DTO', async () => {
     const perfil = crearPerfil();
     const repositorio = crearRepositorio({
-      ...perfil,
-      sobre: await crearCifrador().cifrar(Buffer.from('fixture'), contexto),
+      ...crearPerfilPersistido(await crearCifrador().cifrar(Buffer.from('fixture'), contexto)),
     });
     const servicio = new ServicioPerfilesConexion(
       repositorio,
@@ -160,8 +169,7 @@ describe('ServicioPerfilesConexion', () => {
   it('rechaza host y puerto no configurados antes de cifrar o persistir credenciales', async () => {
     const perfil = crearPerfil();
     const repositorio = crearRepositorio({
-      ...perfil,
-      sobre: await crearCifrador().cifrar(Buffer.from('fixture'), contexto),
+      ...crearPerfilPersistido(await crearCifrador().cifrar(Buffer.from('fixture'), contexto)),
     });
     const servicio = new ServicioPerfilesConexion(
       repositorio,
@@ -205,8 +213,7 @@ describe('ServicioPerfilesConexion', () => {
   it('acepta la configuración SSH con hosts visibles y conserva referencias solo en servidor', async () => {
     const perfil = crearPerfil();
     const repositorio = crearRepositorio({
-      ...perfil,
-      sobre: await crearCifrador().cifrar(Buffer.from('fixture'), contexto),
+      ...crearPerfilPersistido(await crearCifrador().cifrar(Buffer.from('fixture'), contexto)),
     });
     const servicio = new ServicioPerfilesConexion(
       repositorio,
@@ -265,7 +272,7 @@ describe('ServicioPerfilesConexion', () => {
     );
     const sobre = await cifrador.cifrar(material, contexto);
     material.fill(0);
-    const perfil: PerfilConexionPersistido = { ...crearPerfil(), sobre };
+    const perfil = crearPerfilPersistido(sobre);
     const repositorio = crearRepositorio(perfil);
     let bufferRecibido: Uint8Array | undefined;
     const broker = {
@@ -305,7 +312,7 @@ describe('ServicioPerfilesConexion', () => {
     );
     const sobre = await cifrador.cifrar(material, contexto);
     material.fill(0);
-    const perfil: PerfilConexionPersistido = { ...crearPerfil(), sobre };
+    const perfil = crearPerfilPersistido(sobre);
     const repositorio = crearRepositorio(perfil);
     repositorio.registrarPrueba.mockRejectedValueOnce(new Error('audit storage unavailable'));
     const servicio = new ServicioPerfilesConexion(
@@ -333,10 +340,8 @@ describe('ServicioPerfilesConexion', () => {
   });
 
   it('rechaza crear un perfil cuando la custodia no está disponible', async () => {
-    const perfil = crearPerfil();
     const repositorio = crearRepositorio({
-      ...perfil,
-      sobre: await crearCifrador().cifrar(Buffer.from('x'), contexto),
+      ...crearPerfilPersistido(await crearCifrador().cifrar(Buffer.from('x'), contexto)),
     });
     const credenciales: SolicitudCrearPerfilConexionAdmin = {
       nombre: 'Nuevo',
@@ -380,7 +385,7 @@ describe('ServicioPerfilesConexion', () => {
     );
     const sobre = await cifrador.cifrar(material, contexto);
     material.fill(0);
-    const perfil: PerfilConexionPersistido = { ...crearPerfil(), sobre };
+    const perfil = crearPerfilPersistido(sobre);
     const repositorio = crearRepositorio(perfil);
     const sesion: SesionLecturaRf1 = {
       async buscarSociedadesPorRfc() {
@@ -432,7 +437,7 @@ describe('ServicioPerfilesConexion', () => {
     const material = Buffer.from('{"mysqlUsername":"sintetico","mysqlPassword":"sintetico"}');
     const sobre = await cifrador.cifrar(material, contexto);
     material.fill(0);
-    const perfil: PerfilConexionPersistido = { ...crearPerfil(), sobre };
+    const perfil = crearPerfilPersistido(sobre);
     const abrirInsercionRf1 = vi.fn(async () => {
       throw new Error('no debe abrirse el broker');
     });
@@ -470,7 +475,7 @@ describe('ServicioPerfilesConexion', () => {
     );
     const sobre = await cifrador.cifrar(material, contexto);
     material.fill(0);
-    const perfil: PerfilConexionPersistido = { ...crearPerfil(), sobre };
+    const perfil = crearPerfilPersistido(sobre);
     const servicio = new ServicioPerfilesConexion(
       crearRepositorio(perfil),
       cifrador,

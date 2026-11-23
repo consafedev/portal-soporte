@@ -3,6 +3,8 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 import type {
   AltaPerfilConexionPersistido,
   CambiosPerfilConexionPersistidos,
+  EndpointConexionPersistido,
+  GatewaySshPersistido,
   PerfilConexionCliente,
   PerfilConexionPersistido,
   RepositorioPerfilesConexion,
@@ -76,7 +78,12 @@ export class RepositorioPerfilesConexionPostgres implements RepositorioPerfilesC
             profileType: entrada.tipo,
             environment: entrada.entorno,
             destinationId: entrada.destinoMySqlId,
+            destinationHostname: entrada.destinoMySql?.hostname ?? null,
+            destinationPort: entrada.destinoMySql?.port ?? null,
             gatewayId: entrada.gatewaySshId,
+            gatewayHostname: entrada.gatewaySsh?.hostname ?? null,
+            gatewayPort: entrada.gatewaySsh?.port ?? null,
+            gatewayFingerprint: entrada.gatewaySsh?.fingerprint ?? null,
             databaseName: entrada.baseDatos,
             secretEnvelope: entrada.sobre,
             status: 'ACTIVE',
@@ -126,7 +133,20 @@ export class RepositorioPerfilesConexionPostgres implements RepositorioPerfilesC
           ...(cambios.destinoMySqlId === undefined
             ? {}
             : { destinationId: cambios.destinoMySqlId }),
+          ...(cambios.destinoMySql === undefined
+            ? {}
+            : {
+                destinationHostname: cambios.destinoMySql?.hostname ?? null,
+                destinationPort: cambios.destinoMySql?.port ?? null,
+              }),
           ...(cambios.gatewaySshId === undefined ? {} : { gatewayId: cambios.gatewaySshId }),
+          ...(cambios.gatewaySsh === undefined
+            ? {}
+            : {
+                gatewayHostname: cambios.gatewaySsh?.hostname ?? null,
+                gatewayPort: cambios.gatewaySsh?.port ?? null,
+                gatewayFingerprint: cambios.gatewaySsh?.fingerprint ?? null,
+              }),
           ...(cambios.baseDatos === undefined ? {} : { databaseName: cambios.baseDatos }),
           ...(cambios.estado === undefined ? {} : { status: cambios.estado }),
           updatedAt: cambios.updatedAt,
@@ -263,7 +283,45 @@ function mapearPerfilConexion(fila: FilaPerfilConexionMapeable): PerfilConexionC
 function mapearPerfilPersistido(
   fila: typeof clientConnectionProfiles.$inferSelect,
 ): PerfilConexionPersistido {
-  return { ...mapearPerfilConexion(fila), sobre: fila.secretEnvelope };
+  return {
+    ...mapearPerfilConexion(fila),
+    sobre: fila.secretEnvelope,
+    destinoMySql: mapearEndpointPersistido(fila.destinationHostname, fila.destinationPort),
+    gatewaySsh: mapearGatewayPersistido(
+      fila.gatewayHostname,
+      fila.gatewayPort,
+      fila.gatewayFingerprint,
+    ),
+  };
+}
+
+/** Convierte hostname y puerto nullable en un endpoint interno o falla ante una fila parcial. */
+function mapearEndpointPersistido(
+  hostname: string | null,
+  puerto: number | null,
+): EndpointConexionPersistido | null {
+  if (hostname === null && puerto === null) {
+    return null;
+  }
+  if (hostname === null || puerto === null || !Number.isInteger(puerto)) {
+    throw new Error('CONNECTION_PROFILE_DESTINATION_INCOMPLETE');
+  }
+  return { hostname, port: puerto };
+}
+
+/** Convierte el gateway nullable en un endpoint SSH completo y verifica su fingerprint presente. */
+function mapearGatewayPersistido(
+  hostname: string | null,
+  puerto: number | null,
+  fingerprint: string | null,
+): GatewaySshPersistido | null {
+  if (hostname === null && puerto === null && fingerprint === null) {
+    return null;
+  }
+  if (hostname === null || puerto === null || fingerprint === null || !Number.isInteger(puerto)) {
+    throw new Error('CONNECTION_PROFILE_GATEWAY_INCOMPLETE');
+  }
+  return { hostname, port: puerto, fingerprint };
 }
 
 /** Registra metadatos auditables sin nombres, usuarios, hosts ni valores secretos. */

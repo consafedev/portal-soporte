@@ -64,6 +64,20 @@
       "when": 1795342994856,
       "tag": "0008_rf1_execute_capability",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1795460054594,
+      "tag": "0009_connection_profile_destinations",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795461441452,
+      "tag": "0010_connection_profile_complete_endpoint",
+      "breakpoints": true
     }
   ]
 }
