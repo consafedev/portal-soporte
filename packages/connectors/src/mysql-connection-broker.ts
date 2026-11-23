@@ -32,17 +32,26 @@ export interface MaterialTlsConexion {
   readonly key?: string;
 }
 
-/** Credencial SSH limitada a PEM compatible o PPK v2 RSA, sin autenticación por contraseña. */
-export interface AutenticacionSshPrueba {
-  /** Cuenta del sistema remoto, limitada por longitud y caracteres de control. */
-  readonly username: string;
-  /** Única modalidad permitida; nunca se envía contraseña SSH. */
-  readonly authentication: 'PRIVATE_KEY';
-  /** Llave privada PEM temporal, cifrada antes de persistir. */
-  readonly privateKey: string;
-  /** Passphrase opcional de una llave cifrada. */
-  readonly passphrase?: string;
-}
+/** Credencial SSH de llave privada o contraseña, mantenida en memoria solo durante la operación. */
+export type AutenticacionSshPrueba =
+  | {
+      /** Cuenta del sistema remoto, limitada por longitud y caracteres de control. */
+      readonly username: string;
+      /** Modalidad de autenticación con material criptográfico local. */
+      readonly authentication: 'PRIVATE_KEY';
+      /** Llave privada PEM temporal, cifrada antes de persistir. */
+      readonly privateKey: string;
+      /** Passphrase opcional de una llave cifrada. */
+      readonly passphrase?: string;
+    }
+  | {
+      /** Cuenta del sistema remoto, limitada por longitud y caracteres de control. */
+      readonly username: string;
+      /** Modalidad de autenticación tradicional aceptada por Workbench. */
+      readonly authentication: 'PASSWORD';
+      /** Contraseña SSH cifrada antes de persistir y nunca devuelta por la API. */
+      readonly password: string;
+    };
 
 /** Parámetros internos MySQL ya ligados a un destino fijo de la allowlist. */
 export interface DatosConexionMySql {
@@ -311,6 +320,7 @@ export class ClientConnectionBrokerMySql implements ClientConnectionBroker {
         let gatewayUsado: GatewaySshPermitido | undefined;
         if (perfil.tipo === 'MYSQL_SSH') {
           if (gateway === undefined) throw new ErrorConectorPrueba('DESTINATION_NOT_ALLOWED');
+          if (credenciales.ssh === null) throw new Error('INVALID_CREDENTIALS');
           etapa = 'SSH';
           gatewayUsado = gateway;
           recursos.tunel = await this.ssh.abrir(
@@ -435,6 +445,9 @@ export class ClientConnectionBrokerMySql implements ClientConnectionBroker {
           if (gateway === undefined) {
             throw new ErrorConectorPrueba('DESTINATION_NOT_ALLOWED');
           }
+          if (secretosValidos.ssh === null) {
+            throw new Error('INVALID_CREDENTIALS');
+          }
           etapa = 'SSH';
           gatewayUsado = gateway;
           recursos.tunel = await this.ssh.abrir(
@@ -497,7 +510,7 @@ interface CredencialesConexionAnalizadas {
   /** CA y credencial TLS cliente opcionales, nunca devueltas al llamador. */
   readonly tls: MaterialTlsConexion;
   /** Credenciales SSH necesarias solo para MYSQL_SSH. */
-  readonly ssh: AutenticacionSshPrueba;
+  readonly ssh: AutenticacionSshPrueba | null;
 }
 
 /** Error de formato que el broker puede reportar sin exponer contenido del paquete secreto. */
@@ -609,7 +622,7 @@ function analizarCredenciales(
       mysqlUsername: documento['mysqlUsername'],
       mysqlPassword: documento['mysqlPassword'],
       tls,
-      ssh: ssh ?? { username: '', authentication: 'PRIVATE_KEY', privateKey: '' },
+      ssh,
     };
   } catch {
     return null;
@@ -655,6 +668,23 @@ function analizarAutenticacionSsh(
     !/^\S.{0,127}$/u.test(valor['username'])
   ) {
     return null;
+  }
+  if (valor['authentication'] === 'PASSWORD') {
+    if (
+      !objetoEstricto(
+        valor,
+        ['username', 'authentication', 'password'],
+        ['username', 'authentication', 'password'],
+      ) ||
+      !textoSecretoValido(valor['password'], 4_096)
+    ) {
+      return null;
+    }
+    return {
+      username: valor['username'],
+      authentication: 'PASSWORD',
+      password: valor['password'],
+    };
   }
   if (valor['authentication'] === 'PRIVATE_KEY') {
     const llavePrivada = valor['privateKey'];

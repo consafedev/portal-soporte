@@ -304,7 +304,7 @@ function crearOpcionesConexionSsh(
   credencial: AutenticacionSshPrueba,
   tiempoHandshakeMs: number,
 ): { readonly opciones: ConnectConfig; readonly hostRechazado: () => boolean } {
-  const autenticacion = crearOpcionesClavePrivada(credencial);
+  const autenticacion = crearOpcionesAutenticacionSsh(credencial);
   let hostRechazado = false;
   return {
     opciones: {
@@ -324,9 +324,22 @@ function crearOpcionesConexionSsh(
   };
 }
 
+/** Convierte la modalidad validada en opciones SSH sin activar agente ni teclado interactivo.
+ * @param credencial Material SSH ya validado por el broker y descifrado para esta operación.
+ * @returns Solo los campos de autenticación requeridos por ssh2.
+ */
+export function crearOpcionesAutenticacionSsh(
+  credencial: AutenticacionSshPrueba,
+): Pick<ConnectConfig, 'privateKey' | 'passphrase' | 'password'> {
+  if (credencial.authentication === 'PASSWORD') {
+    return { password: credencial.password };
+  }
+  return crearOpcionesClavePrivada(credencial);
+}
+
 /** Valida el formato de la llave privada antes de entregarla al cliente SSH2. */
 function crearOpcionesClavePrivada(
-  credencial: AutenticacionSshPrueba,
+  credencial: Extract<AutenticacionSshPrueba, { readonly authentication: 'PRIVATE_KEY' }>,
 ): Pick<ConnectConfig, 'privateKey' | 'passphrase'> {
   const esPem = /^-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----\r?$/mu.test(credencial.privateKey);
   const esPpkV2Rsa = /^PuTTY-User-Key-File-2: ssh-rsa\r?\n/u.test(credencial.privateKey);

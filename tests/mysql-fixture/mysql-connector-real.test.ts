@@ -30,6 +30,8 @@ interface ConfiguracionFixtureMysql {
   readonly caPath: string;
   readonly pemPrivateKeyPath: string;
   readonly ppkPrivateKeyPath: string;
+  /** Contraseña SSH generada al vuelo por el fixture, no persistente ni registrada. */
+  readonly sshPassword: string;
   /** Puerto loopback y huella del host SSH creados durante la ejecución. */
   readonly sshPort: number;
   readonly sshFingerprint: string;
@@ -111,6 +113,7 @@ function crearCredenciales(
     readonly ca?: string;
     readonly privateKey?: string;
     readonly ssh?: boolean;
+    readonly sshPassword?: string;
   } = {},
 ): Buffer {
   const credenciales = {
@@ -119,12 +122,19 @@ function crearCredenciales(
     tls: { ca: opciones.ca ?? readFileSync(configuracion.caPath, 'utf8') },
     ...(opciones.ssh
       ? {
-          ssh: {
-            username: 'fixture',
-            authentication: 'PRIVATE_KEY',
-            privateKey:
-              opciones.privateKey ?? readFileSync(configuracion.pemPrivateKeyPath, 'utf8'),
-          },
+          ssh:
+            opciones.sshPassword === undefined
+              ? {
+                  username: 'fixture',
+                  authentication: 'PRIVATE_KEY',
+                  privateKey:
+                    opciones.privateKey ?? readFileSync(configuracion.pemPrivateKeyPath, 'utf8'),
+                }
+              : {
+                  username: 'fixture',
+                  authentication: 'PASSWORD',
+                  password: opciones.sshPassword,
+                },
         }
       : {}),
   };
@@ -142,8 +152,14 @@ async function probarConexion(
 }
 
 /** Ejecuta las lecturas RF-1 contra el catálogo exclusivamente sintético del fixture. */
-async function probarLecturasRf1(perfil: PerfilConexionPrueba): Promise<void> {
-  const secretos = crearCredenciales({ ssh: perfil.tipo === 'MYSQL_SSH' });
+async function probarLecturasRf1(
+  perfil: PerfilConexionPrueba,
+  sshPassword?: string,
+): Promise<void> {
+  const secretos = crearCredenciales({
+    ssh: perfil.tipo === 'MYSQL_SSH',
+    ...(sshPassword === undefined ? {} : { sshPassword }),
+  });
   const broker = crearBroker({}, perfil);
   const sesion = await broker.abrirLecturaRf1(perfil, secretos, new AbortController().signal);
   try {
@@ -292,6 +308,24 @@ async function probarTunelPpk(): Promise<void> {
   );
   expect(resultado.code).toBe('CONNECTED');
   expect([...resultado.secretos].every((byte) => byte === 0)).toBe(true);
+}
+
+/** Comprueba que el fixture acepta contraseña SSH sin alterar la política del forward.
+ * @returns Promesa resuelta si el handshake, TLS y SELECT 1 terminan correctamente.
+ */
+async function probarTunelPassword(): Promise<void> {
+  const perfil: PerfilConexionPrueba = {
+    ...perfilBase,
+    tipo: 'MYSQL_SSH',
+    gatewaySshId: idGateway,
+  };
+  const resultado = await probarConexion(
+    perfil,
+    crearCredenciales({ ssh: true, sshPassword: configuracion.sshPassword }),
+  );
+  expect(resultado.code).toBe('CONNECTED');
+  expect([...resultado.secretos].every((byte) => byte === 0)).toBe(true);
+  await probarLecturasRf1(perfil, configuracion.sshPassword);
 }
 
 /** Rechaza una huella no coincidente y un destino que no pertenece a la política fijada. */
@@ -455,6 +489,7 @@ describe('conector MySQL real con servicios sintéticos efímeros', () => {
     await probarLecturasRf1({ ...perfilBase, tipo: 'MYSQL_SSH', gatewaySshId: idGateway });
   });
   it('ejecuta SELECT 1 por SSH y TLS con llave PPK v2 RSA', probarTunelPpk);
+  it('ejecuta SELECT 1 por SSH y TLS con contraseña sintética', probarTunelPassword);
   it('rechaza fingerprint SSH incorrecta y destinos fuera de allowlist', rechazarHuellaYDestino);
   it(
     'rechaza puertos no permitidos aunque el cliente solicite un forward',

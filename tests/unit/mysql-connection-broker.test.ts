@@ -285,7 +285,7 @@ describe('ClientConnectionBrokerMySql', () => {
     }
   });
 
-  it('rechaza contraseña SSH y distingue un PPK fuera de formato', async () => {
+  it('acepta contraseña SSH sin exponerla y distingue un PPK fuera de formato', async () => {
     const factories = crearFactories();
     const broker = crearBroker(factories);
     const paquetes = [
@@ -295,7 +295,7 @@ describe('ClientConnectionBrokerMySql', () => {
           authentication: 'PASSWORD',
           password: 'secreto-sintetico',
         },
-        code: 'INVALID_CREDENTIALS',
+        code: 'CONNECTED',
       },
       {
         ssh: {
@@ -322,9 +322,11 @@ describe('ClientConnectionBrokerMySql', () => {
       );
 
       expect(resultado.code).toBe(paquete.code);
+      expect(JSON.stringify(resultado)).not.toContain('secreto-sintetico');
       expect([...secretos].every((byte) => byte === 0)).toBe(true);
     }
-    expect(factories.tunelesCreados).toHaveLength(0);
+    expect(factories.tunelesCreados).toHaveLength(1);
+    expect(factories.mysqlDatos).toHaveLength(1);
   });
 
   it('acepta el encabezado PPK v2 RSA para que la fábrica real valide su contenido', async () => {

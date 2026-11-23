@@ -3,6 +3,7 @@ import { PassThrough } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import {
   coincideFingerprintSsh,
+  crearOpcionesAutenticacionSsh,
   crearOpcionesConexionMysql,
 } from '../../packages/connectors/src/mysql2-ssh-factories.js';
 import type { DatosConexionMySql } from '../../packages/connectors/src/mysql-connection-broker.js';
@@ -66,5 +67,15 @@ describe('configuración de fábricas MySQL y SSH', () => {
     expect(coincideFingerprintSsh(claveHostSintetica, fingerprint)).toBe(true);
     expect(coincideFingerprintSsh(claveHostSintetica, `${fingerprint.slice(0, -1)}x`)).toBe(false);
     expect(coincideFingerprintSsh(claveHostSintetica, 'SHA256:huella-invalida')).toBe(false);
+  });
+
+  it('configura contraseña SSH sin agregar campos de llave o agente', () => {
+    const opciones = crearOpcionesAutenticacionSsh({
+      username: 'ssh_sintetico',
+      authentication: 'PASSWORD',
+      password: 'secreto-ssh-sintetico',
+    });
+
+    expect(opciones).toEqual({ password: 'secreto-ssh-sintetico' });
   });
 });

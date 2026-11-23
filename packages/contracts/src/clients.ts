@@ -200,28 +200,38 @@ export const credencialesMySqlAdminSchema = Type.Object(
       ),
     ),
     ssh: Type.Optional(
-      Type.Object(
-        {
-          username: Type.String({ minLength: 1, maxLength: 128 }),
-          authentication: Type.Literal('PRIVATE_KEY'),
-          privateKey: Type.String({
-            minLength: 1,
-            maxLength: 16_384,
-            pattern:
-              '^(?:-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----|PuTTY-User-Key-File-[0-9]+: [A-Za-z0-9-]+)',
-            description:
-              'Llave PEM/OpenSSH o PuTTY PPK v2 RSA; PPK v3, DSA y otros PPK no son compatibles.',
-          }),
-          passphrase: Type.Optional(Type.String({ maxLength: 1024 })),
-        },
-        { additionalProperties: false },
-      ),
+      Type.Union([
+        Type.Object(
+          {
+            username: Type.String({ minLength: 1, maxLength: 128 }),
+            authentication: Type.Literal('PRIVATE_KEY'),
+            privateKey: Type.String({
+              minLength: 1,
+              maxLength: 16_384,
+              pattern:
+                '^(?:-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----|PuTTY-User-Key-File-[0-9]+: [A-Za-z0-9-]+)',
+              description:
+                'Llave PEM/OpenSSH o PuTTY PPK v2 RSA; PPK v3, DSA y otros PPK no son compatibles.',
+            }),
+            passphrase: Type.Optional(Type.String({ maxLength: 1024 })),
+          },
+          { additionalProperties: false },
+        ),
+        Type.Object(
+          {
+            username: Type.String({ minLength: 1, maxLength: 128 }),
+            authentication: Type.Literal('PASSWORD'),
+            password: Type.String({ minLength: 1, maxLength: 4096 }),
+          },
+          { additionalProperties: false },
+        ),
+      ]),
     ),
   },
   {
     additionalProperties: false,
     description:
-      'Material temporal que el servidor cifra antes de persistir; SSH usa llave privada, no contraseña.',
+      'Material temporal que el servidor cifra antes de persistir; SSH permite llave privada o contraseña.',
   },
 );
 

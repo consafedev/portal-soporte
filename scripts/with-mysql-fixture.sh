@@ -13,6 +13,7 @@ directorio_temporal="$(mktemp -d "${TMPDIR:-/tmp}/portal-mysql-fixture.XXXXXXXX"
 directorio_tls="${directorio_temporal}/mysql-tls"
 password_app="$(openssl rand -hex 24)"
 password_root="$(openssl rand -hex 24)"
+password_ssh="$(openssl rand -hex 32)"
 puerto_mysql=""
 puerto_ssh=""
 ip_mysql=""
@@ -311,6 +312,7 @@ iniciar_contenedores_aislados() {
     --publish 127.0.0.1::22 \
     --mount "type=bind,source=${directorio_temporal}/ssh-client.pem.pub,target=/run/fixture/authorized_keys,readonly" \
     --env "FIXTURE_MYSQL_DESTINATION=${ip_mysql}:3306" \
+    --env "FIXTURE_SSH_PASSWORD=${password_ssh}" \
     "${imagen_ssh}" >/dev/null
 
   puerto_mysql="$(docker port "${contenedor_mysql}" 3306/tcp | sed -E 's/^127\.0\.0\.1://')"
@@ -328,6 +330,7 @@ escribir_configuracion_fixture() {
   export FIXTURE_SSH_FINGERPRINT="${huella_ssh}"
   export FIXTURE_SSH_PEM_PATH="${directorio_temporal}/ssh-client.pem"
   export FIXTURE_SSH_PPK_PATH="${directorio_temporal}/ssh-client.ppk"
+  export FIXTURE_SSH_PASSWORD="${password_ssh}"
   node --input-type=module - "${directorio_temporal}/fixture.json" <<'NODE'
 import { chmodSync, writeFileSync } from 'node:fs';
 const ruta = process.argv[2];
@@ -342,10 +345,12 @@ const configuracion = {
   sshFingerprint: process.env['FIXTURE_SSH_FINGERPRINT'],
   pemPrivateKeyPath: process.env['FIXTURE_SSH_PEM_PATH'],
   ppkPrivateKeyPath: process.env['FIXTURE_SSH_PPK_PATH'],
+  sshPassword: process.env['FIXTURE_SSH_PASSWORD'],
 };
 writeFileSync(ruta, JSON.stringify(configuracion), { mode: 0o600 });
 chmodSync(ruta, 0o600);
 NODE
+  unset password_ssh FIXTURE_SSH_PASSWORD
 }
 
 generar_certificados_tls

@@ -10,7 +10,7 @@ ADMIN puede registrar y mantener clientes, ambientes SAP y perfiles de conexión
 
 - Clientes: alta, consulta, edición y desactivación lógica. Se conserva el identificador y la auditoría.
 - Ambientes SAP ligados a un cliente. El código/alias SAP es distinto del entorno de despliegue del perfil (`PRODUCTION`, `TEST` u otro tipo que se apruebe); no se infiere ni se mezcla con el RFC/sociedad de RF-1.
-- Perfiles previstos: `MYSQL_TCP`, `MYSQL_URL`, `MYSQL_SSH` y `SSH_SERVER`, sujetos a pruebas de compatibilidad por tipo, TLS, autenticación, algoritmos de llave y versiones PPK. PS-005.2 implementa por ahora `MYSQL_TCP` y `MYSQL_SSH`.
+- Perfiles implementados en este alcance: `MYSQL_TCP` y `MYSQL_SSH`, sujetos a pruebas sintéticas de compatibilidad. No se gestionan conexiones SAP; sociedad y ambiente SAP son metadatos consultados desde MySQL. `MYSQL_URL` y `SSH_SERVER` permanecen fuera de alcance.
 - Prueba de conexión exclusiva de ADMIN, de solo lectura/no mutante, con límites de tiempo, conexiones y destinos configurados. No se ofrece SQL ni shell libre.
 - Auditoría de alta, edición, desactivación, prueba, rotación y fallos sin valores de secretos.
 
@@ -22,7 +22,7 @@ ADMIN puede registrar y mantener clientes, ambientes SAP y perfiles de conexión
 - Las entidades tienen estado y borrado lógico; no se permite eliminar físicamente clientes con perfiles o auditoría asociada.
 - Las credenciales se guardarán con cifrado autenticado de sobre, con clave fuera de PostgreSQL y Git, versión de clave y procedimiento probado de rotación/revocación. Antes de persistir secretos o habilitar conectores deben aprobarse el proveedor de claves, su operación/rotación y la matriz de datos permitidos/amenazas. El primer incremento no almacena secretos y no abre conexiones de clientes.
 - Host SSH debe verificarse por fingerprint configurado. TLS MySQL verifica certificados cuando el perfil lo requiere; nunca degradar TLS o verificación de host para “hacer funcionar” una conexión.
-- SSH usa llave privada PEM/OpenSSH o PPK v2 RSA y passphrase opcional; no acepta contraseña SSH. PPK v3, DSA y otras variantes quedan rechazadas hasta tener fixtures sintéticos de compatibilidad para la implementación fijada.
+- SSH admite llave privada PEM/OpenSSH o PPK v2 RSA con passphrase opcional, o contraseña SSH. Esta opción de compatibilidad fue aprobada por el propietario el 2026-11-22 y queda desarrollada conforme al addendum de [ADR-0002](../architecture/ADR-0002_CUSTODIA_SECRETOS.md). La interfaz carga archivos `.pem`, `.key` o `.ppk` sin presentar su contenido. PPK v3, DSA y otras variantes se rechazan explícitamente.
 - No declarar soporte universal para PEM, OpenSSH o PPK. Cada formato/algoritmo soportado debe pasar fixtures sintéticos y prueba aislada; incompatibilidad falla explícitamente.
 
 ## Incremento PS-005.1
@@ -47,5 +47,6 @@ Perfiles de conexión, cifrado, reemplazo/rotación de secretos y prueba no muta
 - El llavero se configura mediante ruta absoluta protegida, no con la clave en variables de entorno. El arranque y las operaciones fallan cerrados si el llavero está ausente, el propietario/permisos no coinciden, la versión de clave no está disponible o la autenticación del sobre falla. El formato operativo y recuperación se describen en [KEYRING_RECOVERY.md](../operations/KEYRING_RECOVERY.md).
 - Los secretos por perfil se cifran como un paquete JSON limitado; la API solo recibe valores en operaciones de escritura y nunca devuelve el paquete en claro. Las lecturas usan allowlists sin columnas cifradas. Registro de auditoría contiene acción, actor, perfil, resultado y correlación, nunca valores secretos.
 - Para MySQL, el único sondeo de conectividad es `SELECT 1`, una conexión a la vez, timeout acotado y cierre garantizado. TLS usa validación de certificado; no existe opción para ignorar errores TLS. En SSH se verifica la huella configurada y se permite únicamente un forward al destino MySQL exacto autorizado, sin shell ni agente.
+- La modalidad SSH se selecciona explícitamente entre contraseña y llave privada. Ambos secretos solo se reciben al guardar o reemplazar credenciales, se cifran antes de persistirse y nunca se recuperan para la interfaz; el selector de llave acepta `.pem`, `.key` y `.ppk` y muestra únicamente el nombre del archivo.
 - Host/puerto/fingerprint deben pertenecer a allowlist operacional explícita fuera del request/DB. La resolución se fija a IP validada para impedir DNS rebinding; no se siguen redirecciones ni se aceptan URLs arbitrarias.
 - No se crea un llavero de producción ni se guardan secretos de clientes en este incremento sin una copia de recuperación independiente probada. Conectividad efectiva requiere fixture MySQL aislado; la ausencia de ese fixture se registra como `NO EJECUTADO`, no como PASS. RF-1 puede iniciar parser/preview con fixtures sintéticos cuando el contrato del broker exista; inserción permanece separada y bloqueada por VT-01..VT-09.
