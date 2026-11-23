@@ -2019,3 +2019,59 @@ eload, se reinició únicamente cloudflared-consafedev.service; procesos web, AP
 - Revalidación GitHub: PR #6 sigue OPEN, base `main`, sin merge. Actions run `45005424165` SUCCESS en HEAD probado `2d2f1f83e790caa99e354eeee50837586a2455a7`.
 - Ambos jobs SUCCESS: calidad/seguridad completo y conectores MySQL/SSH efímeros completo. El diff de esta actualización documental no cambia código, tests, fixtures ni configuración.
 - Estado: PS-009 EN_REVISION para aprobación manual; limitaciones de DDL real, AuthContext/capacidad, auditoría y conciliación siguen vigentes.
+
+### [2026-11-22T04:14:19-06:00] PS-009 — INICIO DE INTEGRACIÓN DE EJECUCIÓN RF-1 CON GATE CERRADO
+- Agente/tarea/rama/base: Codex · PS-009 · `codex/ps-009-rf1-execution-gate` · base y HEAD inicial `d2e741645cd79528827d70772df236a5ca5b76e6`.
+- Objetivo: añadir endpoint RF-1 de inserción transaccional protegido por sesión, CSRF, rol, asignación/capacidad vigente y kill switch cerrado por defecto; integrar confirmación UI segura y probar solo con fixture MySQL sintético.
+- Alcance previsto: contratos API, servicio de aplicación, autorización de `rf-1:execute`, auditoría sin XML/secretos, validación de contexto inmediatamente antes de cada escritura, idempotencia/rollback/concurrencia de laboratorio, controles UI y pruebas; ninguna conexión/DML a bases de clientes, ninguna migración o escritura en `portal_soporte`, ningún despliegue ni cambio de infraestructura compartida.
+- Aprobaciones conservadas: AP-013 sin MFA; AP-014 ADMIN administra y SUPPORT opera solo con asignación/capacidad; `rf-1:read` y `rf-1:execute` son capacidades separadas; SMTP inactivo; Cloudflare Access excluido; UFW sin cambios.
+- Riesgos: VT-01..VT-09 siguen abiertos para destinos reales; no existen clientes/perfiles/allowlist en el Portal, por lo que DDL/permisos reales y el piloto no son verificables todavía. El backend debe rechazar toda inserción mientras el gate global esté apagado, incluso con capacidad asignada.
+- Comprobaciones previstas: TDD unitarias e integración PostgreSQL aislada; fixture MySQL/SSH sintético (CI si Docker local falta); E2E ADMIN/SUPPORT/403/CSRF/gate; lint, typecheck, formato focalizado, build, Secretlint, auditoría de dependencias y revisión del diff. Validación UI según Apple Design: foco/teclado, escritorio/móvil, claro/oscuro y movimiento reducido; captura o evidencia visual sin datos sensibles.
+- Evidencia de integración: GitHub confirmó PR #6 fusionado en `2026-11-22T10:05:20Z`, merge SHA `d2e741645cd79528827d70772df236a5ca5b76e6`; ambos jobs SUCCESS. `main` fue actualizado por fast-forward sin descartar cambios.
+- UI/UX: Apple Design leído íntegramente en `.agents/skills/apple-design/SKILL.md`; aplicar simplicidad/jerarquía, feedback claro, soporte de teclado y reducción de movimiento. Evidencia visual se registrará al validar pantalla; inicialmente NO EJECUTADA.
+- Estado: EN_CURSO.
+
+### [2026-11-22T05:34:18-06:00] PS-009 — CONTINUACIÓN DE REVISIÓN VISUAL RF-1
+- Evidencia visual sintética inspeccionada en `portal-soporte-rf1-escritorio-claro.png` y `portal-soporte-rf1-movil-oscuro.png`: el control global fijo se superpone a un selector del formulario en escritorio; en móvil la tabla angosta quiebra nombres de archivo y estados palabra por palabra.
+- Aplicación Apple Design: eliminar solapamientos manteniendo el control de tema en el flujo del documento; preservar jerarquía, lectura horizontal de datos tabulares, uso por teclado, responsive, claro/oscuro y `prefers-reduced-motion`.
+- Incremento TDD: agregar una aserción E2E reproducible para el solapamiento; después cubrir la región de tabla horizontal móvil y su operación por teclado. No se ejecutará ninguna escritura en destinos de clientes.
+- Próximo paso: verificar RED de cada defecto, implementar el mínimo cambio visual, inspeccionar capturas nuevas y repetir validaciones pertinentes.
+- Estado: EN_CURSO.
+
+### [2026-11-22T06:11:31-06:00] PS-009 — CONTINUACIÓN DE VERIFICACIÓN Y CIERRE
+- Agente/tarea/rama/base: Codex · PS-009 · codex/ps-009-rf1-execution-gate · base d2e741645cd79528827d70772df236a5ca5b76e6.
+- Objetivo: cerrar la verificación del endpoint de ejecución gated, conservarlo deshabilitado para destinos reales y preparar un PR independiente.
+- Estado inicial confirmado: main/origin/main en d2e741645cd79528827d70772df236a5ca5b76e6; portal_soporte tiene ocho entradas de migración; el constraint que elimina la migración 0008 permanece presente. En Debian serverAlcazar se observaron los servicios propios activos en /opt/portal-soporte/releases/a3980d47c2fac104b856e51eb13e1b99155f5c26 y listeners loopback 18840/18841. Comprobaciones remotas de solo lectura; no hubo migraciones, DML, reinicios ni cambios de infraestructura.
+- Alcance: nuevas pruebas tras auditoría previa a escritura, inspección de diff, controles de calidad/seguridad, publicación de rama/PR si la evidencia lo permite. portal_soporte, túneles, DNS, firewall, servicios ajenos y destinos MySQL reales quedan fuera.
+- Riesgos/decisiones: VT-01..VT-09 no están acreditadas para un destino real; la capacidad rf-1:execute debe seguir bloqueada por gate global hasta validación y aprobación explícita de piloto. El keyring está recuperable según evidencia previa, pero el Portal no tiene perfiles ni destinos de cliente configurados.
+- Comprobaciones previstas: unitarias limitadas, integración y E2E exclusivamente en portal_soporte_test, fixture MySQL/SSH por CI, formato focalizado, lint, typecheck, build, secretos/dependencias y revisión Git/PR.
+- Próximo paso: verificar el ledger de migraciones y el harness remoto, luego ejecutar las pruebas actuales y actualizar el estado a EN_REVISION con evidencia verídica.
+- Estado: EN_CURSO.
+
+
+### [2026-11-22T06:31:30-06:00] PS-009 — EVIDENCIA LOCAL; CI Y PR PENDIENTES
+- Rama/base: codex/ps-009-rf1-execution-gate, con base d2e741645cd79528827d70772df236a5ca5b76e6; origin/main coincide con esa base.
+- Integración del servidor comprobada en modo solo lectura: Debian 12, release a3980d47c2fac104b856e51eb13e1b99155f5c26 activa; unidades web/API activas y listeners 127.0.0.1:18840/18841. GET local con Host HTTPS correcto: /login 200 y /api/v1/auth/csrf 200. El ledger productivo contiene el hash de 0007 684e9c7601d3fcb4c002fbd3407bb2d6295b62b405047d668f8a8869b24b2016; 0008 no está aplicada y su constraint sigue presente. No hubo escritura, migración ni reinicio en producción.
+- Conteos agregados de portal_soporte: clientes 0, perfiles 0, asignaciones 0, capacidades 0. No existe destino de cliente ni DDL autorizado que permita preparar el piloto. El keyring recuperable permanece sin sobres de clientes. No se accedió a bases MySQL reales.
+- Pruebas posteriores al código: unitarias 46 archivos/361 pruebas PASS; integración PostgreSQL remota aislada 9 archivos/91 pruebas PASS; migraciones CLI PASS sobre portal_soporte_test; E2E remoto 19/19 PASS con un worker, incluidas autorización, preview y validación visual sintética. Build Next.js/API y typecheck PASS; lint PASS; formato focalizado de todos los archivos cambiados PASS; verify:skills PASS; Secretlint PASS; auditoría CI PASS con 1 moderada y 0 alta/crítica. pnpm audit estricto PASS con 1 vulnerabilidad moderada reportada.
+- Formato global local: NO PASS en Windows; Prettier reporta 217 archivos por la línea base de finales CRLF/LF del checkout. No se hizo reformateo masivo. El job Linux de GitHub Actions queda como verificación definitiva.
+- Fixture MySQL/SSH local: NO EJECUTADO; Docker Engine no está disponible. Se requiere el job aislado de GitHub Actions para validar el motor transaccional de este cambio.
+- Git/seguridad: diff --check PASS; el archivo .env.infra-001.local está ignorado por .gitignore y no versionado; migraciones 0004–0007 no presentan diff. Hash SHA-256 del blob canónico 0007 coincide con 684e9c7601d3fcb4c002fbd3407bb2d6295b62b405047d668f8a8869b24b2016.
+- Decisiones y límites: AP-013/AP-014 conservadas. Gate global cerrado por defecto; 0008 se validó solo en portal_soporte_test. No se habilitó DML real, no se desplegó el incremento, y no se cambió Cloudflare, DNS, UFW ni servicios ajenos.
+- Próximo paso: publicar la rama sin force, abrir PR contra main y revisar Actions. Mantener PS-009 EN_REVISION hasta revisión humana y checks verdes. La aprobación de piloto queda pendiente de destino, DDL y VT-01–VT-09.
+- Estado: EN_CURSO, a la espera de PR y CI.
+### [2026-11-22T06:45:19-06:00] PS-009 — PR #7 Y CI COMPLETOS; LISTO PARA REVISIÓN
+- Rama/base: codex/ps-009-rf1-execution-gate, base d2e741645cd79528827d70772df236a5ca5b76e6; HEAD 5ba70dc3c7a2b251f4d0e9dc6618f6b1054896a7.
+- PR: #7 abierto contra main, sin reviews, pendiente de revisión/merge manual del propietario: https://github.com/consafedev/portal-soporte/pull/7.
+- GitHub Actions confirmado para el HEAD: push run #57 / 45023051774 SUCCESS en 2m47s; pull_request run #58 / 45023511831 SUCCESS en 2m54s. En ambos: “Calidad y seguridad básica” y “Conectores MySQL y SSH con fixture sintético” SUCCESS. El fixture sintético de Actions cubrió el bloqueo local por falta de Docker Engine.
+- Verificación local ya registrada: unitarias 46 archivos/361 pruebas PASS; PostgreSQL aislado 9 archivos/91 pruebas PASS y migración CLI PASS; E2E remoto aislado 19/19 PASS; build, typecheck, lint, formato focalizado, verify:skills y Secretlint PASS. Auditoría: 1 moderada, 0 altas/críticas; revisión de CI PASS. Formato global Windows no ejecutado satisfactoriamente por discrepancias CRLF/LF de línea base, sin reformateo masivo.
+- Migración: 0008 aditiva aplicada solo a portal_soporte_test; migraciones 0004–0007 intactas. Producción sigue en release a3980d47c2fac104b856e51eb13e1b99155f5c26, con 0007 y sin 0008. No se desplegó el incremento ni se ejecutó DML en portal_soporte o en bases de clientes.
+- Seguridad y límites: PORTAL_RF1_INSERTION_ENABLED sigue cerrado por defecto. AP-013/AP-014 conservadas; SMTP deshabilitado. La base permanente no tiene clientes, perfiles, asignaciones ni capacidades; faltan destino/DDL autorizados y VT-01–VT-09, por lo que no se solicita habilitar piloto. Riesgo moderado de dependencia permanece documentado.
+- Acción: dejar PS-009 en EN_REVISION; solicitar revisión humana del PR. No merge, despliegue, migración productiva, cambio de Cloudflare/DNS/firewall ni acceso a bases de clientes.
+- Estado: EN_REVISION.
+### [2026-11-22T06:51:48-06:00] PS-009 — CI VERDE EN HEAD ACTUAL
+- Rama y HEAD: codex/ps-009-rf1-execution-gate · e24c08cfa018e40c1ce8e2ac020f863133afe2bd. El incremento de código continúa en 5ba70dc3c7a2b251f4d0e9dc6618f6b1054896a7; e24c08c solo actualiza WORKLOG y TASK_BOARD.
+- GitHub Actions para el HEAD e24c08c: push run #59 / 45024085513 SUCCESS y pull_request run #60 / 45024089862 SUCCESS. Cada run terminó con ambos jobs: “Calidad y seguridad básica” SUCCESS y “Conectores MySQL y SSH con fixture sintético” SUCCESS.
+- Estos runs validan el mismo código funcional ya verificado en el HEAD anterior; no hubo modificaciones de código, migraciones ni configuración después del run #58. El nuevo commit solo registra evidencia administrativa.
+- PR #7 sigue abierto contra main y no tiene reviews; listo para revisión humana. No se fusionó.
+- Estado: EN_REVISION.

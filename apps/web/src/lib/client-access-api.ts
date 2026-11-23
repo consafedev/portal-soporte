@@ -16,7 +16,7 @@ import {
   traducirErrorHttp,
 } from './client-admin-api.ts';
 
-/** Métodos HTTP permitidos para concesiones, revocaciones y capacidad de lectura. */
+/** Métodos HTTP permitidos para concesiones, revocaciones y capacidades de RF-1. */
 type MetodoMutacionAcceso = 'PUT' | 'DELETE';
 
 /** Tipo de perfil de conexión visible para una operación autorizada. */
@@ -111,20 +111,20 @@ export function revocarAccesoCliente(clientId: string, userId: string): Promise<
 }
 
 /**
- * Cambia solo `rf-1:read`; la capacidad de ejecución no forma parte de esta interfaz.
+ * Cambia la capacidad allowlisted del cliente; el gate global sigue siendo independiente.
  *
  * @param clientId - UUID del cliente administrado.
  * @param capacidad - Capacidad allowlisted, restringida aquí a lectura RF-1.
  * @param enabled - Nuevo estado explícito para las vistas previas.
  * @returns Promesa que termina al persistir el cambio auditado.
- * @throws ErrorApiClientes si se pide `rf-1:execute` o el backend rechaza la mutación.
+ * @throws ErrorApiClientes si el backend rechaza la mutación o la respuesta CSRF.
  */
 export function establecerCapacidadCliente(
   clientId: string,
   capacidad: CapacidadClienteContrato,
   enabled: boolean,
 ): Promise<void> {
-  if (capacidad !== 'rf-1:read') {
+  if (capacidad !== 'rf-1:read' && capacidad !== 'rf-1:execute') {
     throw new ErrorApiClientes('CAPABILITY_UNAVAILABLE', 403);
   }
   return enviarMutacionAcceso(

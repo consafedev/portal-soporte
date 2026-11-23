@@ -279,6 +279,8 @@ function traducirErrorPerfil(codigo: ErrorPerfilesConexion['code']): string {
       return 'El destino no está habilitado por la configuración de seguridad.';
     case 'PROFILE_NOT_FOUND':
       return 'No se encontró el perfil activo indicado.';
+    case 'PROFILE_CHANGED':
+      return 'El perfil cambió después de la vista previa; vuelve a revisar la factura.';
     case 'PROFILE_DUPLICATE':
       return 'Ya existe un perfil con ese nombre para el cliente.';
     case 'CLIENT_NOT_FOUND':

@@ -112,6 +112,9 @@ describe('ServicioPerfilesConexion', () => {
       async abrirLecturaRf1(): Promise<never> {
         throw new Error('RF1_CONNECTOR_NOT_CONFIGURED');
       },
+      async abrirInsercionRf1(): Promise<never> {
+        throw new Error('RF1_CONNECTOR_NOT_CONFIGURED');
+      },
     };
     const servicio = new ServicioPerfilesConexion(
       repositorio,
@@ -151,6 +154,9 @@ describe('ServicioPerfilesConexion', () => {
         async abrirLecturaRf1(): Promise<never> {
           throw new Error('RF1_CONNECTOR_NOT_CONFIGURED');
         },
+        async abrirInsercionRf1(): Promise<never> {
+          throw new Error('RF1_CONNECTOR_NOT_CONFIGURED');
+        },
       },
       new PoliticaDestinosConexion([destino], []),
       { ahora: () => now },
@@ -184,6 +190,9 @@ describe('ServicioPerfilesConexion', () => {
           return { code: 'CONNECTED', completedAt: now };
         },
         async abrirLecturaRf1(): Promise<never> {
+          throw new Error('RF1_CONNECTOR_NOT_CONFIGURED');
+        },
+        async abrirInsercionRf1(): Promise<never> {
           throw new Error('RF1_CONNECTOR_NOT_CONFIGURED');
         },
       },
@@ -234,6 +243,9 @@ describe('ServicioPerfilesConexion', () => {
           return { code: 'CONNECTED', completedAt: now };
         },
         abrirLecturaRf1,
+        async abrirInsercionRf1(): Promise<never> {
+          throw new Error('RF1_CONNECTOR_NOT_CONFIGURED');
+        },
       },
       new PoliticaDestinosConexion([destino], []),
       { ahora: () => now },
@@ -249,6 +261,42 @@ describe('ServicioPerfilesConexion', () => {
       expect.any(AbortSignal),
     );
     expect(Buffer.from(secretosRecibidos ?? []).every((byte) => byte === 0)).toBe(true);
+  });
+
+  it('rechaza un perfil cambiado antes de descifrar credenciales para inserción', async () => {
+    const cifrador = crearCifrador();
+    const material = Buffer.from('{"mysqlUsername":"sintetico","mysqlPassword":"sintetico"}');
+    const sobre = await cifrador.cifrar(material, contexto);
+    material.fill(0);
+    const perfil: PerfilConexionPersistido = { ...crearPerfil(), sobre };
+    const abrirInsercionRf1 = vi.fn(async () => {
+      throw new Error('no debe abrirse el broker');
+    });
+    const servicio = new ServicioPerfilesConexion(
+      crearRepositorio(perfil),
+      cifrador,
+      {
+        async probar() {
+          return { code: 'CONNECTED', completedAt: now };
+        },
+        async abrirLecturaRf1(): Promise<never> {
+          throw new Error('RF1_CONNECTOR_NOT_CONFIGURED');
+        },
+        abrirInsercionRf1,
+      },
+      new PoliticaDestinosConexion([destino], []),
+      { ahora: () => now },
+    );
+
+    await expect(
+      servicio.abrirInsercionRf1(
+        clientId,
+        profileId,
+        new AbortController().signal,
+        'sha256:huella-vieja',
+      ),
+    ).rejects.toMatchObject({ code: 'PROFILE_CHANGED', statusCode: 409 });
+    expect(abrirInsercionRf1).not.toHaveBeenCalled();
   });
 
   it('redacta fallos del broker RF-1 antes de exponerlos a la API', async () => {
@@ -268,6 +316,9 @@ describe('ServicioPerfilesConexion', () => {
         },
         async abrirLecturaRf1() {
           throw new Error('password=secreto-sintetico; driver detail');
+        },
+        async abrirInsercionRf1(): Promise<never> {
+          throw new Error('RF1_CONNECTOR_NOT_CONFIGURED');
         },
       },
       new PoliticaDestinosConexion([destino], []),

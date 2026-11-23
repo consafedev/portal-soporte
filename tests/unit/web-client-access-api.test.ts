@@ -164,15 +164,20 @@ describe('cliente HTTP same-origin para permisos de cliente', () => {
     });
   });
 
-  it('no ofrece una operación de escritura para rf-1:execute', () => {
+  it('permite solicitar rf-1:execute con CSRF al endpoint ADMIN protegido', async () => {
     fetchMock
       .mockResolvedValueOnce(crearRespuestaCsrf())
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
 
-    expect(() => establecerCapacidadCliente(CLIENT_ID, 'rf-1:execute', false)).toThrow(
-      expect.objectContaining({ code: 'CAPABILITY_UNAVAILABLE' }),
+    await establecerCapacidadCliente(CLIENT_ID, 'rf-1:execute', false);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      `/api/v1/admin/clients/${CLIENT_ID}/capabilities/rf-1%3Aexecute`,
     );
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+      method: 'PUT',
+      body: JSON.stringify({ enabled: false }),
+      headers: { 'content-type': 'application/json', 'x-csrf-token': CSRF },
+    });
   });
 
   it('traduce denegación sin conservar mensajes arbitrarios del servidor', async () => {

@@ -52,6 +52,11 @@ const MENSAJES_CLIENTES: Readonly<Record<string, string>> = {
   SECRET_CUSTODY_UNAVAILABLE: 'La custodia segura no está disponible. No se abrió una conexión.',
   SECRET_PACKAGE_INVALID: 'No fue posible validar el material cifrado del perfil.',
   PROFILE_CONFIGURATION_INVALID: 'La ruta SSH o los certificados TLS no son coherentes.',
+  RF1_INSERTION_DISABLED: 'La inserción de facturas está bloqueada por la política del Portal.',
+  RF1_CONFIRMATION_INVALID:
+    'La vista previa cambió o venció. Genera una nueva vista previa antes de confirmar.',
+  RF1_PREVIEW_NOT_READY:
+    'Corrige los bloqueos y vuelve a revisar la vista previa antes de insertar.',
   PROFILE_DUPLICATE: 'Ya existe un perfil con ese nombre para este cliente.',
   PROFILE_NOT_FOUND: 'No se encontró el perfil de conexión.',
   PROFILE_NAME_INVALID: 'El nombre del perfil debe tener entre 2 y 120 caracteres.',

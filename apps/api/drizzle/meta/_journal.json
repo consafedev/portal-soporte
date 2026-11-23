@@ -57,6 +57,13 @@
       "when": 1795296042120,
       "tag": "0007_client_user_access_capabilities",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795342994856,
+      "tag": "0008_rf1_execute_capability",
+      "breakpoints": true
     }
   ]
 }

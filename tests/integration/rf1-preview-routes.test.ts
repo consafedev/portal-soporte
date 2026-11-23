@@ -21,6 +21,7 @@ import { ServicioPerfilesConexion } from '../../apps/api/src/clients/connection-
 import { PostgresClientAccessRepository } from '../../apps/api/src/clients/postgres-client-access-repository.js';
 import { RepositorioPerfilesConexionPostgres } from '../../apps/api/src/clients/postgres-connection-profile-repository.js';
 import { ServicioVistaPreviaRf1 } from '../../apps/api/src/clients/rf1-preview-service.js';
+import { ServicioInsercionRf1 } from '../../apps/api/src/clients/rf1-insertion-service.js';
 import { PostgresAuthRepository } from '../../apps/api/src/auth/postgres-auth-repository.js';
 import { ServicioPreferenciasUsuario } from '../../packages/core/src/preferences/service.js';
 import type { SeleccionSociedadArchivoRf1Contrato } from '../../packages/contracts/src/clients.js';
@@ -396,6 +397,10 @@ async function prepararFixtures(): Promise<void> {
         },
       };
     },
+    /** Impide que una prueba de lectura ejecute escrituras de facturas. */
+    async abrirInsercionRf1(): Promise<never> {
+      throw new Error('RF1_INSERTION_NOT_CONFIGURED');
+    },
   };
   const acceso = new ServicioAccesoCliente(new PostgresClientAccessRepository(base));
   const perfiles = new ServicioPerfilesConexion(
@@ -418,6 +423,7 @@ async function prepararFixtures(): Promise<void> {
   const preferencias = new ServicioPreferenciasUsuario(
     new RepositorioPreferenciasUsuarioPostgres(base),
   );
+  const vistaPreviaRf1 = new ServicioVistaPreviaRf1(acceso, perfiles, repositorioAuth, reloj);
   aplicacion = await crearServidorAuth({
     configuracion: cargarConfiguracionAuth({
       NODE_ENV: 'test',
@@ -433,7 +439,15 @@ async function prepararFixtures(): Promise<void> {
     preferencias,
     accesoClientes: acceso,
     perfilesConexion: perfiles,
-    vistaPreviaRf1: new ServicioVistaPreviaRf1(acceso, perfiles, repositorioAuth, reloj),
+    vistaPreviaRf1,
+    insercionRf1: new ServicioInsercionRf1(
+      acceso,
+      perfiles,
+      vistaPreviaRf1,
+      repositorioAuth,
+      reloj,
+      false,
+    ),
     generarIdSolicitud: idSolicitudPrueba.generar,
   });
   cookieAdmin = `portal_test_session=${inicioAdmin.token}`;
@@ -498,9 +512,17 @@ describe('vista previa RF-1 con autorización y PostgreSQL aislado', () => {
 
   it('permite a ADMIN con cliente/capacidad activos obtener una preview read-only', async () => {
     const respuesta = await enviarLote(cookieAdmin, [crearXmlSintetico()]);
-    const resultado = respuesta.json<readonly { status: string; resolution: unknown }[]>();
+    const cuerpo = respuesta.json<{
+      readonly resultados: readonly { status: string; resolution: unknown }[];
+      readonly executionAvailable: boolean;
+      readonly confirmationToken: string | null;
+    }>();
+    const resultado = cuerpo.resultados;
 
     expect(respuesta.statusCode).toBe(200);
+    expect(respuesta.headers['cache-control']).toContain('no-store');
+    expect(cuerpo.executionAvailable).toBe(false);
+    expect(cuerpo.confirmationToken).toBeNull();
     expect(resultado).toHaveLength(1);
     expect(resultado[0]).toMatchObject({
       status: 'READY',
@@ -514,7 +536,10 @@ describe('vista previa RF-1 con autorización y PostgreSQL aislado', () => {
     const respuesta = await enviarLote(cookieSupport, [crearXmlSintetico()]);
 
     expect(respuesta.statusCode).toBe(200);
-    expect(respuesta.json<readonly { status: string }[]>()[0]?.status).toBe('READY');
+    expect(
+      respuesta.json<{ readonly resultados: readonly { status: string }[] }>().resultados[0]
+        ?.status,
+    ).toBe('READY');
   });
 
   it('revalida y usa el par sociedad/ambiente elegido para buscar proveedor', async () => {
@@ -522,7 +547,7 @@ describe('vista previa RF-1 con autorización y PostgreSQL aislado', () => {
     const xml = crearXmlSintetico();
     try {
       const pendiente = await enviarLote(cookieSupport, [xml]);
-      expect(pendiente.json()[0]).toMatchObject({
+      expect(pendiente.json<{ resultados: readonly unknown[] }>().resultados[0]).toMatchObject({
         status: 'NEEDS_SELECTION',
         sociedadesDisponibles: [
           { sociedad: '1000', ambienteSap: 'ERP-QA' },
@@ -535,7 +560,7 @@ describe('vista previa RF-1 con autorización y PostgreSQL aislado', () => {
       ]);
 
       expect(respuesta.statusCode).toBe(200);
-      expect(respuesta.json()[0]).toMatchObject({
+      expect(respuesta.json<{ resultados: readonly unknown[] }>().resultados[0]).toMatchObject({
         status: 'READY',
         resolution: { sociedad: '2000', ambienteSap: 'ERP-DEV', idProveedor: 'PROV-FIXTURE' },
       });
@@ -576,7 +601,7 @@ describe('vista previa RF-1 con autorización y PostgreSQL aislado', () => {
       ]);
 
       expect(respuesta.statusCode).toBe(200);
-      expect(respuesta.json()[0]).toMatchObject({
+      expect(respuesta.json<{ resultados: readonly unknown[] }>().resultados[0]).toMatchObject({
         status: 'BLOCKED',
         errorCode: 'RF1_CONTEXT_MISMATCH',
       });
@@ -716,9 +741,10 @@ describe('vista previa RF-1 con autorización y PostgreSQL aislado', () => {
     const respuesta = await enviarLote(cookieAdmin, [Buffer.from('<comprobante', 'utf8')]);
 
     expect(respuesta.statusCode).toBe(200);
-    expect(respuesta.json<readonly { status: string; errorCode?: string }[]>()).toEqual([
-      expect.objectContaining({ status: 'BLOCKED', errorCode: 'XML_MALFORMED' }),
-    ]);
+    expect(
+      respuesta.json<{ resultados: readonly { status: string; errorCode?: string }[] }>()
+        .resultados,
+    ).toEqual([expect.objectContaining({ status: 'BLOCKED', errorCode: 'XML_MALFORMED' })]);
     expect(aperturasBroker).toBe(aperturasAntes + 1);
     expect(cierresBroker).toBe(cierresAntes + 1);
     expect(operacionesBroker).toHaveLength(consultasAntes);
@@ -781,7 +807,9 @@ describe('vista previa RF-1 con autorización y PostgreSQL aislado', () => {
 
   it('bloquea el mismo UUID repetido dentro del lote', async () => {
     const respuesta = await enviarLote(cookieAdmin, [crearXmlSintetico(), crearXmlSintetico()]);
-    const resultados = respuesta.json<readonly { status: string; errorCode?: string }[]>();
+    const resultados = respuesta.json<{
+      resultados: readonly { status: string; errorCode?: string }[];
+    }>().resultados;
 
     expect(respuesta.statusCode).toBe(200);
     expect(resultados.map((resultado) => resultado.status)).toEqual(['READY', 'BLOCKED']);
@@ -794,7 +822,10 @@ describe('vista previa RF-1 con autorización y PostgreSQL aislado', () => {
     catalogoFalla = false;
 
     expect(respuesta.statusCode).toBe(200);
-    expect(respuesta.json<readonly { status: string; errorCode?: string }[]>()).toEqual([
+    expect(
+      respuesta.json<{ resultados: readonly { status: string; errorCode?: string }[] }>()
+        .resultados,
+    ).toEqual([
       expect.objectContaining({ status: 'BLOCKED', errorCode: 'RF1_CATALOG_UNAVAILABLE' }),
     ]);
     expect(respuesta.body).not.toContain('detalle_driver_sintetico_no_publicable');
@@ -816,16 +847,17 @@ describe('vista previa RF-1 con autorización y PostgreSQL aislado', () => {
     expect(auditoria).not.toContain(contrasenaHashableSintetica);
   });
 
-  it('no publica una ruta de ejecución de facturas', async () => {
+  it('mantiene la ruta de ejecución cerrada si falta el servicio con gate operativo', async () => {
     const encabezados = await encabezadosCsrf(cookieAdmin);
     const respuesta = await exigirAplicacion().inject({
       method: 'POST',
-      url: `/api/v1/clients/${idCliente}/modules/rf-1/execute`,
-      headers: encabezados,
+      url: `/api/v1/clients/${idCliente}/modules/rf-1/execute?profileId=${idPerfil}&estatus=CONTABILIZADO`,
+      headers: { ...encabezados, 'content-type': 'application/json' },
       payload: {},
     });
 
-    expect(respuesta.statusCode).toBe(404);
+    expect(respuesta.statusCode, JSON.stringify(respuesta.json())).toBe(503);
+    expect(respuesta.json()).toMatchObject({ code: 'RF1_INSERTION_DISABLED' });
   });
 
   it('solo invoca lecturas tipadas y cierra las sesiones abiertas', async () => {

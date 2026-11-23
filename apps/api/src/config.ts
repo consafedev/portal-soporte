@@ -76,6 +76,25 @@ export function cargarConfiguracionAuth(
   };
 }
 
+/**
+ * Lee el interruptor global de inserción RF-1 y falla cerrado si el valor es ambiguo.
+ * @param variables Entorno de Node que contiene la política operativa.
+ * @returns `true` solo cuando la variable vale literalmente `true`.
+ * @throws Error si se proporciona un valor distinto de `true` o `false`.
+ */
+export function cargarConfiguracionInsercionRf1(
+  variables: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const valor = variables['PORTAL_RF1_INSERTION_ENABLED'];
+  if (valor === undefined || valor === 'false') {
+    return false;
+  }
+  if (valor === 'true') {
+    return true;
+  }
+  throw new Error('PORTAL_RF1_INSERTION_ENABLED debe ser true o false.');
+}
+
 /** Carga SMTP opcional en cualquier entorno, sin exponer valores sensibles. */
 export function cargarConfiguracionSmtpAuth(
   variables: NodeJS.ProcessEnv = process.env,

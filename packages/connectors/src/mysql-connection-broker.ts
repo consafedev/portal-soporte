@@ -7,10 +7,14 @@ import type {
   DestinoGatewaySsh,
   PerfilConexionPrueba,
   ResultadoPruebaConexion,
+  SesionInsercionRf1,
   SesionLecturaRf1,
 } from '../../core/src/clients/secret-custody-ports.js';
 import { SesionMysqlRf1, type ConsultaFijaRf1 } from './mysql-rf1-catalog.js';
-import type { EjecutorTransaccionFacturaRf1 } from './mysql-rf1-invoice-insert.js';
+import {
+  SesionInsercionMysqlRf1,
+  type EjecutorTransaccionFacturaRf1,
+} from './mysql-rf1-invoice-insert.js';
 
 /** Destino MySQL fijo, con hostname TLS y dirección IP previamente aprobada. */
 export type DestinoMySqlPermitido = DestinoMySqlAutorizado;
@@ -88,6 +92,11 @@ export interface ConexionMySqlTransaccionalRf1
 export interface FabricaConexionMySql {
   /** Abre el socket al destino fijado y devuelve un recurso cerrable. */
   conectar(datos: DatosConexionMySql, senal: AbortSignal): Promise<ConexionMySqlPrueba>;
+  /** Abre una conexión con sentencias transaccionales RF-1 fijas, si el driver las soporta. */
+  conectarParaInsercion?(
+    datos: DatosConexionMySql,
+    senal: AbortSignal,
+  ): Promise<ConexionMySqlTransaccionalRf1>;
 }
 
 /** Túnel TCP SSH sin shell ni forwarding a destinos distintos del permitido. */
@@ -158,18 +167,86 @@ export class ClientConnectionBrokerMySql implements ClientConnectionBroker {
   }
 
   /**
-   * Abre una sesión RF-1 limitada a lecturas de catálogo y existencia de UUID.
-   * @param perfil Perfil de conexión validado contra la política operacional.
-   * @param secretos Buffer mutable que contiene credenciales sintéticas o custodiadas; se borra.
-   * @param senalExterna Señal de cancelación de la solicitud autorizada.
-   * @returns Sesión de lectura que se debe cerrar al terminar.
-   * @throws Error con código estable si el perfil, destino, credencial o conexión no son válidos.
+   * Abre una sesión RF-1 de lectura usando un perfil y destino ya permitidos.
+   * @param perfil Perfil validado por la política operacional.
+   * @param secretos Buffer mutable de credenciales que se borra al abrir la conexión.
+   * @param senalExterna Cancelación propagada al socket y al túnel SSH.
+   * @returns Sesión de solo lectura que el llamador debe cerrar en finally.
+   * @throws Error con un código estable si perfil, credenciales, destino o conexión no son válidos.
    */
   public async abrirLecturaRf1(
     perfil: PerfilConexionPrueba,
     secretos: Uint8Array,
     senalExterna: AbortSignal,
   ): Promise<SesionLecturaRf1> {
+    const recurso = await this.abrirConexionRf1(perfil, secretos, senalExterna, (datos, senal) =>
+      this.mysql.conectar(datos, senal),
+    );
+    return new SesionMysqlRf1(
+      {
+        ejecutar: (consulta: ConsultaFijaRf1, parametros: readonly string[]) =>
+          recurso.conexion.ejecutarRf1(consulta, parametros),
+      },
+      recurso.cerrar,
+      recurso.senal,
+      this.timeoutMs,
+      recurso.abortar,
+    );
+  }
+
+  /**
+   * Abre una sesión transaccional limitada a las sentencias RF-1 permitidas.
+   * @param perfil Perfil activo ya autorizado y perteneciente al cliente.
+   * @param secretos Buffer mutable descifrado que se borra durante la conexión.
+   * @param senalExterna Cancelación de la operación autenticada.
+   * @returns Sesión que inserta y verifica una factura por transacción.
+   * @throws Error estable cuando el driver no admite inserciones o el destino no es válido.
+   */
+  public async abrirInsercionRf1(
+    perfil: PerfilConexionPrueba,
+    secretos: Uint8Array,
+    senalExterna: AbortSignal,
+  ): Promise<SesionInsercionRf1> {
+    const conectar = this.mysql.conectarParaInsercion;
+    if (conectar === undefined) {
+      secretos.fill(0);
+      throw new Error('RF1_INSERTION_UNAVAILABLE');
+    }
+    const recurso = await this.abrirConexionRf1(perfil, secretos, senalExterna, (datos, senal) =>
+      conectar.call(this.mysql, datos, senal),
+    );
+    const ejecutor: EjecutorTransaccionFacturaRf1 = {
+      iniciarTransaccion: () => recurso.conexion.iniciarTransaccion(),
+      ejecutar: (consulta, parametros) => recurso.conexion.ejecutar(consulta, parametros),
+      confirmarTransaccion: () => recurso.conexion.confirmarTransaccion(),
+      revertirTransaccion: () => recurso.conexion.revertirTransaccion(),
+      abortar: recurso.abortar,
+      cerrar: recurso.cerrar,
+    };
+    return new SesionInsercionMysqlRf1(ejecutor, this.timeoutMs);
+  }
+
+  /**
+   * Abre recursos de lectura o escritura mediante la misma política de red, TLS y SSH.
+   * @param perfil Perfil activo cuyo destino está restringido por la allowlist del proceso.
+   * @param secretos Buffer mutable de credenciales que se borra en todos los caminos de salida.
+   * @param senalExterna Cancelación de la solicitud autenticada que controla socket y túnel.
+   * @param conectar Factory específica de lectura o escritura con SQL permitido.
+   * @returns Conexión tipada y operaciones de cancelación/cierre idempotentes.
+   * @throws Error con código estable si falla perfil, destino, credenciales, SSH, TLS o conexión.
+   * @effects Mantiene una sola sesión del broker y libera túnel, conexión y buffers al cerrar.
+   */
+  private async abrirConexionRf1<T extends ConexionMySqlPrueba>(
+    perfil: PerfilConexionPrueba,
+    secretos: Uint8Array,
+    senalExterna: AbortSignal,
+    conectar: (datos: DatosConexionMySql, senal: AbortSignal) => Promise<T>,
+  ): Promise<{
+    readonly conexion: T;
+    readonly senal: AbortSignal;
+    readonly abortar: () => void;
+    readonly cerrar: () => Promise<void>;
+  }> {
     const contenido = Buffer.from(secretos);
     secretos.fill(0);
     if (this.ocupado) {
@@ -179,27 +256,24 @@ export class ClientConnectionBrokerMySql implements ClientConnectionBroker {
     this.ocupado = true;
 
     const controlador = new AbortController();
-    const recursos: {
-      conexion: ConexionMySqlPrueba | null;
-      tunel: TunelSshPrueba | null;
-    } = { conexion: null, tunel: null };
+    const recursos: { conexion: T | null; tunel: TunelSshPrueba | null } = {
+      conexion: null,
+      tunel: null,
+    };
     let temporizadorConexion: ReturnType<typeof setTimeout> | undefined;
     let temporizadorSesion: ReturnType<typeof setTimeout> | undefined;
     let conexionVencida = false;
     let etapa: 'SSH' | 'MYSQL' = 'MYSQL';
     let cierre: Promise<void> | null = null;
+    const cancelarDesdeSolicitante = (): void => controlador.abort();
 
     const cerrar = (): Promise<void> => {
       if (cierre !== null) {
         return cierre;
       }
       cierre = (async (): Promise<void> => {
-        if (temporizadorConexion !== undefined) {
-          clearTimeout(temporizadorConexion);
-        }
-        if (temporizadorSesion !== undefined) {
-          clearTimeout(temporizadorSesion);
-        }
+        if (temporizadorConexion !== undefined) clearTimeout(temporizadorConexion);
+        if (temporizadorSesion !== undefined) clearTimeout(temporizadorSesion);
         senalExterna.removeEventListener('abort', cancelarDesdeSolicitante);
         controlador.abort();
         await recursos.conexion?.cerrar().catch(() => undefined);
@@ -210,12 +284,8 @@ export class ClientConnectionBrokerMySql implements ClientConnectionBroker {
       return cierre;
     };
 
-    const cancelarDesdeSolicitante = (): void => controlador.abort();
-
     try {
-      if (senalExterna.aborted) {
-        throw new Error('RF1_SESSION_ABORTED');
-      }
+      if (senalExterna.aborted) throw new Error('RF1_SESSION_ABORTED');
       senalExterna.addEventListener('abort', cancelarDesdeSolicitante, { once: true });
       if (!perfilValido(perfil) || contenido.byteLength > TAMANO_MAXIMO_SECRETOS) {
         throw new Error(
@@ -233,24 +303,18 @@ export class ClientConnectionBrokerMySql implements ClientConnectionBroker {
       }
 
       const credenciales = analizarCredenciales(contenido, perfil.tipo);
-      if (credenciales === null) {
-        throw new Error('INVALID_CREDENTIALS');
-      }
-      if ('error' in credenciales) {
-        throw new Error(credenciales.error);
-      }
+      if (credenciales === null) throw new Error('INVALID_CREDENTIALS');
+      if ('error' in credenciales) throw new Error(credenciales.error);
 
       const abrir = async (): Promise<void> => {
         let stream: Duplex | undefined;
         let gatewayUsado: GatewaySshPermitido | undefined;
         if (perfil.tipo === 'MYSQL_SSH') {
-          if (gateway === undefined) {
-            throw new ErrorConectorPrueba('DESTINATION_NOT_ALLOWED');
-          }
+          if (gateway === undefined) throw new ErrorConectorPrueba('DESTINATION_NOT_ALLOWED');
           etapa = 'SSH';
           gatewayUsado = gateway;
           recursos.tunel = await this.ssh.abrir(
-            gatewayUsado,
+            gateway,
             destino,
             credenciales.ssh,
             controlador.signal,
@@ -262,7 +326,7 @@ export class ClientConnectionBrokerMySql implements ClientConnectionBroker {
           stream = recursos.tunel.stream;
         }
         etapa = 'MYSQL';
-        recursos.conexion = await this.mysql.conectar(
+        recursos.conexion = await conectar(
           {
             destino,
             database: perfil.baseDatos,
@@ -289,7 +353,8 @@ export class ClientConnectionBrokerMySql implements ClientConnectionBroker {
         }, this.timeoutMs);
       });
       await Promise.race([abrir(), plazoConexion]);
-      if (senalExterna.aborted || controlador.signal.aborted || recursos.conexion === null) {
+      const conexion = recursos.conexion;
+      if (senalExterna.aborted || controlador.signal.aborted || conexion === null) {
         throw new Error('RF1_SESSION_ABORTED');
       }
       if (temporizadorConexion !== undefined) {
@@ -297,35 +362,20 @@ export class ClientConnectionBrokerMySql implements ClientConnectionBroker {
         temporizadorConexion = undefined;
       }
       contenido.fill(0);
-
       temporizadorSesion = setTimeout(() => controlador.abort(), 15_000);
-      const conexion = recursos.conexion;
-      return new SesionMysqlRf1(
-        {
-          ejecutar: (consulta: ConsultaFijaRf1, parametros: readonly string[]) =>
-            conexion.ejecutarRf1(consulta, parametros),
-        },
+      return {
+        conexion,
+        senal: controlador.signal,
+        abortar: cancelarDesdeSolicitante,
         cerrar,
-        controlador.signal,
-        this.timeoutMs,
-        cancelarDesdeBroker,
-      );
+      };
     } catch (error: unknown) {
       await cerrar();
-      if (conexionVencida) {
-        throw new Error('RF1_CONNECTION_TIMEOUT');
-      }
-      if (error instanceof Error && esCodigoErrorRf1(error.message)) {
-        throw new Error(error.message);
-      }
+      if (conexionVencida) throw new Error('RF1_CONNECTION_TIMEOUT');
+      if (error instanceof Error && esCodigoErrorRf1(error.message)) throw new Error(error.message);
       throw new Error(clasificarFalloConector(error, etapa));
     }
-
-    function cancelarDesdeBroker(): void {
-      controlador.abort();
-    }
   }
-
   /** Comprueba `SELECT 1`, redacta errores y borra el paquete de credenciales recibido. */
   public async probar(
     perfil: PerfilConexionPrueba,

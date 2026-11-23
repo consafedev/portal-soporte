@@ -207,7 +207,10 @@ test('SUPPORT autorizado carga XML y ve resultados de preview sin inserción', a
   await page.getByRole('link', { name: 'RF-1' }).click();
   await expect(page.getByRole('heading', { name: 'Vista previa de facturas' })).toBeVisible();
   await expect(
-    page.getByText('Solo vista previa; no se modifica la base.', { exact: true }),
+    page.getByText(
+      'La vista previa es de solo lectura; cualquier inserción requiere confirmación explícita y permisos vigentes.',
+      { exact: true },
+    ),
   ).toBeVisible();
   await page.getByLabel('Cliente').selectOption(idCliente);
   await expect(page.getByText('Ambiente SAP de prueba', { exact: true })).toBeVisible();
@@ -242,7 +245,6 @@ test('SUPPORT autorizado carga XML y ve resultados de preview sin inserción', a
   await page.getByRole('button', { name: 'Validar selecciones de sociedad' }).click();
   await expect(resultados.getByText(/2000 · ERP-DEV · SUP-42/u)).toBeVisible();
   await expect(resultados.getByText('Vista previa completa')).toHaveCount(2);
-  await expect(page.getByRole('button', { name: /insertar factura/i })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /confirmar inserción/i })).toHaveCount(0);
 
   expect(observaciones).toEqual([
@@ -298,8 +300,15 @@ test('ADMIN selecciona un cliente activo y obtiene una fila lista para revisión
     'SUP-42',
   );
   await expect(
-    page.getByText('Solo vista previa; no se modifica la base.', { exact: true }),
+    page.getByText(
+      'La vista previa es de solo lectura; cualquier inserción requiere confirmación explícita y permisos vigentes.',
+      { exact: true },
+    ),
   ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Confirmar inserción de 1 factura' }),
+  ).toBeDisabled();
+  await expect(page.getByText(/compuerta global del servidor/u)).toBeVisible();
   await expect(page.getByText('destino-sintetico-interno', { exact: true })).toHaveCount(0);
   await expect(page.getByText('base_sintetica_interna', { exact: true })).toHaveCount(0);
   expect(observaciones).toHaveLength(1);
@@ -513,7 +522,11 @@ async function instalarRespuestaPreview(
       await ruta.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify(respuestas[indiceRespuesta++] ?? respuestas.at(-1)),
+        body: JSON.stringify({
+          resultados: respuestas[indiceRespuesta++] ?? respuestas.at(-1),
+          executionAvailable: false,
+          confirmationToken: null,
+        }),
       });
     },
   );

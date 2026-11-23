@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { previsualizarRf1 } from '../../apps/web/src/lib/rf1-preview-api.js';
+import { ejecutarRf1, previsualizarRf1 } from '../../apps/web/src/lib/rf1-preview-api.js';
 
 const CLIENT_ID = '35b77fcb-0bf8-4d88-8b81-187dd30d5101';
 const PROFILE_ID = '756d0604-b994-433b-b103-1e881ea908e7';
@@ -38,14 +38,18 @@ describe('cliente HTTP same-origin para vista previa RF-1', () => {
   it('envía archivos multipart con CSRF sin caché ni destino externo', async () => {
     const archivoUno = crearArchivoSintetico('factura-sintetica-uno.xml');
     const archivoDos = crearArchivoSintetico('factura-sintetica-dos.xml');
-    const resultados = [{ status: 'BLOCKED', errorCode: 'XML_MALFORMED' }];
+    const resultado = {
+      resultados: [{ status: 'BLOCKED', errorCode: 'XML_MALFORMED' }],
+      executionAvailable: false,
+      confirmationToken: null,
+    };
     fetchMock
       .mockResolvedValueOnce(crearRespuestaCsrf())
-      .mockResolvedValueOnce(crearRespuestaJson(resultados));
+      .mockResolvedValueOnce(crearRespuestaJson(resultado));
 
     await expect(
       previsualizarRf1(CLIENT_ID, PROFILE_ID, 'PAGADA', [archivoUno, archivoDos]),
-    ).resolves.toEqual(resultados);
+    ).resolves.toEqual(resultado);
 
     const [ruta, opciones] = fetchMock.mock.calls[1] ?? [];
     expect(ruta).toBe(
@@ -68,9 +72,13 @@ describe('cliente HTTP same-origin para vista previa RF-1', () => {
   it('envía la selección explícita por índice sin alterar los archivos del lote', async () => {
     const archivo = crearArchivoSintetico('factura-sociedades.xml');
     const selecciones = [{ indiceArchivo: 0, sociedad: '2000', ambienteSap: 'ERP-DEV' }];
-    fetchMock
-      .mockResolvedValueOnce(crearRespuestaCsrf())
-      .mockResolvedValueOnce(crearRespuestaJson([{ status: 'READY' }]));
+    fetchMock.mockResolvedValueOnce(crearRespuestaCsrf()).mockResolvedValueOnce(
+      crearRespuestaJson({
+        resultados: [{ status: 'READY' }],
+        executionAvailable: false,
+        confirmationToken: null,
+      }),
+    );
 
     await previsualizarRf1(CLIENT_ID, PROFILE_ID, 'PAGADA', [archivo], selecciones);
 
@@ -80,14 +88,41 @@ describe('cliente HTTP same-origin para vista previa RF-1', () => {
     expect(formulario.get('seleccionesSociedad')).toBe(JSON.stringify(selecciones));
   });
 
-  it('rechaza una respuesta fuera del contrato sin devolver sus campos extra', async () => {
+  it('envía la confirmación opaca en multipart con CSRF y sin caché', async () => {
+    const archivo = crearArchivoSintetico('factura-confirmada.xml');
+    const confirmacion = 'b'.repeat(43);
+    const resultados = [{ status: 'INSERTADA_VERIFICADA' }];
     fetchMock
       .mockResolvedValueOnce(crearRespuestaCsrf())
-      .mockResolvedValueOnce(
-        crearRespuestaJson([
-          { status: 'BLOCKED', errorCode: 'XML_MALFORMED', xmlOriginal: XML_SINTETICO },
-        ]),
-      );
+      .mockResolvedValueOnce(crearRespuestaJson(resultados));
+
+    await expect(
+      ejecutarRf1(CLIENT_ID, PROFILE_ID, 'PAGADA', [archivo], confirmacion),
+    ).resolves.toEqual(resultados);
+
+    const [ruta, opciones] = fetchMock.mock.calls[1] ?? [];
+    expect(ruta).toBe(
+      `/api/v1/clients/${CLIENT_ID}/modules/rf-1/execute?profileId=${PROFILE_ID}&estatus=PAGADA`,
+    );
+    expect(opciones).toMatchObject({
+      method: 'POST',
+      credentials: 'same-origin',
+      cache: 'no-store',
+      headers: { 'x-csrf-token': CSRF },
+    });
+    const formulario = opciones?.body as FormData;
+    expect([...formulario.keys()]).toEqual(['files', 'confirmationToken']);
+    expect(formulario.get('confirmationToken')).toBe(confirmacion);
+  });
+
+  it('rechaza una respuesta fuera del contrato sin devolver sus campos extra', async () => {
+    fetchMock.mockResolvedValueOnce(crearRespuestaCsrf()).mockResolvedValueOnce(
+      crearRespuestaJson({
+        resultados: [{ status: 'BLOCKED', errorCode: 'XML_MALFORMED', xmlOriginal: XML_SINTETICO }],
+        executionAvailable: false,
+        confirmationToken: null,
+      }),
+    );
 
     await expect(
       previsualizarRf1(CLIENT_ID, PROFILE_ID, 'CONTABILIZADO', [

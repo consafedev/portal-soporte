@@ -16,10 +16,12 @@ import type {
   ContextoSobreSecreto,
   PerfilConexionPrueba,
   ResultadoPruebaConexion,
+  SesionInsercionRf1,
   SesionLecturaRf1,
 } from '../../../../packages/core/src/clients/secret-custody-ports.js';
 import type { RelojAuth } from '../../../../packages/core/src/auth/ports.js';
 import type { PoliticaDestinosConexion, ServicioCifradoSecretos } from '@portal-soporte/connectors';
+import { calcularHuellaPerfilConexion } from './connection-profile-fingerprint.js';
 
 /** Error de dominio con código y estado HTTP controlados, sin valores de conexión. */
 export class ErrorPerfilesConexion extends Error {
@@ -39,7 +41,8 @@ export class ErrorPerfilesConexion extends Error {
       | 'CONNECTOR_BUSY'
       | 'CONNECTION_FAILED'
       | 'CONNECTION_TIMEOUT'
-      | 'REQUEST_ABORTED',
+      | 'REQUEST_ABORTED'
+      | 'PROFILE_CHANGED',
     public readonly statusCode: 400 | 404 | 409 | 413 | 422 | 502 | 503 | 504,
   ) {
     super(code);
@@ -266,6 +269,53 @@ export class ServicioPerfilesConexion {
         baseDatos: perfil.baseDatos,
       };
       return await this.broker.abrirLecturaRf1(solicitud, secreto, senal);
+    } catch (error: unknown) {
+      throw convertirErrorLecturaRf1(error);
+    } finally {
+      secreto?.fill(0);
+    }
+  }
+
+  /**
+   * Descifra temporalmente un perfil activo y abre escritura RF-1 parametrizada.
+   * El llamador debe exigir sesión, rol, asignación, capacidad y gate global antes de invocarlo.
+   * @param clientId Cliente propietario del perfil solicitado.
+   * @param profileId Perfil activo asociado al cliente.
+   * @param senal Cancelación que se propaga a MySQL y al túnel SSH.
+   * @param huellaEsperada Huella confirmada durante la previsualización; invalida cambios de destino o credenciales.
+   * @returns Sesión transaccional RF-1 que debe cerrarse en finally.
+   * @throws ErrorPerfilesConexion ante perfil, destino, custodia o conexión inválidos.
+   */
+  public async abrirInsercionRf1(
+    clientId: string,
+    profileId: string,
+    senal: AbortSignal,
+    huellaEsperada: string,
+  ): Promise<SesionInsercionRf1> {
+    const perfil = await this.repositorio.obtenerParaPrueba(clientId, profileId);
+    if (perfil === null) {
+      throw new ErrorPerfilesConexion('PROFILE_NOT_FOUND', 404);
+    }
+    if (calcularHuellaPerfilConexion(perfil) !== huellaEsperada) {
+      throw new ErrorPerfilesConexion('PROFILE_CHANGED', 409);
+    }
+    this.exigirDestinoPermitido(
+      perfil.destinoMySqlId,
+      perfil.gatewaySshId === null ? undefined : perfil.gatewaySshId,
+    );
+    const custodia = this.exigirCustodia();
+    let secreto: Buffer | null = null;
+    try {
+      secreto = await custodia.descifrar(perfil.sobre, crearContextoSobre(clientId, profileId));
+      const solicitud: PerfilConexionPrueba = {
+        id: perfil.id,
+        clientId: perfil.clientId,
+        tipo: perfil.tipo,
+        destinoMySqlId: perfil.destinoMySqlId,
+        ...(perfil.gatewaySshId === null ? {} : { gatewaySshId: perfil.gatewaySshId }),
+        baseDatos: perfil.baseDatos,
+      };
+      return await this.broker.abrirInsercionRf1(solicitud, secreto, senal);
     } catch (error: unknown) {
       throw convertirErrorLecturaRf1(error);
     } finally {

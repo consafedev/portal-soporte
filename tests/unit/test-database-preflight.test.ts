@@ -21,7 +21,6 @@ const restriccionesEsperadasPrueba = [
   ['auth_throttle_windows', 'auth_throttle_windows_pkey', 'p'],
   ['client_capabilities', 'client_capabilities_changed_by_user_id_users_id_fk', 'f'],
   ['client_capabilities', 'client_capabilities_client_id_clients_id_fk', 'f'],
-  ['client_capabilities', 'client_capabilities_execute_disabled_check', 'c'],
   ['client_capabilities', 'client_capabilities_id_check', 'c'],
   ['client_capabilities', 'client_capabilities_pkey', 'p'],
   ['client_sap_environments', 'client_sap_environments_client_id_clients_id_fk', 'f'],
@@ -147,6 +146,7 @@ function crearEstadoMigrado(
   incluirClientes = true,
   incluirPerfiles = true,
   incluirAccesoCliente = true,
+  incluirRestriccionExecuteDeshabilitado = false,
 ): EstadoEsquemaBasePrueba {
   const tablas = [
     '__drizzle_migrations',
@@ -226,15 +226,28 @@ function crearEstadoMigrado(
     esquemas: ['portal', 'public'],
     tablas: tablas.map((nombre) => ({ esquema: 'portal', nombre, tipo: 'BASE TABLE' })),
     secuencias: [{ esquema: 'portal', nombre: '__drizzle_migrations_id_seq' }],
-    restricciones: restriccionesEsperadasPrueba.filter(
-      (restriccion) =>
-        (incluirClientes ||
-          (restriccion.tabla !== 'client_sap_environments' && restriccion.tabla !== 'clients')) &&
-        (incluirPerfiles || restriccion.tabla !== 'client_connection_profiles') &&
-        (incluirAccesoCliente ||
-          (restriccion.tabla !== 'client_capabilities' &&
-            restriccion.tabla !== 'client_user_assignments')),
-    ),
+    restricciones: restriccionesEsperadasPrueba
+      .filter(
+        (restriccion) =>
+          (incluirClientes ||
+            (restriccion.tabla !== 'client_sap_environments' && restriccion.tabla !== 'clients')) &&
+          (incluirPerfiles || restriccion.tabla !== 'client_connection_profiles') &&
+          (incluirAccesoCliente ||
+            (restriccion.tabla !== 'client_capabilities' &&
+              restriccion.tabla !== 'client_user_assignments')),
+      )
+      .concat(
+        incluirRestriccionExecuteDeshabilitado
+          ? [
+              {
+                esquema: 'portal',
+                tabla: 'client_capabilities',
+                nombre: 'client_capabilities_execute_disabled_check',
+                tipo: 'c',
+              },
+            ]
+          : [],
+      ),
     relaciones: relaciones.map(([nombre, tipo]) => ({
       esquema: 'portal',
       nombre: nombre!,
@@ -340,6 +353,7 @@ describe('validación del estado persistente de la base de pruebas', () => {
     'hash-0005',
     'hash-0006',
     'hash-0007',
+    'hash-0008',
   ].map((hash) => [hash]);
 
   it('acepta una base nueva antes de aplicar migraciones', () => {
@@ -361,8 +375,8 @@ describe('validación del estado persistente de la base de pruebas', () => {
     ).toBe('migrado');
   });
 
-  it('acepta únicamente el esquema vacío inmediatamente anterior a la última migración', () => {
-    const estadoAnterior = crearEstadoMigrado(hashesEsperados.slice(0, -1), true, true, false);
+  it('acepta el esquema con la capacidad execute deshabilitada antes de migrar su constraint', () => {
+    const estadoAnterior = crearEstadoMigrado(hashesEsperados.slice(0, -1), true, true, true, true);
 
     expect(validarEstadoEsquemaBasePrueba(estadoAnterior, hashesEsperados)).toBe(
       'migracion-pendiente',
@@ -379,6 +393,7 @@ describe('validación del estado persistente de la base de pruebas', () => {
       'hash-0005',
       'hash-0006',
       'hash-0007',
+      'hash-0008',
     ].map((hash) => [`${hash}-windows`, `${hash}-unix`]);
     const estado = crearEstadoMigrado(variantes);
 

@@ -259,6 +259,9 @@ async function prepararAdministracion(): Promise<void> {
     async abrirLecturaRf1(): Promise<never> {
       throw new Error('RF1_CONNECTOR_NOT_CONFIGURED');
     },
+    async abrirInsercionRf1(): Promise<never> {
+      throw new Error('RF1_CONNECTOR_NOT_CONFIGURED');
+    },
   };
   const perfilesConexion = new ServicioPerfilesConexion(
     new RepositorioPerfilesConexionPostgres(exigirBasePrueba()),

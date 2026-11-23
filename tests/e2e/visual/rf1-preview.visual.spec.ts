@@ -136,9 +136,13 @@ test('ADMIN selecciona sociedad por teclado en escritorio/móvil y ambos temas',
   let solicitudesPreview = 0;
   await page.route(`**/api/v1/clients/${CLIENT_ID}/modules/rf-1/preview?*`, async (ruta) => {
     solicitudesPreview += 1;
-    await responderJson([
-      solicitudesPreview === 1 ? RESULTADO_PENDIENTE_VISUAL : RESULTADO_SELECCIONADO_VISUAL,
-    ])(ruta);
+    await responderJson({
+      resultados: [
+        solicitudesPreview === 1 ? RESULTADO_PENDIENTE_VISUAL : RESULTADO_SELECCIONADO_VISUAL,
+      ],
+      executionAvailable: false,
+      confirmationToken: null,
+    })(ruta);
   });
 
   await page.goto('/modules/rf-1');
@@ -151,6 +155,11 @@ test('ADMIN selecciona sociedad por teclado en escritorio/móvil y ambos temas',
   await cliente.press('Enter');
   const perfil = page.getByLabel('Perfil de conexión');
   await expect(perfil).toBeEnabled();
+  expect(
+    await page
+      .locator('.control-tema-global')
+      .evaluate((element) => getComputedStyle(element).position),
+  ).toBe('static');
   await perfil.focus();
   await perfil.press('ArrowDown');
   await perfil.press('Enter');
@@ -200,6 +209,16 @@ test('ADMIN selecciona sociedad por teclado en escritorio/móvil y ambos temas',
   expect(ordenMovil.temaInferior).toBeLessThanOrEqual(ordenMovil.navegacionSuperior);
   await expect(selectorSociedad).toBeVisible();
   await expect(selectorSociedad).toHaveValue('["2000","ERP-DEV"]');
+  const regionTablaResultados = page.getByRole('region', {
+    name: 'Tabla de resultados RF-1, desplázate horizontalmente para ver todas las columnas',
+  });
+  await expect(regionTablaResultados).toBeVisible();
+  await expect(regionTablaResultados).toHaveAttribute('tabindex', '0');
+  await expect(
+    page.getByText('Desplaza la tabla horizontalmente para consultar todas las columnas.', {
+      exact: true,
+    }),
+  ).toBeVisible();
   await page.screenshot({
     path: join(tmpdir(), 'portal-soporte-rf1-movil-oscuro.png'),
     fullPage: true,
@@ -209,11 +228,16 @@ test('ADMIN selecciona sociedad por teclado en escritorio/móvil y ambos temas',
     true,
   );
   expect(
-    await page.evaluate(() => {
-      const tabla = document.querySelector('.contenedor-tabla-rf1');
-      return tabla !== null && tabla.scrollWidth <= tabla.clientWidth;
-    }),
+    await regionTablaResultados.evaluate((region) => region.scrollWidth > region.clientWidth),
   ).toBe(true);
+  await regionTablaResultados.focus();
+  await expect(regionTablaResultados).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  expect(await regionTablaResultados.evaluate((region) => region.scrollLeft)).toBeGreaterThan(0);
+  await page.keyboard.press('End');
+  expect(await regionTablaResultados.evaluate((region) => region.scrollLeft)).toBeGreaterThan(0);
+  await page.keyboard.press('Home');
+  expect(await regionTablaResultados.evaluate((region) => region.scrollLeft)).toBe(0);
   await expect(analizar).toBeVisible();
   await expect(page.getByRole('button', { name: 'Cambiar a tema claro' })).toBeVisible();
 

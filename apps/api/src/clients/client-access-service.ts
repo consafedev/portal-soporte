@@ -97,7 +97,7 @@ export class ServicioAccesoCliente {
     }
   }
 
-  /** Establece capacidades por cliente; impide habilitar ejecución RF-1. */
+  /** Establece capacidades allowlisted por cliente después de verificar ADMIN vigente. */
   public async establecerCapacidad(
     clientId: string,
     capacidad: CapacidadCliente,
@@ -108,9 +108,6 @@ export class ServicioAccesoCliente {
     validarCapacidad(capacidad);
     if (typeof habilitada !== 'boolean') {
       throw new ErrorAccesoCliente('INPUT_INVALID', 400);
-    }
-    if (capacidad === 'rf-1:execute' && habilitada) {
-      throw denegarAcceso();
     }
     await this.exigirAdministrador(actor.actorUserId);
 
@@ -137,10 +134,6 @@ export class ServicioAccesoCliente {
     validarUuid(actor.actorUserId);
     validarUuid(clientId);
     validarCapacidad(capacidad);
-    if (capacidad === 'rf-1:execute') {
-      throw denegarAcceso();
-    }
-
     const estado = await this.repositorio.consultarEstadoAutorizacion(
       actor.actorUserId,
       clientId,

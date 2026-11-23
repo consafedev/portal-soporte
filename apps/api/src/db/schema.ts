@@ -213,16 +213,12 @@ function definirRestriccionesAsignacionCliente(columnas: ColumnasAsignacionClien
   };
 }
 
-/** Limita la tabla de capacidades a IDs conocidos y bloquea la ejecución de escrituras RF-1. */
+/** Limita la tabla de capacidades a los identificadores RF-1 conocidos. */
 function definirRestriccionesCapacidadCliente(columnas: ColumnasCapacidadClienteRestricciones) {
   return {
     capacidadPermitida: check(
       'client_capabilities_id_check',
       sql`${columnas.capabilityId} IN ('rf-1:read', 'rf-1:execute')`,
-    ),
-    ejecucionRf1Deshabilitada: check(
-      'client_capabilities_execute_disabled_check',
-      sql`${columnas.capabilityId} <> 'rf-1:execute' OR ${columnas.enabled} = false`,
     ),
   };
 }

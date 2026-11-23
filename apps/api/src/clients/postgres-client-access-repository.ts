@@ -137,7 +137,7 @@ export class PostgresClientAccessRepository implements RepositorioAccesoCliente 
       return {
         clientId,
         capabilityId,
-        enabled: capabilityId === 'rf-1:execute' ? false : (fila?.enabled ?? false),
+        enabled: fila?.enabled ?? false,
         changedAt: fila?.changedAt ?? null,
       };
     });
@@ -272,14 +272,14 @@ export class PostgresClientAccessRepository implements RepositorioAccesoCliente 
         .values({
           clientId,
           capabilityId: capacidad,
-          enabled: capacidad === 'rf-1:execute' ? false : habilitada,
+          enabled: habilitada,
           changedByUserId: actor.actorUserId,
           changedAt: new Date(),
         })
         .onConflictDoUpdate({
           target: [clientCapabilities.clientId, clientCapabilities.capabilityId],
           set: {
-            enabled: capacidad === 'rf-1:execute' ? false : habilitada,
+            enabled: habilitada,
             changedByUserId: actor.actorUserId,
             changedAt: new Date(),
           },
@@ -289,7 +289,7 @@ export class PostgresClientAccessRepository implements RepositorioAccesoCliente 
         clientId,
         action: 'CLIENT_CAPABILITY_UPDATED',
         capabilityId: capacidad,
-        enabled: capacidad === 'rf-1:execute' ? false : habilitada,
+        enabled: habilitada,
       });
       return 'UPDATED';
     });

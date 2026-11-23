@@ -4,7 +4,8 @@ import { Value } from '@sinclair/typebox/value';
 import {
   clienteParamsSchema,
   errorClienteAdminSchema,
-  resultadosVistaPreviaRf1Schema,
+  respuestaVistaPreviaRf1Schema,
+  resultadosInsercionRf1Schema,
   seleccionesSociedadRf1Schema,
   solicitudVistaPreviaRf1Schema,
   type EstatusVistaPreviaRf1Contrato,
@@ -19,6 +20,7 @@ import type { ConfiguracionAuth } from '../config.js';
 import { ErrorAccesoCliente } from '../clients/client-access-service.js';
 import { ErrorPerfilesConexion } from '../clients/connection-profile-service.js';
 import { ServicioVistaPreviaRf1 } from '../clients/rf1-preview-service.js';
+import { ErrorInsercionRf1, type ServicioInsercionRf1 } from '../clients/rf1-insertion-service.js';
 
 const MAXIMO_ARCHIVOS = 100;
 const MAXIMO_BYTES_POR_ARCHIVO = 5 * 1024 * 1024;
@@ -43,6 +45,8 @@ export interface DependenciasRutasVistaPreviaRf1 {
   readonly sesiones: ServicioSesion;
   /** Servicio de aplicación que revalida cliente, perfil, rol y capacidad por operación. */
   readonly vistaPrevia: ServicioVistaPreviaRf1;
+  /** Servicio de escritura RF-1 detrás de un gate global cerrado por defecto. */
+  readonly insercion?: ServicioInsercionRf1;
   /** Puerto de auditoría usado por guards globales y decisiones de preview. */
   readonly auditoria: EscritorAuditoriaAuth;
   /** Fuente de hora compartida para auditoría, nunca tomada de la petición. */
@@ -114,7 +118,7 @@ export async function registrarRutasVistaPreviaRf1(
           });
         }
 
-        const resultados = await dependencias.vistaPrevia.ejecutar({
+        const solicitudServicio = {
           actor,
           clientId: solicitud.params.clientId,
           profileId: solicitud.query.profileId,
@@ -122,8 +126,17 @@ export async function registrarRutasVistaPreviaRf1(
           archivos,
           seleccionesSociedad: lote.seleccionesSociedad,
           senal: controlador.signal,
-        });
-        return respuesta.code(200).send(resultados);
+        };
+        const resultados = await dependencias.vistaPrevia.ejecutar(solicitudServicio);
+        const confirmacion = (await dependencias.insercion?.prepararConfirmacion(
+          solicitudServicio,
+          resultados,
+        )) ?? {
+          executionAvailable: false,
+          confirmationToken: null,
+        };
+        respuesta.header('cache-control', 'no-store, private').header('pragma', 'no-cache');
+        return respuesta.code(200).send({ resultados, ...confirmacion });
       } catch (error: unknown) {
         if (vencioTiempo) {
           return respuesta.code(408).send({
@@ -153,7 +166,7 @@ export async function registrarRutasVistaPreviaRf1(
           params: clienteParamsSchema,
           querystring: solicitudVistaPreviaRf1Schema,
           response: {
-            200: resultadosVistaPreviaRf1Schema,
+            200: respuestaVistaPreviaRf1Schema,
             400: errorClienteAdminSchema,
             401: errorClienteAdminSchema,
             403: errorClienteAdminSchema,
@@ -172,12 +185,166 @@ export async function registrarRutasVistaPreviaRf1(
       },
       previsualizar,
     );
+
+    /**
+     * Bloquea gate y permisos antes de leer archivos de cualquier solicitud de escritura.
+     * @param solicitud Request con sesión autenticada y contexto de cliente/perfil.
+     * @param respuesta Respuesta Fastify para rechazar formatos de cuerpo no permitidos.
+     * @returns Respuesta temprana cuando el contenido no es multipart; en otro caso `undefined`.
+     * @throws ErrorInsercionRf1 si el servicio o la compuerta global no están habilitados.
+     * @effects Revalida rol, cliente, capacidades y perfil antes de consumir el cuerpo.
+     */
+    async function preautorizarEjecucion(
+      solicitud: FastifyRequest<{
+        Params: ParametrosCliente;
+        Querystring: SolicitudVistaPreviaRf1Contrato;
+      }>,
+      respuesta: FastifyReply,
+    ): Promise<FastifyReply | undefined> {
+      const insercion = dependencias.insercion;
+      if (insercion === undefined) {
+        throw new ErrorInsercionRf1('RF1_INSERTION_DISABLED', 503);
+      }
+      const actor = exigirActorVistaPrevia(solicitud);
+      await insercion.preautorizar({
+        actor,
+        clientId: solicitud.params.clientId,
+        profileId: solicitud.query.profileId,
+        estatus: solicitud.query.estatus as EstatusVistaPreviaRf1Contrato,
+        archivos: [],
+        seleccionesSociedad: [],
+        senal: new AbortController().signal,
+      });
+      if (!solicitud.isMultipart()) {
+        return respuesta.code(415).send({
+          code: 'MULTIPART_REQUIRED',
+          message: 'La solicitud debe contener archivos multipart/form-data.',
+        });
+      }
+      return undefined;
+    }
+
+    /**
+     * Recalcula el lote, consume el token de un solo uso y llama el motor transaccional fijo.
+     * @param solicitud Request multipart autenticada, protegida con CSRF y limitada por tamaño.
+     * @param respuesta Respuesta Fastify para estados individuales y errores controlados.
+     * @returns Respuesta HTTP con un resultado por archivo o un error redactado.
+     * @throws ErrorInsercionRf1 ante token, autorización, gate o preview no válidos.
+     * @effects Borra los buffers de XML al finalizar y no conserva el contenido en logs.
+     */
+    async function insertar(
+      solicitud: FastifyRequest<{
+        Params: ParametrosCliente;
+        Querystring: SolicitudVistaPreviaRf1Contrato;
+      }>,
+      respuesta: FastifyReply,
+    ): Promise<FastifyReply> {
+      const rechazo = await preautorizarEjecucion(solicitud, respuesta);
+      if (rechazo !== undefined) {
+        return rechazo;
+      }
+      const insercion = dependencias.insercion;
+      if (insercion === undefined) {
+        throw new ErrorInsercionRf1('RF1_INSERTION_DISABLED', 503);
+      }
+      const actor = exigirActorVistaPrevia(solicitud);
+      const controlador = new AbortController();
+      let vencioTiempo = false;
+      const temporizador = setTimeout(() => {
+        vencioTiempo = true;
+        controlador.abort();
+        solicitud.raw.destroy();
+      }, LIMITE_TIEMPO_SOLICITUD_MS);
+      temporizador.unref();
+      const cancelarAlAbortar = (): void => controlador.abort();
+      const cancelarAlCerrarRespuesta = (): void => {
+        if (!respuesta.raw.writableEnded) {
+          controlador.abort();
+        }
+      };
+      solicitud.raw.once('aborted', cancelarAlAbortar);
+      respuesta.raw.once('close', cancelarAlCerrarRespuesta);
+      const archivos: Buffer[] = [];
+      try {
+        const lote = await leerArchivosMultipart(solicitud, controlador.signal, true);
+        archivos.push(...lote.archivos);
+        if (vencioTiempo) {
+          return respuesta.code(408).send({
+            code: 'REQUEST_TIMEOUT',
+            message: 'La solicitud excedió el tiempo permitido.',
+          });
+        }
+        if (lote.confirmationToken === undefined) {
+          throw new ErrorInsercionRf1('RF1_CONFIRMATION_INVALID', 409);
+        }
+        const resultados = await insercion.ejecutar(
+          {
+            actor,
+            clientId: solicitud.params.clientId,
+            profileId: solicitud.query.profileId,
+            estatus: solicitud.query.estatus as EstatusVistaPreviaRf1Contrato,
+            archivos,
+            seleccionesSociedad: lote.seleccionesSociedad,
+            senal: controlador.signal,
+          },
+          lote.confirmationToken,
+        );
+        respuesta.header('cache-control', 'no-store, private').header('pragma', 'no-cache');
+        return respuesta.code(200).send(resultados);
+      } catch (error: unknown) {
+        if (vencioTiempo) {
+          return respuesta.code(408).send({
+            code: 'REQUEST_TIMEOUT',
+            message: 'La solicitud excedió el tiempo permitido.',
+          });
+        }
+        throw error;
+      } finally {
+        clearTimeout(temporizador);
+        solicitud.raw.off('aborted', cancelarAlAbortar);
+        respuesta.raw.off('close', cancelarAlCerrarRespuesta);
+        for (const archivo of archivos) {
+          archivo.fill(0);
+        }
+      }
+    }
+
+    rutas.post<{
+      Params: ParametrosCliente;
+      Querystring: SolicitudVistaPreviaRf1Contrato;
+    }>(
+      '/api/v1/clients/:clientId/modules/rf-1/execute',
+      {
+        preHandler: autenticado,
+        schema: {
+          params: clienteParamsSchema,
+          querystring: solicitudVistaPreviaRf1Schema,
+          response: {
+            200: resultadosInsercionRf1Schema,
+            400: errorClienteAdminSchema,
+            401: errorClienteAdminSchema,
+            403: errorClienteAdminSchema,
+            408: errorClienteAdminSchema,
+            409: errorClienteAdminSchema,
+            413: errorClienteAdminSchema,
+            415: errorClienteAdminSchema,
+            422: errorClienteAdminSchema,
+            502: errorClienteAdminSchema,
+            503: errorClienteAdminSchema,
+            504: errorClienteAdminSchema,
+            500: errorClienteAdminSchema,
+          },
+        },
+      },
+      insertar,
+    );
   });
 }
 
 /** Lee los XML y la selección opcional desde multipart, solo en memoria.
  * @param solicitud - Request de Fastify ya autenticada y protegida contra CSRF.
  * @param senal - Señal que detiene lectura y procesamiento al cancelar o vencer la petición.
+ * @param exigirConfirmacion - Exige un token opaco multipart además de las selecciones de sociedad.
  * @returns Archivos originales y selecciones con índices validados dentro del lote.
  * @throws ErrorCargaVistaPrevia ante límites, estructura multipart o selección inválidos.
  * @effects Borra buffers acumulados si la lectura o validación falla.
@@ -185,22 +352,41 @@ export async function registrarRutasVistaPreviaRf1(
 async function leerArchivosMultipart(
   solicitud: FastifyRequest,
   senal: AbortSignal,
+  exigirConfirmacion = false,
 ): Promise<{
   readonly archivos: readonly Buffer[];
   readonly seleccionesSociedad: readonly SeleccionSociedadArchivoRf1Contrato[];
+  readonly confirmationToken?: string;
 }> {
   const archivos: Buffer[] = [];
   let totalBytes = 0;
   let recibioSelecciones = false;
+  let confirmationToken: string | undefined;
   let jsonSelecciones: string | undefined;
   try {
     for await (const parte of solicitud.parts({
-      limits: LIMITES_MULTIPART,
+      limits: {
+        ...LIMITES_MULTIPART,
+        fields: exigirConfirmacion ? 2 : 1,
+        parts: MAXIMO_ARCHIVOS + (exigirConfirmacion ? 2 : 1),
+      },
     })) {
       if (senal.aborted) {
         throw new ErrorCargaVistaPrevia('REQUEST_ABORTED', 408);
       }
       if (parte.type === 'field') {
+        if (
+          exigirConfirmacion &&
+          parte.fieldname === 'confirmationToken' &&
+          confirmationToken === undefined &&
+          !parte.fieldnameTruncated &&
+          !parte.valueTruncated &&
+          typeof parte.value === 'string' &&
+          /^[A-Za-z0-9_-]{43}$/u.test(parte.value)
+        ) {
+          confirmationToken = parte.value;
+          continue;
+        }
         if (
           parte.fieldname !== 'seleccionesSociedad' ||
           recibioSelecciones ||
@@ -227,11 +413,18 @@ async function leerArchivosMultipart(
         }),
       );
     }
+    if (exigirConfirmacion && confirmationToken === undefined) {
+      throw new ErrorCargaVistaPrevia('MULTIPART_SELECTION_INVALID', 400);
+    }
     if (archivos.length === 0) {
       throw new ErrorCargaVistaPrevia('BATCH_EMPTY', 400);
     }
     const seleccionesSociedad = validarSeleccionesSociedad(jsonSelecciones, archivos.length);
-    return { archivos, seleccionesSociedad };
+    return {
+      archivos,
+      seleccionesSociedad,
+      ...(confirmationToken === undefined ? {} : { confirmationToken }),
+    };
   } catch (error: unknown) {
     for (const archivo of archivos) {
       archivo.fill(0);
@@ -365,7 +558,13 @@ function manejarErrorVistaPrevia(
   if (error instanceof ErrorPerfilesConexion) {
     return respuesta.code(error.statusCode).send({
       code: error.code,
-      message: 'No fue posible abrir el perfil de lectura autorizado.',
+      message: 'No fue posible utilizar el perfil autorizado.',
+    });
+  }
+  if (error instanceof ErrorInsercionRf1) {
+    return respuesta.code(error.statusCode).send({
+      code: error.code,
+      message: traducirErrorInsercionRf1(error.code),
     });
   }
   if (error instanceof ErrorCargaVistaPrevia) {
@@ -382,6 +581,24 @@ function manejarErrorVistaPrevia(
     code: 'INTERNAL_ERROR',
     message: 'No fue posible procesar la vista previa.',
   });
+}
+
+/**
+ * Traduce errores de inserción a mensajes estables sin contenido fiscal ni de conexión.
+ * @param codigo Código de dominio acotado producido por el servicio de inserción.
+ * @returns Texto en español apto para respuesta HTTP y presentación al operador.
+ */
+function traducirErrorInsercionRf1(codigo: ErrorInsercionRf1['code']): string {
+  switch (codigo) {
+    case 'RF1_INSERTION_DISABLED':
+      return 'La inserción RF-1 permanece deshabilitada por la política del servidor.';
+    case 'RF1_CONFIRMATION_INVALID':
+      return 'La vista previa cambió o la confirmación ya venció; genera una nueva vista previa.';
+    case 'RF1_PREVIEW_NOT_READY':
+      return 'La vista previa contiene facturas que requieren corrección antes de confirmar.';
+    case 'RF1_CONNECTION_FAILED':
+      return 'No fue posible abrir el perfil autorizado; no se ejecutó la inserción.';
+  }
 }
 
 /** Error local de carga cuyo código y estado no retienen contenido del archivo. */

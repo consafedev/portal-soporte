@@ -23,9 +23,12 @@ async function ejecutarMigracionesPrueba(): Promise<void> {
     });
     await migrarBaseAuth(database);
     process.stdout.write('Migraciones aplicadas a PostgreSQL aislado de prueba.\n');
-  } catch {
+  } catch (error: unknown) {
     fallo = true;
-    process.stderr.write('No fue posible aplicar migraciones a la base aislada de prueba.\n');
+    const codigoSql = obtenerCodigoSqlSeguro(error);
+    process.stderr.write(
+      `No fue posible aplicar migraciones a la base aislada de prueba${codigoSql === null ? '' : ` (SQLSTATE ${codigoSql})`}.\n`,
+    );
   } finally {
     if (database !== null) {
       try {
@@ -40,6 +43,21 @@ async function ejecutarMigracionesPrueba(): Promise<void> {
   if (fallo) {
     process.exitCode = 1;
   }
+}
+
+/** Extrae únicamente SQLSTATE numérico de la cadena de causas, nunca mensajes ni consultas. */
+function obtenerCodigoSqlSeguro(error: unknown): string | null {
+  let actual: unknown = error;
+  for (let profundidad = 0; profundidad < 4; profundidad += 1) {
+    if (typeof actual !== 'object' || actual === null) {
+      return null;
+    }
+    if ('code' in actual && typeof actual.code === 'string' && /^\d{5}$/u.test(actual.code)) {
+      return actual.code;
+    }
+    actual = 'cause' in actual ? actual.cause : undefined;
+  }
+  return null;
 }
 
 /**

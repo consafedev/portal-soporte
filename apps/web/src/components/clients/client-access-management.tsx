@@ -25,13 +25,13 @@ export interface ClienteAccesoAdminProps {
 }
 
 /**
- * Administra usuarios SUPPORT y el permiso de vista previa sin mostrar datos de conexión.
+ * Administra usuarios SUPPORT y capacidades RF-1 sin mostrar datos de conexión.
  * @param propiedades - Cliente objetivo, estado y callbacks de la página contenedora.
  * @param propiedades.clientId - Identificador que limita lecturas y mutaciones de acceso.
  * @param propiedades.clienteActivo - Estado que controla si la interfaz permite configurar acceso.
  * @param propiedades.onError - Callback para comunicar errores públicos sin detalles de red.
  * @param propiedades.onSaved - Callback que anuncia una operación confirmada por el servidor.
- * @returns Sección accesible de asignaciones SUPPORT y capacidad `rf-1:read`.
+ * @returns Sección accesible de asignaciones SUPPORT y capacidades independientes RF-1.
  * @throws Los fallos de transporte se capturan y se muestran como errores controlados.
  * @effects Consulta y modifica únicamente el cliente de la propiedad mediante API same-origin.
  */
@@ -45,6 +45,9 @@ export function AdministracionAccesoCliente({
   const [resumen, setResumen] = useState<AccesoClienteAdminContrato | null>(null);
   const [usuarioSeleccionado, setUsuarioSeleccionado] = useState('');
   const [capacidadOptimista, setCapacidadOptimista] = useState<boolean | null>(null);
+  const [capacidadEjecucionOptimista, setCapacidadEjecucionOptimista] = useState<boolean | null>(
+    null,
+  );
   const [cargando, setCargando] = useState(true);
   const [guardando, setGuardando] = useState(false);
   const [errorLocal, setErrorLocal] = useState<string | null>(null);
@@ -107,6 +110,10 @@ export function AdministracionAccesoCliente({
     resumen?.capacidades.find((capacidad) => capacidad.capabilityId === 'rf-1:read')?.enabled ??
     false;
   const capacidadLectura = capacidadOptimista ?? capacidadConfirmada;
+  const capacidadEjecucionConfirmada =
+    resumen?.capacidades.find((capacidad) => capacidad.capabilityId === 'rf-1:execute')?.enabled ??
+    false;
+  const capacidadEjecucion = capacidadEjecucionOptimista ?? capacidadEjecucionConfirmada;
 
   /**
    * Persiste una mutación, vuelve a leer el estado y solo entonces anuncia éxito.
@@ -169,18 +176,23 @@ export function AdministracionAccesoCliente({
   }
 
   /**
-   * Guarda la capacidad allowlisted de lectura y mantiene la ejecución deshabilitada.
-   * @param enabled - Estado solicitado para `rf-1:read`.
+   * Guarda una capacidad allowlisted y deja el gate global bajo control del servidor.
+   * @param capacidad - Permiso RF-1 que ADMIN administra en el cliente seleccionado.
+   * @param enabled - Estado persistente solicitado.
    * @returns No retorna valor; inicia una operación de lectura/escritura controlada.
    * @throws No propaga errores; el estado vuelve a la capacidad persistida y anuncia el fallo.
    * @effects Muestra feedback inmediato y después confirma contra el servidor.
    */
-  function manejarCapacidad(enabled: boolean): void {
-    setCapacidadOptimista(enabled);
+  function manejarCapacidad(capacidad: 'rf-1:read' | 'rf-1:execute', enabled: boolean): void {
+    const actualizarOptimista =
+      capacidad === 'rf-1:read' ? setCapacidadOptimista : setCapacidadEjecucionOptimista;
+    actualizarOptimista(enabled);
     void guardarOperacion(
-      () => establecerCapacidadCliente(clientId, 'rf-1:read', enabled),
-      'La capacidad de lectura se actualizó.',
-    ).finally(() => setCapacidadOptimista(null));
+      () => establecerCapacidadCliente(clientId, capacidad, enabled),
+      capacidad === 'rf-1:read'
+        ? 'La capacidad de lectura se actualizó.'
+        : 'La capacidad de ejecución por cliente se actualizó.',
+    ).finally(() => actualizarOptimista(null));
   }
 
   /**
@@ -226,7 +238,7 @@ export function AdministracionAccesoCliente({
       <div>
         <h4 id={`acceso-cliente-${clientId}`}>Acceso de usuarios y capacidades</h4>
         <p className="texto-secundario">
-          Concede acceso de soporte a este cliente y habilita únicamente la vista previa.
+          Administra las capacidades de lectura e inserción por separado.
         </p>
       </div>
 
@@ -289,21 +301,41 @@ export function AdministracionAccesoCliente({
             </ul>
           )}
 
-          <label className="capacidad-rf1">
-            <input
-              type="checkbox"
-              checked={capacidadLectura}
-              onChange={(evento) => manejarCapacidad(evento.currentTarget.checked)}
-              disabled={guardando || !clienteActivo}
-              aria-label="Permitir vista previa RF-1"
-            />
-            <span>
-              <strong>Permitir vista previa RF-1</strong>
-              <span className="texto-secundario">
-                Permite cargar XML y consultar datos autorizados sin insertar facturas.
+          <fieldset className="grupo-capacidades-rf1">
+            <legend>Capacidades RF-1</legend>
+            <label className="capacidad-rf1">
+              <input
+                type="checkbox"
+                checked={capacidadLectura}
+                onChange={(evento) => manejarCapacidad('rf-1:read', evento.currentTarget.checked)}
+                disabled={guardando || !clienteActivo}
+                aria-label="Permitir vista previa RF-1"
+              />
+              <span>
+                <strong>Permitir vista previa RF-1</strong>
+                <span className="texto-secundario">
+                  Permite cargar XML y consultar datos autorizados sin insertar facturas.
+                </span>
               </span>
-            </span>
-          </label>
+            </label>
+            <label className="capacidad-rf1">
+              <input
+                type="checkbox"
+                checked={capacidadEjecucion}
+                onChange={(evento) =>
+                  manejarCapacidad('rf-1:execute', evento.currentTarget.checked)
+                }
+                disabled={guardando || !clienteActivo}
+                aria-label="Permitir inserción RF-1"
+              />
+              <span>
+                <strong>Permitir inserción RF-1</strong>
+                <span className="texto-secundario">
+                  Permiso por cliente; la compuerta global del servidor se habilita por separado.
+                </span>
+              </span>
+            </label>
+          </fieldset>
           {!clienteActivo ? (
             <p className="ayuda-campo">Activa el cliente antes de configurar su capacidad.</p>
           ) : null}
