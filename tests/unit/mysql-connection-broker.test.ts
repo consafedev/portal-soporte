@@ -9,6 +9,10 @@ import {
   type FabricaTunelSsh,
   type TunelSshPrueba,
 } from '../../packages/connectors/src/mysql-connection-broker.js';
+import {
+  PoliticaDireccionesDestino,
+  type ResolverDireccionesDestino,
+} from '../../packages/connectors/src/network-destination-policy.js';
 import type {
   DestinoGatewaySsh,
   PerfilConexionPrueba,
@@ -34,6 +38,20 @@ const perfilDirecto: PerfilConexionPrueba = {
   destinoMySqlId: destino.id,
   baseDatos: 'base_sintetica',
 };
+const perfilDirectoAutoservicio: PerfilConexionPrueba = {
+  ...perfilDirecto,
+  destinoMySql: { hostname: 'mysql.autoservicio.test', port: 3306 },
+};
+const perfilSshAutoservicio: PerfilConexionPrueba = {
+  ...perfilDirectoAutoservicio,
+  tipo: 'MYSQL_SSH',
+  gatewaySshId: gateway.id,
+  gatewaySsh: {
+    hostname: 'ssh.autoservicio.test',
+    port: 22,
+    fingerprint: gateway.fingerprint,
+  },
+};
 
 describe('PoliticaDestinosConexion', () => {
   it('resuelve destinos por hostname y puerto visibles en el formulario', () => {
@@ -57,6 +75,7 @@ describe('PoliticaDestinosConexion', () => {
 function crearFactories(
   consulta: () => Promise<void> = async () => undefined,
   falloConexion?: Error,
+  falloSsh?: Error,
 ): {
   readonly mysql: FabricaConexionMySql;
   readonly ssh: FabricaTunelSsh;
@@ -64,6 +83,10 @@ function crearFactories(
   readonly consultas: string[];
   readonly consultasRf1: { readonly sql: string; readonly parametros: readonly string[] }[];
   readonly tunelesCreados: number[];
+  readonly destinosSsh: {
+    readonly gateway: DestinoGatewaySsh;
+    readonly destino: DatosConexionMySql['destino'];
+  }[];
   readonly cierresMySql: number[];
   readonly cierresSsh: number[];
 } {
@@ -71,6 +94,10 @@ function crearFactories(
   const consultas: string[] = [];
   const consultasRf1: { readonly sql: string; readonly parametros: readonly string[] }[] = [];
   const tunelesCreados: number[] = [];
+  const destinosSsh: {
+    readonly gateway: DestinoGatewaySsh;
+    readonly destino: DatosConexionMySql['destino'];
+  }[] = [];
   const cierresMySql: number[] = [];
   const cierresSsh: number[] = [];
   const stream = new PassThrough();
@@ -97,8 +124,12 @@ function crearFactories(
     },
   };
   const ssh: FabricaTunelSsh = {
-    async abrir(): Promise<TunelSshPrueba> {
+    async abrir(gatewayUsado, destinoUsado): Promise<TunelSshPrueba> {
+      if (falloSsh !== undefined) {
+        throw falloSsh;
+      }
       tunelesCreados.push(1);
+      destinosSsh.push({ gateway: gatewayUsado, destino: destinoUsado });
       return {
         stream,
         async cerrar(): Promise<void> {
@@ -119,6 +150,7 @@ function crearFactories(
     consultas,
     consultasRf1,
     tunelesCreados,
+    destinosSsh,
     cierresMySql,
     cierresSsh,
   };
@@ -172,7 +204,228 @@ function crearBroker(factories: ReturnType<typeof crearFactories>): ClientConnec
   );
 }
 
+/** Compone el broker de autoservicio con DNS sintético y un fallback legacy aislado. */
+function crearBrokerAutoservicio(
+  factories: ReturnType<typeof crearFactories>,
+  resolver: ResolverDireccionesDestino,
+  timeoutDnsMs: number = 100,
+  destinosLegacy: readonly (typeof destino)[] = [destino],
+  gatewaysLegacy: readonly DestinoGatewaySsh[] = [gateway],
+): ClientConnectionBrokerMySql {
+  return new ClientConnectionBrokerMySql(
+    new PoliticaDestinosConexion(destinosLegacy, gatewaysLegacy),
+    factories.mysql,
+    factories.ssh,
+    100,
+    new PoliticaDireccionesDestino({ resolver, timeoutMs: timeoutDnsMs }),
+  );
+}
+
+/** Crea un resolver controlado que nunca consulta DNS externo durante las pruebas. */
+function crearResolverPorHost(
+  respuestas: Readonly<Record<string, readonly string[]>>,
+): ResolverDireccionesDestino {
+  return {
+    async resolver(hostname): Promise<readonly string[]> {
+      return respuestas[hostname] ?? [];
+    },
+  };
+}
+
 describe('ClientConnectionBrokerMySql', () => {
+  it('conecta por un endpoint del perfil aunque no exista en la allowlist operacional', async () => {
+    const factories = crearFactories();
+    const resolver = crearResolverPorHost({ 'mysql.autoservicio.test': ['93.184.216.34'] });
+    const broker = crearBrokerAutoservicio(factories, resolver, 100, [], []);
+
+    const resultado = await broker.probar(perfilDirectoAutoservicio, crearSecretos());
+
+    expect(resultado.code).toBe('CONNECTED');
+    expect(factories.mysqlDatos[0]?.destino).toMatchObject({
+      hostname: 'mysql.autoservicio.test',
+      address: '93.184.216.34',
+      port: 3306,
+    });
+    expect(factories.mysqlDatos[0]?.destino.hostname).toBe('mysql.autoservicio.test');
+    expect(factories.mysqlDatos[0]?.tls).toEqual({
+      ca: 'CERTIFICADO CA SINTÉTICO',
+      rejectUnauthorized: true,
+    });
+    expect(factories.consultas).toEqual(['SELECT 1']);
+  });
+
+  it('rechaza IP privada directa antes de abrir sockets', async () => {
+    const factories = crearFactories();
+    const resolver = crearResolverPorHost({ 'mysql.autoservicio.test': ['10.22.0.8'] });
+    const broker = crearBrokerAutoservicio(factories, resolver);
+    const secretos = crearSecretos();
+
+    const resultado = await broker.probar(perfilDirectoAutoservicio, secretos);
+
+    expect(resultado.code).toBe('DESTINATION_NOT_ALLOWED');
+    expect(factories.mysqlDatos).toHaveLength(0);
+    expect(factories.consultas).toHaveLength(0);
+    expect([...secretos].every((byte) => byte === 0)).toBe(true);
+  });
+
+  it('rechaza una respuesta DNS mixta antes de abrir sockets', async () => {
+    const factories = crearFactories();
+    const resolver = crearResolverPorHost({
+      'mysql.autoservicio.test': ['93.184.216.34', '127.0.0.1'],
+    });
+    const broker = crearBrokerAutoservicio(factories, resolver);
+
+    const resultado = await broker.probar(perfilDirectoAutoservicio, crearSecretos());
+
+    expect(resultado.code).toBe('DESTINATION_NOT_ALLOWED');
+    expect(factories.mysqlDatos).toHaveLength(0);
+  });
+
+  it('vuelve a resolver el perfil en cada prueba y bloquea un cambio de DNS a IP privada', async () => {
+    const factories = crearFactories();
+    const respuestas = [['93.184.216.34'], ['10.22.0.8']];
+    let intentos = 0;
+    const resolver: ResolverDireccionesDestino = {
+      async resolver(): Promise<readonly string[]> {
+        const respuesta = respuestas[intentos];
+        intentos += 1;
+        return respuesta ?? [];
+      },
+    };
+    const broker = crearBrokerAutoservicio(factories, resolver);
+
+    const primera = await broker.probar(perfilDirectoAutoservicio, crearSecretos());
+    const segunda = await broker.probar(perfilDirectoAutoservicio, crearSecretos());
+
+    expect(primera.code).toBe('CONNECTED');
+    expect(segunda.code).toBe('DESTINATION_NOT_ALLOWED');
+    expect(intentos).toBe(2);
+    expect(factories.mysqlDatos).toHaveLength(1);
+  });
+
+  it('falla de forma acotada ante un timeout DNS sin abrir sockets', async () => {
+    const factories = crearFactories();
+    const resolver: ResolverDireccionesDestino = {
+      resolver: async () => new Promise<readonly string[]>(() => undefined),
+    };
+    const broker = crearBrokerAutoservicio(factories, resolver, 5);
+
+    const resultado = await broker.probar(perfilDirectoAutoservicio, crearSecretos());
+
+    expect(resultado.code).toBe('DESTINATION_NOT_ALLOWED');
+    expect(factories.mysqlDatos).toHaveLength(0);
+  });
+
+  it('rechaza gateway SSH no público o fingerprint inválida antes de abrir el túnel', async () => {
+    for (const respuesta of [
+      { hosts: { 'ssh.autoservicio.test': ['192.168.1.10'] }, fingerprint: gateway.fingerprint },
+      { hosts: { 'ssh.autoservicio.test': ['1.1.1.1'] }, fingerprint: 'SHA256:invalida' },
+    ]) {
+      const factories = crearFactories();
+      const resolver = crearResolverPorHost({
+        'mysql.autoservicio.test': ['93.184.216.34'],
+        ...respuesta.hosts,
+      });
+      const broker = crearBrokerAutoservicio(factories, resolver);
+
+      const resultado = await broker.probar(
+        {
+          ...perfilSshAutoservicio,
+          gatewaySsh: { ...perfilSshAutoservicio.gatewaySsh!, fingerprint: respuesta.fingerprint },
+        },
+        crearSecretos(true),
+      );
+
+      expect(resultado.code).toBe('DESTINATION_NOT_ALLOWED');
+      expect(factories.tunelesCreados).toHaveLength(0);
+      expect(factories.mysqlDatos).toHaveLength(0);
+    }
+  });
+
+  it('rechaza targets metadata y link-local antes del forward SSH', async () => {
+    for (const address of ['169.254.169.254', '169.254.0.9']) {
+      const factories = crearFactories();
+      const resolver = crearResolverPorHost({ 'mysql.autoservicio.test': [address] });
+      const broker = crearBrokerAutoservicio(factories, resolver);
+
+      const resultado = await broker.probar(perfilSshAutoservicio, crearSecretos(true));
+
+      expect(resultado.code).toBe('DESTINATION_NOT_ALLOWED');
+      expect(factories.tunelesCreados).toHaveLength(0);
+      expect(factories.mysqlDatos).toHaveLength(0);
+    }
+  });
+
+  it('no abre MySQL cuando la fábrica SSH rechaza la fingerprint del gateway', async () => {
+    const factories = crearFactories(
+      async () => undefined,
+      undefined,
+      new Error('SSH_HOST_KEY_REJECTED'),
+    );
+    const resolver = crearResolverPorHost({
+      'mysql.autoservicio.test': ['10.20.30.40'],
+      'ssh.autoservicio.test': ['1.1.1.1'],
+    });
+    const broker = crearBrokerAutoservicio(factories, resolver);
+
+    const resultado = await broker.probar(perfilSshAutoservicio, crearSecretos(true));
+
+    expect(resultado.code).toBe('SSH_HOST_KEY_REJECTED');
+    expect(factories.destinosSsh).toHaveLength(0);
+    expect(factories.mysqlDatos).toHaveLength(0);
+  });
+
+  it('fija el endpoint del perfil antes de abrir la sesión de lectura RF-1', async () => {
+    const factories = crearFactories();
+    const resolver = crearResolverPorHost({ 'mysql.autoservicio.test': ['93.184.216.34'] });
+    const broker = crearBrokerAutoservicio(factories, resolver);
+
+    const sesion = await broker.abrirLecturaRf1(
+      perfilDirectoAutoservicio,
+      crearSecretos(),
+      new AbortController().signal,
+    );
+    const existe = await sesion.existeUuid('550e8400-e29b-41d4-a716-446655440001');
+    await sesion.cerrar();
+
+    expect(existe).toBe(true);
+    expect(factories.mysqlDatos[0]?.destino.address).toBe('93.184.216.34');
+    expect(factories.consultasRf1).toHaveLength(1);
+    expect(factories.cierresMySql).toEqual([1]);
+  });
+
+  it('rechaza el endpoint inseguro antes de abrir la sesión de lectura RF-1', async () => {
+    const factories = crearFactories();
+    const resolver = crearResolverPorHost({ 'mysql.autoservicio.test': ['127.0.0.1'] });
+    const broker = crearBrokerAutoservicio(factories, resolver);
+    const secretos = crearSecretos();
+
+    await expect(
+      broker.abrirLecturaRf1(perfilDirectoAutoservicio, secretos, new AbortController().signal),
+    ).rejects.toThrow('DESTINATION_NOT_ALLOWED');
+
+    expect(factories.mysqlDatos).toHaveLength(0);
+    expect(factories.consultasRf1).toHaveLength(0);
+    expect([...secretos].every((byte) => byte === 0)).toBe(true);
+  });
+
+  it('permite target loopback/RFC1918 solo dentro del forward SSH del perfil', async () => {
+    for (const address of ['127.0.0.1', '10.20.30.40']) {
+      const factories = crearFactories();
+      const resolver = crearResolverPorHost({
+        'mysql.autoservicio.test': [address],
+        'ssh.autoservicio.test': ['1.1.1.1'],
+      });
+      const broker = crearBrokerAutoservicio(factories, resolver);
+
+      const resultado = await broker.probar(perfilSshAutoservicio, crearSecretos(true));
+
+      expect(resultado.code).toBe('CONNECTED');
+      expect(factories.destinosSsh[0]?.destino.address).toBe(address);
+      expect(factories.tunelesCreados).toHaveLength(1);
+    }
+  });
+
   it('abre sesión RF-1 tipada, borra el paquete de entrada y libera recursos al cerrar', async () => {
     const factories = crearFactories();
     const secretos = crearSecretos();

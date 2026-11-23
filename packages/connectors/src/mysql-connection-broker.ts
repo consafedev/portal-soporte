@@ -15,6 +15,11 @@ import {
   SesionInsercionMysqlRf1,
   type EjecutorTransaccionFacturaRf1,
 } from './mysql-rf1-invoice-insert.js';
+import {
+  ErrorPoliticaDestino,
+  PoliticaDireccionesDestino,
+  type DireccionConexionFijada,
+} from './network-destination-policy.js';
 
 /** Destino MySQL fijo, con hostname TLS y dirección IP previamente aprobada. */
 export type DestinoMySqlPermitido = DestinoMySqlAutorizado;
@@ -188,17 +193,20 @@ function buscarEndpointUnico<T extends { readonly hostname: string; readonly por
 /** Prueba acceso con sesión única, timeout, destinos fijados y cierre de recursos. */
 export class ClientConnectionBrokerMySql implements ClientConnectionBroker {
   private ocupado = false;
+  private readonly politicaDirecciones: PoliticaDireccionesDestino;
 
-  /** Crea el broker con una allowlist y factories de conexión inyectables. */
+  /** Crea el broker con compatibilidad legacy y validación DNS/IP por perfil. */
   public constructor(
     private readonly politica: PoliticaDestinosConexion,
     private readonly mysql: FabricaConexionMySql,
     private readonly ssh: FabricaTunelSsh,
     private readonly timeoutMs: number = 5_000,
+    politicaDirecciones: PoliticaDireccionesDestino = new PoliticaDireccionesDestino(),
   ) {
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 15_000) {
       throw new Error('CONNECTOR_POLICY_INVALID');
     }
+    this.politicaDirecciones = politicaDirecciones;
   }
 
   /**
@@ -328,20 +336,13 @@ export class ClientConnectionBrokerMySql implements ClientConnectionBroker {
         );
       }
 
-      const destino = this.politica.obtenerMySql(perfil.destinoMySqlId);
-      const gateway =
-        perfil.tipo === 'MYSQL_SSH' && perfil.gatewaySshId !== undefined
-          ? this.politica.obtenerGatewaySsh(perfil.gatewaySshId)
-          : undefined;
-      if (destino === undefined || (perfil.tipo === 'MYSQL_SSH' && gateway === undefined)) {
-        throw new Error('DESTINATION_NOT_ALLOWED');
-      }
-
       const credenciales = analizarCredenciales(contenido, perfil.tipo);
       if (credenciales === null) throw new Error('INVALID_CREDENTIALS');
       if ('error' in credenciales) throw new Error(credenciales.error);
 
       const abrir = async (): Promise<void> => {
+        const destinos = await this.resolverDestinosPerfil(perfil, controlador.signal);
+        const { destino, gateway } = destinos;
         let stream: Duplex | undefined;
         let gatewayUsado: GatewaySshPermitido | undefined;
         if (perfil.tipo === 'MYSQL_SSH') {
@@ -408,6 +409,7 @@ export class ClientConnectionBrokerMySql implements ClientConnectionBroker {
     } catch (error: unknown) {
       await cerrar();
       if (conexionVencida) throw new Error('RF1_CONNECTION_TIMEOUT');
+      if (error instanceof ErrorPoliticaDestino) throw new Error('DESTINATION_NOT_ALLOWED');
       if (error instanceof Error && esCodigoErrorRf1(error.message)) throw new Error(error.message);
       throw new Error(clasificarFalloConector(error, etapa));
     }
@@ -440,14 +442,6 @@ export class ClientConnectionBrokerMySql implements ClientConnectionBroker {
         );
       }
 
-      const destino = this.politica.obtenerMySql(perfil.destinoMySqlId);
-      const gateway =
-        perfil.tipo === 'MYSQL_SSH' && perfil.gatewaySshId !== undefined
-          ? this.politica.obtenerGatewaySsh(perfil.gatewaySshId)
-          : undefined;
-      if (destino === undefined || (perfil.tipo === 'MYSQL_SSH' && gateway === undefined)) {
-        return resultadoPrueba('DESTINATION_NOT_ALLOWED');
-      }
       const secretosValidos = analizarCredenciales(contenido, perfil.tipo);
       if (secretosValidos === null) {
         return resultadoPrueba('INVALID_CREDENTIALS');
@@ -465,6 +459,8 @@ export class ClientConnectionBrokerMySql implements ClientConnectionBroker {
         }, this.timeoutMs);
       });
       const operacion = (async (): Promise<void> => {
+        const destinos = await this.resolverDestinosPerfil(perfil, controlador.signal);
+        const { destino, gateway } = destinos;
         let stream: Duplex | undefined;
         let gatewayUsado: GatewaySshPermitido | undefined;
         if (perfil.tipo === 'MYSQL_SSH') {
@@ -513,6 +509,9 @@ export class ClientConnectionBrokerMySql implements ClientConnectionBroker {
         if (timeoutAlcanzado) {
           return resultadoPrueba('CONNECTION_TIMEOUT');
         }
+        if (error instanceof ErrorPoliticaDestino) {
+          return resultadoPrueba('DESTINATION_NOT_ALLOWED');
+        }
         return resultadoPrueba(clasificarFalloConector(error, etapa));
       }
     } finally {
@@ -526,6 +525,66 @@ export class ClientConnectionBrokerMySql implements ClientConnectionBroker {
       this.ocupado = false;
     }
   }
+
+  /** Resuelve y fija los destinos del perfil o conserva la resolución legacy explícita. */
+  private async resolverDestinosPerfil(
+    perfil: PerfilConexionPrueba,
+    senal: AbortSignal,
+  ): Promise<{ readonly destino: DestinoMySqlPermitido; readonly gateway?: GatewaySshPermitido }> {
+    if (perfil.destinoMySql === undefined) {
+      const destino =
+        perfil.destinoMySqlId === undefined
+          ? undefined
+          : this.politica.obtenerMySql(perfil.destinoMySqlId);
+      const gateway =
+        perfil.tipo === 'MYSQL_SSH' && perfil.gatewaySshId !== undefined
+          ? this.politica.obtenerGatewaySsh(perfil.gatewaySshId)
+          : undefined;
+      if (destino === undefined || (perfil.tipo === 'MYSQL_SSH' && gateway === undefined)) {
+        throw new ErrorConectorPrueba('DESTINATION_NOT_ALLOWED');
+      }
+      return { destino, ...(gateway === undefined ? {} : { gateway }) };
+    }
+
+    const destinoFijado =
+      perfil.tipo === 'MYSQL_SSH'
+        ? await this.politicaDirecciones.fijarMySqlEnTunel(perfil.destinoMySql, senal)
+        : await this.politicaDirecciones.fijarMySqlDirecto(perfil.destinoMySql, senal);
+    const destino = convertirDireccionFijada(destinoFijado, perfil.destinoMySqlId ?? perfil.id);
+    if (perfil.tipo === 'MYSQL_TCP') {
+      return { destino };
+    }
+
+    const endpointGateway = perfil.gatewaySsh;
+    if (endpointGateway === undefined) {
+      throw new ErrorConectorPrueba('DESTINATION_NOT_ALLOWED');
+    }
+    const gatewayFijado = await this.politicaDirecciones.fijarGatewaySsh(
+      endpointGateway,
+      endpointGateway.fingerprint,
+      senal,
+    );
+    return {
+      destino,
+      gateway: {
+        ...convertirDireccionFijada(gatewayFijado, perfil.gatewaySshId ?? perfil.id),
+        fingerprint: endpointGateway.fingerprint,
+      },
+    };
+  }
+}
+
+/** Convierte una dirección de red validada a un destino interno del driver. */
+function convertirDireccionFijada(
+  direccion: DireccionConexionFijada,
+  id: string,
+): DestinoMySqlPermitido {
+  return {
+    id,
+    hostname: direccion.hostname,
+    address: direccion.address,
+    port: direccion.port,
+  };
 }
 
 interface CredencialesConexionAnalizadas {
@@ -596,18 +655,57 @@ function hostValido(hostname: string): boolean {
 
 /** Valida metadatos del perfil antes de resolver secretos o usar red. */
 function perfilValido(perfil: PerfilConexionPrueba): boolean {
+  if (
+    typeof perfil !== 'object' ||
+    perfil === null ||
+    !UUID_VALIDO.test(perfil.id) ||
+    !UUID_VALIDO.test(perfil.clientId) ||
+    (perfil.tipo !== 'MYSQL_TCP' && perfil.tipo !== 'MYSQL_SSH') ||
+    !/^[A-Za-z0-9_$-]{1,64}$/u.test(perfil.baseDatos)
+  ) {
+    return false;
+  }
+
+  const tieneDestinoPorPerfil = perfil.destinoMySql !== undefined;
+  const tieneGatewayPorPerfil = perfil.gatewaySsh !== undefined;
+  if (tieneDestinoPorPerfil || tieneGatewayPorPerfil) {
+    return (
+      tieneDestinoPorPerfil &&
+      endpointPerfilValido(perfil.destinoMySql) &&
+      (perfil.tipo === 'MYSQL_SSH'
+        ? tieneGatewayPorPerfil && endpointGatewayPerfilValido(perfil.gatewaySsh)
+        : !tieneGatewayPorPerfil && perfil.gatewaySshId === undefined)
+    );
+  }
+
   return (
-    typeof perfil === 'object' &&
-    perfil !== null &&
-    UUID_VALIDO.test(perfil.id) &&
-    UUID_VALIDO.test(perfil.clientId) &&
-    (perfil.tipo === 'MYSQL_TCP' || perfil.tipo === 'MYSQL_SSH') &&
+    typeof perfil.destinoMySqlId === 'string' &&
     IDENTIFICADOR_DESTINO.test(perfil.destinoMySqlId) &&
     (perfil.tipo === 'MYSQL_SSH'
-      ? perfil.gatewaySshId !== undefined && IDENTIFICADOR_DESTINO.test(perfil.gatewaySshId)
-      : perfil.gatewaySshId === undefined) &&
-    /^[A-Za-z0-9_$-]{1,64}$/u.test(perfil.baseDatos)
+      ? typeof perfil.gatewaySshId === 'string' && IDENTIFICADOR_DESTINO.test(perfil.gatewaySshId)
+      : perfil.gatewaySshId === undefined)
   );
+}
+
+/** Comprueba la forma básica del endpoint antes de su validación DNS/IP especializada. */
+function endpointPerfilValido(
+  endpoint: PerfilConexionPrueba['destinoMySql'],
+): endpoint is NonNullable<PerfilConexionPrueba['destinoMySql']> {
+  return (
+    typeof endpoint === 'object' &&
+    endpoint !== null &&
+    typeof endpoint.hostname === 'string' &&
+    Number.isSafeInteger(endpoint.port) &&
+    endpoint.port >= 1 &&
+    endpoint.port <= 65_535
+  );
+}
+
+/** Exige la estructura del gateway sin adelantar la validación segura de su fingerprint. */
+function endpointGatewayPerfilValido(
+  endpoint: PerfilConexionPrueba['gatewaySsh'],
+): endpoint is NonNullable<PerfilConexionPrueba['gatewaySsh']> {
+  return endpointPerfilValido(endpoint) && typeof endpoint.fingerprint === 'string';
 }
 
 /** Decodifica un paquete JSON limitado y rechaza campos inesperados o combinaciones inválidas. */
