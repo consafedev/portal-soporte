@@ -11,7 +11,7 @@ ADMIN puede registrar y mantener clientes, ambientes SAP y perfiles de conexión
 - Clientes: alta, consulta, edición y desactivación lógica. Se conserva el identificador y la auditoría.
 - Ambientes SAP ligados a un cliente. El código/alias SAP es distinto del entorno de despliegue del perfil (`PRODUCTION`, `TEST` u otro tipo que se apruebe); no se infiere ni se mezcla con el RFC/sociedad de RF-1.
 - Perfiles implementados en este alcance: `MYSQL_TCP` y `MYSQL_SSH`, sujetos a pruebas sintéticas de compatibilidad. No se gestionan conexiones SAP; sociedad y ambiente SAP son metadatos consultados desde MySQL. `MYSQL_URL` y `SSH_SERVER` permanecen fuera de alcance.
-- Prueba de conexión exclusiva de ADMIN, de solo lectura/no mutante, con límites de tiempo, conexiones y destinos configurados. No se ofrece SQL ni shell libre.
+- Prueba de conexión exclusiva de ADMIN, de solo lectura/no mutante, con límites de tiempo, conexiones y endpoints ligados al perfil. El broker aplica la política de red vigente; no se ofrece SQL ni shell libre.
 - Auditoría de alta, edición, desactivación, prueba, rotación y fallos sin valores de secretos.
 
 ## Contratos y seguridad
@@ -43,17 +43,31 @@ Perfiles de conexión, cifrado, reemplazo/rotación de secretos y prueba no muta
 
 ## Actualización PS-005.2 — Custodia y conectores
 
+> **Histórico:** las condiciones de allowlist operacional de esta sección describen la decisión anterior y quedaron supersedidas para perfiles nuevos por AP-015 y PS-005.4. La resolución legacy se conserva exclusivamente para perfiles antiguos cuyos endpoints nuevos siguen en `NULL`.
+
 - **Estado de diseño:** decisión técnica registrada en [ADR-0002](../architecture/ADR-0002_CUSTODIA_SECRETOS.md); cifrado/envoltura versionados, proveedor recuperable fuera de PostgreSQL/Git, rotación y controles de acceso a archivo son requisitos del incremento.
 - El llavero se configura mediante ruta absoluta protegida, no con la clave en variables de entorno. El arranque y las operaciones fallan cerrados si el llavero está ausente, el propietario/permisos no coinciden, la versión de clave no está disponible o la autenticación del sobre falla. El formato operativo y recuperación se describen en [KEYRING_RECOVERY.md](../operations/KEYRING_RECOVERY.md).
 - Los secretos por perfil se cifran como un paquete JSON limitado; la API solo recibe valores en operaciones de escritura y nunca devuelve el paquete en claro. Las lecturas usan allowlists sin columnas cifradas. Registro de auditoría contiene acción, actor, perfil, resultado y correlación, nunca valores secretos.
 - Para MySQL, el único sondeo de conectividad es `SELECT 1`, una conexión a la vez, timeout acotado y cierre garantizado. TLS usa validación de certificado; no existe opción para ignorar errores TLS. En SSH se verifica la huella configurada y se permite únicamente un forward al destino MySQL exacto autorizado, sin shell ni agente.
 - La modalidad SSH se selecciona explícitamente entre contraseña y llave privada. Ambos secretos solo se reciben al guardar o reemplazar credenciales, se cifran antes de persistirse y nunca se recuperan para la interfaz; el selector de llave acepta `.pem`, `.key` y `.ppk` y muestra únicamente el nombre del archivo.
-- Host/puerto/fingerprint deben pertenecer a allowlist operacional explícita fuera del request/DB. La resolución se fija a IP validada para impedir DNS rebinding; no se siguen redirecciones ni se aceptan URLs arbitrarias.
+- En el diseño previo a AP-015, host/puerto/fingerprint debían pertenecer a una allowlist operacional explícita fuera del request/DB. Esa condición permanece solo como fallback de perfiles legacy con endpoints nuevos nulos; no autoriza perfiles nuevos.
 - No se crea un llavero de producción ni se guardan secretos de clientes en este incremento sin una copia de recuperación independiente probada. Conectividad efectiva requiere fixture MySQL aislado; la ausencia de ese fixture se registra como `NO EJECUTADO`, no como PASS. RF-1 puede iniciar parser/preview con fixtures sintéticos cuando el contrato del broker exista; inserción permanece separada y bloqueada por VT-01..VT-09.
 
-## Ajuste de interfaz de conexión — 2026-11-23
+## Ajuste histórico de interfaz de conexión — 2026-11-23
+
+> **Supersedido para perfiles nuevos por AP-015.** Se conserva este registro para trazabilidad; su rechazo por falta de allowlist ya no describe el contrato vigente.
 
 - ADMIN configura el perfil con campos `MySQL Hostname` y `MySQL Port`; para `MYSQL_SSH` también `SSH Hostname` y `SSH Port`, además de las credenciales propias de cada capa. La interfaz y el contrato HTTP no solicitan IDs opacos de destinos.
 - El backend compara exactamente hostname y puerto con la política operacional cargada fuera de PostgreSQL y del request. Solo después de una coincidencia única convierte el endpoint a su referencia interna ya persistida. Los DTOs ADMIN exponen hostname/puerto, nunca las referencias internas, la dirección IP fijada ni fingerprints.
 - Un endpoint no configurado o ambiguo se rechaza antes de cifrar o persistir credenciales. La conexión sigue fijada a la IP validada por operaciones, con verificación TLS/fingerprint y sin resolución DNS controlada por el navegador. No se habilitan destinos arbitrarios ni se requieren cambios de esquema.
 - Esta presentación se basa en los campos habituales de Workbench y no implica que el Portal deba tener la misma libertad de red: el broker del Portal mantiene su política de destinos, timeouts, operaciones permitidas y auditoría.
+
+## PS-005.4 — Endpoints autoservicio por perfil (AP-015)
+
+- ADMIN puede registrar y modificar desde el Portal el hostname/IP y puerto MySQL de cada perfil y, para `MYSQL_SSH`, el hostname/IP y puerto del gateway y su fingerprint SHA-256. El perfil liga exactamente esos endpoints con un cliente y perfil; no se piden IDs técnicos ni cambios manuales de allowlist operacional para destinos nuevos.
+- La autorización de negocio del endpoint nace de crear o editar el perfil mediante una sesión ADMIN con CSRF y auditoría. Cada prueba o lectura posterior vuelve a validar cliente, perfil, rol, asignación y capacidad; las solicitudes de ejecución solo reciben identificadores de perfil y nunca pueden sustituir el destino persistido.
+- El autoservicio no desactiva las guardas de red. En cada intento el broker normaliza y resuelve A/AAAA con límites, valida el conjunto de direcciones y conecta a una IP numérica fijada. MySQL directo y el gateway SSH deben resolver exclusivamente a direcciones públicas globalmente enrutables; se rechazan loopback, redes privadas, link-local, metadata y otros rangos especiales, además de DNS mixto o no verificable.
+- En `MYSQL_SSH`, el destino MySQL privado o loopback solo se admite dentro del único forward al host y puerto guardados en el mismo perfil. Se rechazan metadata/link-local y forwarding alterno; el gateway requiere fingerprint SHA-256 confirmada por ADMIN, no ofrece shell ni agente. TLS MySQL conserva verificación de certificado e identidad del hostname cuando aplica.
+- Los perfiles legacy cuyos campos nuevos siguen en `NULL` conservan el fallback por identificadores internos y política operacional anterior. Los perfiles nuevos no dependen de `PORTAL_CONNECTOR_POLICY_JSON`.
+- ADMIN puede ver y editar sus endpoints/fingerprint; SUPPORT no recibe hostname, puerto, fingerprint, credenciales ni sobre cifrado. Contraseñas, llaves y certificados nunca regresan en DTO, mensajes o logs. La prueba de conexión continúa limitada a `SELECT 1`, una conexión a la vez, timeout y cierre.
+- Esta entrega no incluye una conexión a cliente real ni INSERT/UPDATE/DELETE externo. El fixture MySQL/SSH completo queda `NO EJECUTADO` cuando Docker no está disponible; la validación de red se apoya en resolvers y fábricas sintéticos.
