@@ -80,7 +80,7 @@ async function responderCatalogos(
     estado.solicitudesCredenciales.push(solicitud['credenciales']);
     const perfilCreado: PerfilConexionAdminContrato = {
       ...perfilVisual,
-      id: '550e8400-e29b-41d4-a716-446655440031',
+      id: `550e8400-e29b-41d4-a716-${String(446655440031 + estado.perfiles.length).padStart(12, '0')}`,
       nombre: String(solicitud['nombre']),
       tipo: solicitud['tipo'] === 'MYSQL_SSH' ? 'MYSQL_SSH' : 'MYSQL_TCP',
       entorno: solicitud['entorno'] === 'PRODUCTION' ? 'PRODUCTION' : 'TEST',
@@ -232,7 +232,59 @@ test('ADMIN navega y revisa perfiles en escritorio y móvil sin datos reales', a
 
   await tarjeta.getByLabel('Ruta de conexión').selectOption('MYSQL_SSH');
   await expect(tarjeta.getByLabel('ID de gateway SSH autorizado')).toBeVisible();
-  await expect(tarjeta.getByLabel('Llave privada SSH (PEM/OpenSSH o PPK v2 RSA)')).toBeVisible();
+  await expect(tarjeta.getByLabel('Método de autenticación SSH')).toBeVisible();
+  await expect(
+    tarjeta.getByLabel('Llave privada SSH (archivo PEM/OpenSSH o PPK v2 RSA)'),
+  ).toHaveAttribute('type', 'file');
+
+  const secretoSshSintetico = 'contraseña-ssh-visual-sintetica';
+  await formularioAlta.getByLabel('Nombre del perfil').fill('SSH con contraseña sintética');
+  await formularioAlta.getByLabel('ID de gateway SSH autorizado').fill('gateway-visual');
+  await formularioAlta.getByLabel('ID de destino autorizado').fill('destino-visual');
+  await formularioAlta.getByLabel('Base MySQL').fill('base_visual');
+  await formularioAlta.getByLabel('Usuario MySQL').fill('usuario_ssh_visual');
+  await formularioAlta.getByLabel('Contraseña MySQL').fill('clave-mysql-visual-sintetica');
+  await formularioAlta.getByLabel('Método de autenticación SSH').selectOption('PASSWORD');
+  await formularioAlta.getByLabel('Usuario SSH').fill('ssh_visual');
+  await formularioAlta.getByLabel('Contraseña SSH').fill(secretoSshSintetico);
+  expect(
+    await formularioAlta
+      .locator(':invalid')
+      .evaluateAll((elementos) => elementos.map((elemento) => (elemento as HTMLInputElement).id)),
+  ).toEqual([]);
+  await formularioAlta.getByRole('button', { name: 'Guardar perfil' }).click();
+  expect(await formularioAlta.getByRole('alert').allTextContents()).toEqual([]);
+  expect(JSON.stringify(estado.solicitudesCredenciales.at(-1))).toContain(secretoSshSintetico);
+  expect(await page.locator('body').innerText()).not.toContain(secretoSshSintetico);
+  await expect(formularioAlta.getByLabel('Método de autenticación SSH')).toHaveValue('PRIVATE_KEY');
+
+  const contenidoLlaveSintetica =
+    '-----BEGIN OPENSSH PRIVATE KEY-----\nLLAVE-SINTETICA-NO-REAL\n-----END OPENSSH PRIVATE KEY-----';
+  await formularioAlta.getByLabel('Nombre del perfil').fill('SSH con llave sintética');
+  await formularioAlta.getByLabel('ID de gateway SSH autorizado').fill('gateway-visual');
+  await formularioAlta.getByLabel('ID de destino autorizado').fill('destino-visual');
+  await formularioAlta.getByLabel('Base MySQL').fill('base_visual');
+  await formularioAlta.getByLabel('Usuario MySQL').fill('usuario_ssh_visual');
+  await formularioAlta.getByLabel('Contraseña MySQL').fill('clave-mysql-visual-sintetica');
+  await formularioAlta.getByLabel('Usuario SSH').fill('ssh_visual');
+  await formularioAlta
+    .getByLabel('Llave privada SSH (archivo PEM/OpenSSH o PPK v2 RSA)')
+    .setInputFiles({
+      name: 'llave-visual.pem',
+      mimeType: 'application/x-pem-file',
+      buffer: Buffer.from(contenidoLlaveSintetica),
+    });
+  await expect(formularioAlta.getByRole('status')).toContainText('llave-visual.pem');
+  expect(await page.locator('body').innerText()).not.toContain('LLAVE-SINTETICA-NO-REAL');
+  const solicitudesAntesDeGuardarLlave = estado.solicitudesCredenciales.length;
+  await formularioAlta.getByRole('button', { name: 'Guardar perfil' }).click();
+  await expect
+    .poll(() => estado.solicitudesCredenciales.length)
+    .toBe(solicitudesAntesDeGuardarLlave + 1);
+  expect(JSON.stringify(estado.solicitudesCredenciales.at(-1))).toContain(
+    'LLAVE-SINTETICA-NO-REAL',
+  );
+  expect(await page.locator('body').innerText()).not.toContain('LLAVE-SINTETICA-NO-REAL');
 
   await page.screenshot({
     path: join(tmpdir(), 'portal-soporte-ps005-2-panel-cliente-claro-desktop.png'),

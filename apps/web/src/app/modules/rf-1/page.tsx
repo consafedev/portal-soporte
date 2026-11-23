@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 /** Metadatos privados de la vista de lectura RF-1. */
 export const metadata: Metadata = {
-  title: 'Vista previa RF-1 · Portal de Soporte',
+  title: 'Insertar Facturas en BD · Portal de Soporte',
   description: 'Valida CFDI y presenta una vista previa sin modificar bases de clientes.',
   robots: { index: false, follow: false },
 };

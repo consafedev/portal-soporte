@@ -204,8 +204,8 @@ test('SUPPORT autorizado carga XML y ve resultados de preview sin inserción', a
     resultadosSeleccionados(),
   ]);
   await iniciarSesion(page, cuentaSupport);
-  await page.getByRole('link', { name: 'RF-1' }).click();
-  await expect(page.getByRole('heading', { name: 'Vista previa de facturas' })).toBeVisible();
+  await page.getByRole('link', { name: 'Insertar Facturas en BD' }).click();
+  await expect(page.getByRole('heading', { name: 'Insertar Facturas en BD' })).toBeVisible();
   await expect(
     page.getByText(
       'La vista previa es de solo lectura; cualquier inserción requiere confirmación explícita y permisos vigentes.',
@@ -228,7 +228,9 @@ test('SUPPORT autorizado carga XML y ve resultados de preview sin inserción', a
   await expect(page.getByText('4 archivos listos para analizar.', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Analizar vista previa' }).click();
 
-  const resultados = page.getByRole('table', { name: 'Resultados de vista previa RF-1' });
+  const resultados = page.getByRole('table', {
+    name: 'Resultados de vista previa de Insertar Facturas en BD',
+  });
   await expect(resultados).toBeVisible();
   await expect(resultados.getByText('factura-lista.xml')).toBeVisible();
   await expect(resultados.getByText('Vista previa completa')).toBeVisible();
@@ -281,7 +283,7 @@ test('ADMIN selecciona un cliente activo y obtiene una fila lista para revisión
   await instalarPerfilSimulado(page, '/api/v1/admin/clients');
   await instalarRespuestaPreview(page, [resultadoListo()], observaciones);
   await iniciarSesion(page, cuentaAdmin);
-  await page.getByRole('link', { name: 'RF-1' }).click();
+  await page.getByRole('link', { name: 'Insertar Facturas en BD' }).click();
   await expect(
     page.getByLabel('Cliente').getByRole('option', { name: nombreCliente, exact: true }),
   ).toHaveCount(1);
@@ -296,9 +298,9 @@ test('ADMIN selecciona un cliente activo y obtiene una fila lista para revisión
   await expect(page.getByText('Entorno operativo: Pruebas', { exact: true })).toBeVisible();
   await page.getByLabel('Archivos CFDI XML').setInputFiles(archivoXml('solo-preview.xml'));
   await page.getByRole('button', { name: 'Analizar vista previa' }).click();
-  await expect(page.getByRole('table', { name: 'Resultados de vista previa RF-1' })).toContainText(
-    'SUP-42',
-  );
+  await expect(
+    page.getByRole('table', { name: 'Resultados de vista previa de Insertar Facturas en BD' }),
+  ).toContainText('SUP-42');
   await expect(
     page.getByText(
       'La vista previa es de solo lectura; cualquier inserción requiere confirmación explícita y permisos vigentes.',
@@ -323,8 +325,8 @@ test('ADMIN selecciona un cliente activo y obtiene una fila lista para revisión
  */
 test('SUPPORT sin asignación queda vacío y recibe 403 del backend', async ({ page }) => {
   await iniciarSesion(page, cuentaSinAsignacion);
-  await page.getByRole('link', { name: 'RF-1' }).click();
-  await expect(page.getByRole('heading', { name: 'Vista previa de facturas' })).toBeVisible();
+  await page.getByRole('link', { name: 'Insertar Facturas en BD' }).click();
+  await expect(page.getByRole('heading', { name: 'Insertar Facturas en BD' })).toBeVisible();
   await expect(
     page.getByText('No tienes clientes asignados con la vista previa habilitada.', { exact: true }),
   ).toBeVisible();
@@ -370,7 +372,7 @@ test('SUPPORT sin asignación queda vacío y recibe 403 del backend', async ({ p
 test('la carga limita número de archivos y tamaños individual y agregado', async ({ page }) => {
   await instalarPerfilSimulado(page, '/api/v1/clients');
   await iniciarSesion(page, cuentaSupport);
-  await page.getByRole('link', { name: 'RF-1' }).click();
+  await page.getByRole('link', { name: 'Insertar Facturas en BD' }).click();
   await page.getByLabel('Cliente').selectOption(idCliente);
   await page.getByLabel('Perfil de conexión').selectOption(idPerfil);
   const selector = page.getByLabel('Archivos CFDI XML');

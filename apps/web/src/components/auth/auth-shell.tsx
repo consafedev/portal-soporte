@@ -151,7 +151,7 @@ export function MarcoAutenticado({
             href="/modules/rf-1"
             aria-current={rutaActual === '/modules/rf-1' ? 'page' : undefined}
           >
-            RF-1
+            Insertar Facturas en BD
           </Link>
           {usuario.role === 'ADMIN' ? (
             <>

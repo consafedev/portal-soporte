@@ -302,17 +302,17 @@ export function AdministracionAccesoCliente({
           )}
 
           <fieldset className="grupo-capacidades-rf1">
-            <legend>Capacidades RF-1</legend>
+            <legend>Capacidades de Insertar Facturas en BD</legend>
             <label className="capacidad-rf1">
               <input
                 type="checkbox"
                 checked={capacidadLectura}
                 onChange={(evento) => manejarCapacidad('rf-1:read', evento.currentTarget.checked)}
                 disabled={guardando || !clienteActivo}
-                aria-label="Permitir vista previa RF-1"
+                aria-label="Permitir vista previa de facturas"
               />
               <span>
-                <strong>Permitir vista previa RF-1</strong>
+                <strong>Permitir vista previa de facturas</strong>
                 <span className="texto-secundario">
                   Permite cargar XML y consultar datos autorizados sin insertar facturas.
                 </span>
@@ -326,10 +326,10 @@ export function AdministracionAccesoCliente({
                   manejarCapacidad('rf-1:execute', evento.currentTarget.checked)
                 }
                 disabled={guardando || !clienteActivo}
-                aria-label="Permitir inserción RF-1"
+                aria-label="Permitir inserción de facturas"
               />
               <span>
-                <strong>Permitir inserción RF-1</strong>
+                <strong>Permitir inserción de facturas</strong>
                 <span className="texto-secundario">
                   Permiso por cliente; la compuerta global del servidor se habilita por separado.
                 </span>

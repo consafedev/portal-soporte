@@ -151,7 +151,7 @@ test('ADMIN administra asignaciones y capacidad de vista previa sin mostrar secr
   await expect(seccionAcceso.getByText('Acceso vigente', { exact: true })).toBeVisible();
 
   const capacidadLectura = seccionAcceso.getByRole('checkbox', {
-    name: 'Permitir vista previa RF-1',
+    name: 'Permitir vista previa de facturas',
   });
   await expect(capacidadLectura).not.toBeChecked();
   await capacidadLectura.check();
@@ -159,7 +159,7 @@ test('ADMIN administra asignaciones y capacidad de vista previa sin mostrar secr
   await expect(page.locator('.aviso-exito')).toContainText('La capacidad de lectura se actualizó.');
 
   const capacidadEjecucion = seccionAcceso.getByRole('checkbox', {
-    name: 'Permitir inserción RF-1',
+    name: 'Permitir inserción de facturas',
   });
   await expect(capacidadEjecucion).not.toBeChecked();
   await capacidadEjecucion.check();

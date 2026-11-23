@@ -32,10 +32,16 @@ interface ValoresCredenciales {
   readonly tlsKey: string;
   /** Cuenta del gateway SSH. */
   readonly sshUsername: string;
+  /** Modalidad de autenticación SSH seleccionada para el gateway. */
+  readonly sshAuthentication: 'PRIVATE_KEY' | 'PASSWORD';
   /** Llave privada PEM/OpenSSH o PPK v2 RSA temporal. */
   readonly sshPrivateKey: string;
+  /** Nombre local del archivo SSH seleccionado; nunca contiene su material. */
+  readonly sshKeyFileName: string;
   /** Passphrase opcional de la llave privada SSH. */
   readonly sshPassphrase: string;
+  /** Contraseña SSH temporal para el modo compatible con Workbench. */
+  readonly sshPassword: string;
 }
 
 const CREDENCIALES_VACIAS: ValoresCredenciales = {
@@ -45,8 +51,11 @@ const CREDENCIALES_VACIAS: ValoresCredenciales = {
   tlsCert: '',
   tlsKey: '',
   sshUsername: '',
+  sshAuthentication: 'PRIVATE_KEY',
   sshPrivateKey: '',
+  sshKeyFileName: '',
   sshPassphrase: '',
+  sshPassword: '',
 };
 
 /** Propiedades para administrar conexiones dentro del contexto de un cliente. */
@@ -107,8 +116,11 @@ export function AdministracionPerfilesConexion({
       setCredenciales((actuales) => ({
         ...actuales,
         sshUsername: '',
+        sshAuthentication: 'PRIVATE_KEY',
         sshPrivateKey: '',
+        sshKeyFileName: '',
         sshPassphrase: '',
+        sshPassword: '',
       }));
     }
   }
@@ -385,12 +397,59 @@ function CamposCredenciales({
   cambiar,
   sufijo,
 }: PropiedadesCamposCredenciales): JSX.Element {
+  const [errorArchivoLlave, setErrorArchivoLlave] = useState<string | null>(null);
+
   /** Actualiza un campo temporal sin exponer el valor en nodos de estado ajenos. */
   function actualizar<K extends keyof ValoresCredenciales>(
     campo: K,
     valor: ValoresCredenciales[K],
   ): void {
     cambiar({ ...valores, [campo]: valor });
+  }
+
+  /** Lee una llave seleccionada sin mostrar su contenido y conserva solo su nombre visible.
+   * @param evento Evento del selector local de archivos.
+   * @returns Promesa resuelta cuando el archivo se leyó o se rechazó por tamaño.
+   */
+  async function cargarArchivoLlave(evento: ChangeEvent<HTMLInputElement>): Promise<void> {
+    const selector = evento.currentTarget;
+    const archivo = selector.files?.[0];
+    selector.value = '';
+    setErrorArchivoLlave(null);
+    if (archivo === undefined) return;
+    if (archivo.size === 0 || archivo.size > 16_384) {
+      cambiar({ ...valores, sshPrivateKey: '', sshKeyFileName: '' });
+      setErrorArchivoLlave('El archivo debe contener de 1 a 16 KiB.');
+      return;
+    }
+    try {
+      const contenido = await archivo.text();
+      if (new TextEncoder().encode(contenido).byteLength > 16_384) {
+        cambiar({ ...valores, sshPrivateKey: '', sshKeyFileName: '' });
+        setErrorArchivoLlave('El archivo debe contener de 1 a 16 KiB.');
+        return;
+      }
+      cambiar({ ...valores, sshPrivateKey: contenido, sshKeyFileName: archivo.name });
+    } catch {
+      cambiar({ ...valores, sshPrivateKey: '', sshKeyFileName: '' });
+      setErrorArchivoLlave('No fue posible leer el archivo seleccionado.');
+    }
+  }
+
+  /** Cambia el método de acceso y elimina inmediatamente el secreto del método anterior.
+   * @param metodo Método escogido por la persona administradora.
+   * @returns No devuelve valor; actualiza únicamente el estado temporal del formulario.
+   */
+  function cambiarAutenticacionSsh(metodo: 'PRIVATE_KEY' | 'PASSWORD'): void {
+    cambiar({
+      ...valores,
+      sshAuthentication: metodo,
+      sshPrivateKey: '',
+      sshKeyFileName: '',
+      sshPassphrase: '',
+      sshPassword: '',
+    });
+    setErrorArchivoLlave(null);
   }
 
   return (
@@ -467,35 +526,73 @@ function CamposCredenciales({
             />
           </div>
           <div className="campo">
-            <label htmlFor={`ssh-key-${sufijo}`}>
-              Llave privada SSH (PEM/OpenSSH o PPK v2 RSA)
-            </label>
-            <textarea
-              id={`ssh-key-${sufijo}`}
-              autoComplete="off"
-              required
-              maxLength={16384}
-              rows={5}
-              value={valores.sshPrivateKey}
-              onChange={(evento) => actualizar('sshPrivateKey', evento.currentTarget.value)}
-            />
-            <span className="ayuda-campo">
-              Acepta PEM/OpenSSH y PuTTY PPK v2 RSA. PPK v3, DSA y otras variantes PPK no son
-              compatibles. El Portal valida la llave al probar la conexión y no conserva una copia
-              temporal convertida.
-            </span>
+            <label htmlFor={`ssh-auth-${sufijo}`}>Método de autenticación SSH</label>
+            <select
+              id={`ssh-auth-${sufijo}`}
+              value={valores.sshAuthentication}
+              onChange={(evento) =>
+                cambiarAutenticacionSsh(evento.currentTarget.value as 'PRIVATE_KEY' | 'PASSWORD')
+              }
+            >
+              <option value="PRIVATE_KEY">Llave privada</option>
+              <option value="PASSWORD">Contraseña</option>
+            </select>
           </div>
-          <div className="campo">
-            <label htmlFor={`ssh-passphrase-${sufijo}`}>Passphrase SSH (opcional)</label>
-            <input
-              id={`ssh-passphrase-${sufijo}`}
-              type="password"
-              autoComplete="new-password"
-              maxLength={1024}
-              value={valores.sshPassphrase}
-              onChange={(evento) => actualizar('sshPassphrase', evento.currentTarget.value)}
-            />
-          </div>
+          {valores.sshAuthentication === 'PRIVATE_KEY' ? (
+            <>
+              <div className="campo">
+                <label htmlFor={`ssh-key-${sufijo}`}>
+                  Llave privada SSH (archivo PEM/OpenSSH o PPK v2 RSA)
+                </label>
+                <input
+                  id={`ssh-key-${sufijo}`}
+                  type="file"
+                  accept=".pem,.key,.ppk"
+                  aria-describedby={`ssh-key-help-${sufijo}`}
+                  onChange={(evento) => void cargarArchivoLlave(evento)}
+                />
+                {valores.sshKeyFileName.length > 0 ? (
+                  <span className="ayuda-campo" role="status">
+                    Archivo seleccionado: {valores.sshKeyFileName}
+                  </span>
+                ) : null}
+                {errorArchivoLlave !== null ? (
+                  <span className="aviso-error" role="alert">
+                    {errorArchivoLlave}
+                  </span>
+                ) : null}
+                <span id={`ssh-key-help-${sufijo}`} className="ayuda-campo">
+                  Se acepta PEM/OpenSSH y PuTTY PPK v2 RSA. PPK v3, DSA y otras variantes PPK no son
+                  compatibles. El contenido no se muestra; el servidor valida y cifra la llave al
+                  guardar.
+                </span>
+              </div>
+              <div className="campo">
+                <label htmlFor={`ssh-passphrase-${sufijo}`}>Passphrase SSH (opcional)</label>
+                <input
+                  id={`ssh-passphrase-${sufijo}`}
+                  type="password"
+                  autoComplete="new-password"
+                  maxLength={1024}
+                  value={valores.sshPassphrase}
+                  onChange={(evento) => actualizar('sshPassphrase', evento.currentTarget.value)}
+                />
+              </div>
+            </>
+          ) : (
+            <div className="campo">
+              <label htmlFor={`ssh-password-${sufijo}`}>Contraseña SSH</label>
+              <input
+                id={`ssh-password-${sufijo}`}
+                type="password"
+                autoComplete="new-password"
+                required
+                maxLength={4096}
+                value={valores.sshPassword}
+                onChange={(evento) => actualizar('sshPassword', evento.currentTarget.value)}
+              />
+            </div>
+          )}
         </>
       ) : null}
     </fieldset>
@@ -724,7 +821,12 @@ function FilaPerfilConexion({
   );
 }
 
-/** Valida el formato de certificados y arma el paquete que acepta el contrato API. */
+/** Valida certificados y prepara secretos temporales para el contrato de alta o reemplazo.
+ * @param valores Campos temporales de la interfaz; no se persisten en el navegador.
+ * @param tipo Tipo de perfil MySQL que determina si requiere credenciales SSH.
+ * @returns Paquete validado que la API cifra antes de persistir.
+ * @throws Error si falta un par TLS o el método SSH seleccionado no está completo.
+ */
 function construirCredenciales(
   valores: ValoresCredenciales,
   tipo: TipoPerfil,
@@ -734,14 +836,29 @@ function construirCredenciales(
   if (tieneCertificado !== tieneLlaveTls) {
     throw new Error('Agrega juntos el certificado y la llave cliente TLS.');
   }
-  if (
-    tipo === 'MYSQL_SSH' &&
-    !/^-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----\r?$/mu.test(valores.sshPrivateKey) &&
-    !/^PuTTY-User-Key-File-2: ssh-rsa\r?\n/u.test(valores.sshPrivateKey)
-  ) {
-    throw new Error(
-      'Usa PEM/OpenSSH o PPK v2 RSA. PPK v3, DSA y otras variantes no son compatibles.',
-    );
+  let autenticacionSsh: CredencialesMySqlAdmin['ssh'] = undefined;
+  if (tipo === 'MYSQL_SSH' && valores.sshAuthentication === 'PASSWORD') {
+    if (valores.sshPassword.length === 0) {
+      throw new Error('Agrega la contraseña SSH del gateway autorizado.');
+    }
+    autenticacionSsh = {
+      username: valores.sshUsername,
+      authentication: 'PASSWORD',
+      password: valores.sshPassword,
+    };
+  } else if (tipo === 'MYSQL_SSH') {
+    if (
+      !/^-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----\r?$/mu.test(valores.sshPrivateKey) &&
+      !/^PuTTY-User-Key-File-2: ssh-rsa\r?\n/u.test(valores.sshPrivateKey)
+    ) {
+      throw new Error('Selecciona una llave PEM/OpenSSH o PuTTY PPK v2 RSA compatible.');
+    }
+    autenticacionSsh = {
+      username: valores.sshUsername,
+      authentication: 'PRIVATE_KEY',
+      privateKey: valores.sshPrivateKey,
+      ...(valores.sshPassphrase.length === 0 ? {} : { passphrase: valores.sshPassphrase }),
+    };
   }
 
   return {
@@ -755,16 +872,7 @@ function construirCredenciales(
             ...(tieneCertificado ? { cert: valores.tlsCert, key: valores.tlsKey } : {}),
           },
         }),
-    ...(tipo === 'MYSQL_SSH'
-      ? {
-          ssh: {
-            username: valores.sshUsername,
-            authentication: 'PRIVATE_KEY' as const,
-            privateKey: valores.sshPrivateKey,
-            ...(valores.sshPassphrase.length === 0 ? {} : { passphrase: valores.sshPassphrase }),
-          },
-        }
-      : {}),
+    ...(autenticacionSsh === undefined ? {} : { ssh: autenticacionSsh }),
   };
 }
 

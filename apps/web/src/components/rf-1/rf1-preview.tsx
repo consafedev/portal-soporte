@@ -373,10 +373,8 @@ export function VistaPreviaRf1(): JSX.Element {
     <div className="pagina-contenido pagina-rf1">
       <header className="titulo-pagina">
         <p className="sobrelinea">Módulo operativo</p>
-        <h1>Vista previa de facturas</h1>
-        <p className="texto-secundario">
-          Revisa los datos CFDI y su resolución antes de cualquier operación posterior.
-        </p>
+        <h1>Insertar Facturas en BD</h1>
+        <p className="texto-secundario">Carga CFDI y revisa la vista previa antes de operar.</p>
       </header>
 
       <p className="aviso-informativo aviso-rf1" role="note">
@@ -645,11 +643,11 @@ function TablaResultados({
       <div
         className="contenedor-tabla-rf1"
         role="region"
-        aria-label="Tabla de resultados RF-1, desplázate horizontalmente para ver todas las columnas"
+        aria-label="Tabla de resultados de Insertar Facturas en BD; desplázate horizontalmente para ver todas las columnas"
         tabIndex={0}
         onKeyDown={manejarTecladoTablaResultados}
       >
-        <table aria-label="Resultados de vista previa RF-1">
+        <table aria-label="Resultados de vista previa de Insertar Facturas en BD">
           <thead>
             <tr>
               <th scope="col">Archivo</th>
@@ -843,14 +841,14 @@ function mensajeErrorRf1(codigo: string | undefined): string {
     case 'RF1_CONTEXT_MISMATCH':
       return 'El contexto cambió. Analiza de nuevo el archivo para consultar opciones vigentes.';
     default:
-      return 'El archivo no cumple las reglas de validación de RF-1.';
+      return 'El archivo no cumple las reglas de validación de facturas.';
   }
 }
 
 /** Traduce errores HTTP a mensajes acotados y evita mostrar detalles remotos. */
 function mensajeError(rechazo: unknown): string {
   if (rechazo instanceof ErrorApiClientes && rechazo.status === 403) {
-    return 'Tu acceso o la capacidad RF-1 ya no está vigente. Actualiza la selección o solicita acceso a un administrador.';
+    return 'Tu acceso o la capacidad para insertar facturas ya no está vigente. Actualiza la selección o solicita acceso a un administrador.';
   }
   if (rechazo instanceof ErrorApiClientes && rechazo.status === 401) {
     return 'Tu sesión terminó. Inicia sesión de nuevo.';

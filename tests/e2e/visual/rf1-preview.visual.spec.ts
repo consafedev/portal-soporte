@@ -146,7 +146,7 @@ test('ADMIN selecciona sociedad por teclado en escritorio/móvil y ambos temas',
   });
 
   await page.goto('/modules/rf-1');
-  await expect(page.getByRole('heading', { name: 'Vista previa de facturas' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Insertar Facturas en BD' })).toBeVisible();
   await expect(page.getByLabel('Cliente')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Cambiar a tema oscuro' })).toBeVisible();
   const cliente = page.getByLabel('Cliente');
@@ -173,7 +173,9 @@ test('ADMIN selecciona sociedad por teclado en escritorio/móvil y ambos temas',
   await analizar.focus();
   await expect(analizar).toBeFocused();
   await page.keyboard.press('Enter');
-  const tablaResultados = page.getByRole('table', { name: 'Resultados de vista previa RF-1' });
+  const tablaResultados = page.getByRole('table', {
+    name: 'Resultados de vista previa de Insertar Facturas en BD',
+  });
   await expect(tablaResultados).toContainText('La sociedad requiere una selección explícita.');
   const selectorSociedad = page.getByLabel('Sociedad y ambiente SAP para archivo 1: sintetico.xml');
   await selectorSociedad.focus();
@@ -210,7 +212,7 @@ test('ADMIN selecciona sociedad por teclado en escritorio/móvil y ambos temas',
   await expect(selectorSociedad).toBeVisible();
   await expect(selectorSociedad).toHaveValue('["2000","ERP-DEV"]');
   const regionTablaResultados = page.getByRole('region', {
-    name: 'Tabla de resultados RF-1, desplázate horizontalmente para ver todas las columnas',
+    name: 'Tabla de resultados de Insertar Facturas en BD; desplázate horizontalmente para ver todas las columnas',
   });
   await expect(regionTablaResultados).toBeVisible();
   await expect(regionTablaResultados).toHaveAttribute('tabindex', '0');
