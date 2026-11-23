@@ -59,7 +59,7 @@ function crearPolitica(
   readonly resolver: ResolverDireccionesDestino;
 } {
   const resolver: ResolverDireccionesDestino = {
-    resolver: vi.fn(async (_hostname: string, _senal: AbortSignal) => {
+    resolver: vi.fn(async () => {
       if (resultado instanceof Error) {
         throw resultado;
       }
