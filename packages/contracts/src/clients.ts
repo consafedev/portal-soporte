@@ -184,20 +184,47 @@ export const entornoPerfilConexionAdminSchema = Type.Union([
 /** Tipo del ambiente declarativo asociado al perfil de conexión. */
 export type EntornoPerfilConexionAdmin = Static<typeof entornoPerfilConexionAdminSchema>;
 
-/** Endpoint mostrado como hostname y puerto, sujeto a coincidencia exacta en el servidor. */
+/** Hostname ASCII o literal IP del destino; la policy de red valida las direcciones al conectar. */
+const hostnameConexionAdminSchema = Type.String({
+  minLength: 1,
+  maxLength: 253,
+  pattern: '^[A-Za-z0-9.:-]+$',
+  description: 'DNS ASCII o literal IPv4/IPv6; no admite URL, brackets ni zone ID.',
+});
+
+/** Endpoint mostrado como hostname y puerto, ligado al perfil administrativo. */
 export const endpointConexionAdminSchema = Type.Object(
   {
-    hostname: Type.String({ minLength: 1, maxLength: 253, pattern: '^[A-Za-z0-9][A-Za-z0-9.-]*$' }),
+    hostname: hostnameConexionAdminSchema,
     port: Type.Integer({ minimum: 1, maximum: 65_535 }),
   },
   {
     additionalProperties: false,
-    description: 'Host y puerto de conexión sin identificadores opacos.',
+    description: 'Host y puerto de conexión guardados dentro del perfil, sin IDs operacionales.',
   },
 );
 
-/** Tipo público de hostname y puerto permitidos para un perfil. */
+/** Hostname y puerto normalizados que un ADMIN puede guardar en un perfil. */
 export type EndpointConexionAdmin = Static<typeof endpointConexionAdminSchema>;
+
+/** Gateway SSH con fingerprint SHA-256 explícita para validar la identidad del servidor. */
+export const gatewaySshConexionAdminSchema = Type.Object(
+  {
+    hostname: hostnameConexionAdminSchema,
+    port: Type.Integer({ minimum: 1, maximum: 65_535 }),
+    fingerprint: Type.String({
+      pattern: '^SHA256:[A-Za-z0-9+/]{43}$',
+      description: 'Fingerprint OpenSSH SHA-256, sin relleno base64.',
+    }),
+  },
+  {
+    additionalProperties: false,
+    description: 'Endpoint SSH del perfil con fingerprint verificada de forma explícita.',
+  },
+);
+
+/** Tipo del endpoint SSH y su huella de identidad aprobada en el perfil. */
+export type GatewaySshConexionAdmin = Static<typeof gatewaySshConexionAdminSchema>;
 
 /** Credenciales MySQL protegidas en el servidor; jamás son parte de una respuesta. */
 export const credencialesMySqlAdminSchema = Type.Object(
