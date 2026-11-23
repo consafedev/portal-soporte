@@ -399,7 +399,7 @@ function definirPruebasAdmin(): void {
       instanteAuth = new Date(ahora);
     }
   });
-  it('devuelve 401 sin sesión y audita 403 para SUPPORT en rutas administrativas', async () => {
+  it('no almacena las denegaciones de autenticación y autorización', async () => {
     const anónimo = await exigirAplicacion().inject({ method: 'GET', url: '/api/v1/admin/users' });
     const cookie = cookieSupport;
     if (cookie === null) {
@@ -416,7 +416,9 @@ function definirPruebasAdmin(): void {
       .where(eq(auditEvents.actorUserId, idSupport));
 
     expect(anónimo.statusCode).toBe(401);
+    expect(anónimo.headers['cache-control']).toBe('private, no-store');
     expect(soporte.statusCode).toBe(403);
+    expect(soporte.headers['cache-control']).toBe('private, no-store');
     expect(eventos).toContainEqual({ action: 'AUTHORIZATION_DENIED', outcome: 'DENIED' });
   });
 

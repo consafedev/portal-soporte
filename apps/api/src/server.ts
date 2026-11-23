@@ -80,7 +80,7 @@ export interface DependenciasServidorAuth {
 }
 
 /**
- * Construye Fastify con proxy deny-by-default, redacción y rutas de autenticación.
+ * Construye Fastify con proxy deny-by-default, respuestas privadas, redacción y rutas de autenticación.
  *
  * @param dependencias - Configuración validada y servicios de autenticación/sesión.
  * @returns Aplicación Fastify preparada para inyección o para escuchar en una red privada.
@@ -102,6 +102,11 @@ export async function crearServidorAuth(
       level: 'info',
       redact: { paths: CAMPOS_SENSIBLES_LOG, censor: '[REDACTADO]' },
     },
+  });
+
+  /** Evita que una respuesta de API protegida quede almacenada en navegador o proxy compartido. */
+  aplicacion.addHook('onRequest', async (_solicitud, respuesta) => {
+    respuesta.header('Cache-Control', 'private, no-store');
   });
 
   await aplicacion.register(fastifyCookie);
