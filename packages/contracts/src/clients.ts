@@ -184,6 +184,21 @@ export const entornoPerfilConexionAdminSchema = Type.Union([
 /** Tipo del ambiente declarativo asociado al perfil de conexión. */
 export type EntornoPerfilConexionAdmin = Static<typeof entornoPerfilConexionAdminSchema>;
 
+/** Endpoint mostrado como hostname y puerto, sujeto a coincidencia exacta en el servidor. */
+export const endpointConexionAdminSchema = Type.Object(
+  {
+    hostname: Type.String({ minLength: 1, maxLength: 253, pattern: '^[A-Za-z0-9][A-Za-z0-9.-]*$' }),
+    port: Type.Integer({ minimum: 1, maximum: 65_535 }),
+  },
+  {
+    additionalProperties: false,
+    description: 'Host y puerto de conexión sin identificadores opacos.',
+  },
+);
+
+/** Tipo público de hostname y puerto permitidos para un perfil. */
+export type EndpointConexionAdmin = Static<typeof endpointConexionAdminSchema>;
+
 /** Credenciales MySQL protegidas en el servidor; jamás son parte de una respuesta. */
 export const credencialesMySqlAdminSchema = Type.Object(
   {
@@ -244,10 +259,8 @@ export const crearPerfilConexionAdminSchema = Type.Object(
     nombre: Type.String({ minLength: 2, maxLength: 120 }),
     tipo: tipoPerfilConexionAdminSchema,
     entorno: entornoPerfilConexionAdminSchema,
-    destinoMySqlId: Type.String({ minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9_-]*$' }),
-    gatewaySshId: Type.Optional(
-      Type.String({ minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9_-]*$' }),
-    ),
+    destinoMySql: endpointConexionAdminSchema,
+    gatewaySsh: Type.Optional(endpointConexionAdminSchema),
     baseDatos: Type.String({ minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9_$-]+$' }),
     credenciales: credencialesMySqlAdminSchema,
   },
@@ -261,20 +274,13 @@ export const crearPerfilConexionAdminSchema = Type.Object(
 /** Tipo de entrada para la creación de un perfil de conexión. */
 export type SolicitudCrearPerfilConexionAdmin = Static<typeof crearPerfilConexionAdminSchema>;
 
-/** Cambios acotados a metadatos; las credenciales se reemplazan por un endpoint separado. */
+/** Cambios acotados a metadatos de conexión; las credenciales usan una ruta separada. */
 export const actualizarPerfilConexionAdminSchema = Type.Object(
   {
     nombre: Type.Optional(Type.String({ minLength: 2, maxLength: 120 })),
     entorno: Type.Optional(entornoPerfilConexionAdminSchema),
-    destinoMySqlId: Type.Optional(
-      Type.String({ minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9_-]*$' }),
-    ),
-    gatewaySshId: Type.Optional(
-      Type.Union([
-        Type.String({ minLength: 1, maxLength: 64, pattern: '^[a-z0-9][a-z0-9_-]*$' }),
-        Type.Null(),
-      ]),
-    ),
+    destinoMySql: Type.Optional(endpointConexionAdminSchema),
+    gatewaySsh: Type.Optional(Type.Union([endpointConexionAdminSchema, Type.Null()])),
     baseDatos: Type.Optional(
       Type.String({ minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9_$-]+$' }),
     ),
@@ -323,8 +329,8 @@ export const perfilConexionAdminSchema = Type.Object(
     nombre: Type.String({ minLength: 2, maxLength: 120 }),
     tipo: tipoPerfilConexionAdminSchema,
     entorno: entornoPerfilConexionAdminSchema,
-    destinoMySqlId: Type.String({ minLength: 1, maxLength: 64 }),
-    gatewaySshId: Type.Union([Type.String({ minLength: 1, maxLength: 64 }), Type.Null()]),
+    destinoMySql: Type.Union([endpointConexionAdminSchema, Type.Null()]),
+    gatewaySsh: Type.Union([endpointConexionAdminSchema, Type.Null()]),
     baseDatos: Type.String({ minLength: 1, maxLength: 64 }),
     estado: estadoRegistroClienteSchema,
     createdAt: Type.String({ pattern: PATRON_FECHA_CLIENTE }),
@@ -332,7 +338,8 @@ export const perfilConexionAdminSchema = Type.Object(
   },
   {
     additionalProperties: false,
-    description: 'Respuesta sin nombre de usuario ni material secreto.',
+    description:
+      'Respuesta con hostname/puerto y sin IDs operacionales, usuario o material secreto.',
   },
 );
 

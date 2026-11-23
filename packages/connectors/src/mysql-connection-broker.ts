@@ -157,6 +157,32 @@ export class PoliticaDestinosConexion {
   public obtenerGatewaySsh(id: string): GatewaySshPermitido | undefined {
     return this.gatewaysSsh.get(id);
   }
+
+  /** Resuelve un endpoint MySQL visible solo si coincide de forma única con política confiable. */
+  public buscarMySql(hostname: string, port: number): DestinoMySqlPermitido | undefined {
+    return buscarEndpointUnico(this.destinosMySql.values(), hostname, port);
+  }
+
+  /** Resuelve un gateway SSH visible solo si coincide de forma única con política confiable. */
+  public buscarGatewaySsh(hostname: string, port: number): GatewaySshPermitido | undefined {
+    return buscarEndpointUnico(this.gatewaysSsh.values(), hostname, port);
+  }
+}
+
+/** Compara hostname sin distinguir mayúsculas y falla si la política contiene ambigüedad. */
+function buscarEndpointUnico<T extends { readonly hostname: string; readonly port: number }>(
+  candidatos: IterableIterator<T>,
+  hostname: string,
+  port: number,
+): T | undefined {
+  const hostCanonico = hostname.toLowerCase();
+  let coincidencia: T | undefined;
+  for (const candidato of candidatos) {
+    if (candidato.hostname.toLowerCase() !== hostCanonico || candidato.port !== port) continue;
+    if (coincidencia !== undefined) return undefined;
+    coincidencia = candidato;
+  }
+  return coincidencia;
 }
 
 /** Prueba acceso con sesión única, timeout, destinos fijados y cierre de recursos. */

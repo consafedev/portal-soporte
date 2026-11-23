@@ -1217,12 +1217,17 @@ function definirPruebasAdmin(): void {
         nombre: 'MySQL de pruebas',
         tipo: 'MYSQL_TCP',
         entorno: 'TEST',
-        destinoMySqlId: 'mysql-sintetico',
+        destinoMySql: { hostname: 'mysql.test.invalid', port: 3306 },
         baseDatos: 'base_sintetica',
         credenciales: { mysqlUsername: 'usuario_sintetico', mysqlPassword: secretoPrimario },
       },
     });
-    const perfil = altaPerfil.json<{ id?: string; destinoMySqlId?: string }>();
+    const perfil = altaPerfil.json<{
+      id?: string;
+      destinoMySql?: { hostname: string; port: number } | null;
+      destinoMySqlId?: string;
+      gatewaySshId?: string | null;
+    }>();
     if (altaPerfil.statusCode !== 201 || perfil.id === undefined) {
       throw new Error('No se creó el perfil sintético de conexión.');
     }
@@ -1258,7 +1263,9 @@ function definirPruebasAdmin(): void {
       .from(auditEvents)
       .where(sql`${auditEvents.metadata}->>'profileId' = ${perfil.id}`);
 
-    expect(perfil.destinoMySqlId).toBe('mysql-sintetico');
+    expect(perfil.destinoMySql).toEqual({ hostname: 'mysql.test.invalid', port: 3306 });
+    expect(perfil).not.toHaveProperty('destinoMySqlId');
+    expect(perfil).not.toHaveProperty('gatewaySshId');
     expect(altaPerfil.body).not.toContain(secretoPrimario);
     expect(altaPerfil.body).not.toContain('secretEnvelope');
     expect(altaPerfil.body).not.toContain('mysqlUsername');
@@ -1315,7 +1322,7 @@ function definirPruebasAdmin(): void {
           nombre: 'Intento denegado',
           tipo: 'MYSQL_TCP',
           entorno: 'TEST',
-          destinoMySqlId: 'mysql-sintetico',
+          destinoMySql: { hostname: 'mysql.test.invalid', port: 3306 },
           baseDatos: 'base_sintetica',
           credenciales: { mysqlUsername: 'usuario_sintetico', mysqlPassword: 'secreto-sintetico' },
         },

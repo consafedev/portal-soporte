@@ -11,6 +11,7 @@ import {
   resultadoPruebaPerfilAdminSchema,
   type ParametrosCliente,
   type ParametrosClientePerfil,
+  type PerfilConexionAdminContrato,
   type SolicitudActualizarPerfilConexionAdmin,
   type SolicitudCrearPerfilConexionAdmin,
   type SolicitudReemplazarCredencialesPerfilAdmin,
@@ -23,7 +24,6 @@ import {
   ErrorPerfilesConexion,
   ServicioPerfilesConexion,
 } from '../clients/connection-profile-service.js';
-import type { PerfilConexionCliente } from '../../../../packages/core/src/clients/connection-profile-ports.js';
 
 /** Dependencias de rutas de perfiles; no contiene material sensible en parámetros públicos. */
 export interface DependenciasRutasAdminPerfilesConexion {
@@ -60,8 +60,9 @@ export async function registrarRutasAdminPerfilesConexion(
     /** Devuelve solo metadatos de perfiles vinculados al cliente autenticado por ruta. */
     async function listar(
       solicitud: FastifyRequest<{ Params: ParametrosCliente }>,
-    ): Promise<readonly PerfilConexionCliente[]> {
-      return dependencias.perfiles.listar(solicitud.params.clientId);
+    ): Promise<readonly PerfilConexionAdminContrato[]> {
+      const perfiles = await dependencias.perfiles.listar(solicitud.params.clientId);
+      return perfiles.map((perfil) => dependencias.perfiles.presentarPerfilAdmin(perfil));
     }
 
     /** Cifra las credenciales de alta antes de almacenarlas y omite campos sensibles al responder. */
@@ -77,7 +78,7 @@ export async function registrarRutasAdminPerfilesConexion(
         solicitud.body,
         exigirActorPerfil(solicitud),
       );
-      return respuesta.code(201).send(perfil);
+      return respuesta.code(201).send(dependencias.perfiles.presentarPerfilAdmin(perfil));
     }
 
     /** Modifica etiqueta, ambiente, allowlist o estado sin aceptar secretos. */
@@ -87,12 +88,13 @@ export async function registrarRutasAdminPerfilesConexion(
         Body: SolicitudActualizarPerfilConexionAdmin;
       }>,
     ) {
-      return dependencias.perfiles.actualizar(
+      const perfil = await dependencias.perfiles.actualizar(
         solicitud.params.clientId,
         solicitud.params.profileId,
         solicitud.body,
         exigirActorPerfil(solicitud),
       );
+      return dependencias.perfiles.presentarPerfilAdmin(perfil);
     }
 
     /** Reemplaza credenciales cifradas sin devolver el sobre ni el texto recibido. */
@@ -102,12 +104,13 @@ export async function registrarRutasAdminPerfilesConexion(
         Body: SolicitudReemplazarCredencialesPerfilAdmin;
       }>,
     ) {
-      return dependencias.perfiles.reemplazarCredenciales(
+      const perfil = await dependencias.perfiles.reemplazarCredenciales(
         solicitud.params.clientId,
         solicitud.params.profileId,
         solicitud.body,
         exigirActorPerfil(solicitud),
       );
+      return dependencias.perfiles.presentarPerfilAdmin(perfil);
     }
 
     /** Ejecuta la prueba de solo lectura y responde con un código estable redactado. */

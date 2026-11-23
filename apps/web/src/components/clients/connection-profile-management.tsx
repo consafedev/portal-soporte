@@ -81,8 +81,10 @@ export function AdministracionPerfilesConexion({
   const [nombre, setNombre] = useState('');
   const [tipo, setTipo] = useState<TipoPerfil>('MYSQL_TCP');
   const [entorno, setEntorno] = useState<EntornoPerfilConexionAdmin>('TEST');
-  const [destino, setDestino] = useState('');
-  const [gateway, setGateway] = useState('');
+  const [mysqlHostname, setMysqlHostname] = useState('');
+  const [mysqlPort, setMysqlPort] = useState('3306');
+  const [sshHostname, setSshHostname] = useState('');
+  const [sshPort, setSshPort] = useState('22');
   const [baseDatos, setBaseDatos] = useState('');
   const [credenciales, setCredenciales] = useState<ValoresCredenciales>(CREDENCIALES_VACIAS);
 
@@ -112,7 +114,8 @@ export function AdministracionPerfilesConexion({
     const siguiente = evento.currentTarget.value as TipoPerfil;
     setTipo(siguiente);
     if (siguiente === 'MYSQL_TCP') {
-      setGateway('');
+      setSshHostname('');
+      setSshPort('22');
       setCredenciales((actuales) => ({
         ...actuales,
         sshUsername: '',
@@ -136,15 +139,19 @@ export function AdministracionPerfilesConexion({
         nombre,
         tipo,
         entorno,
-        destinoMySqlId: destino,
-        ...(tipo === 'MYSQL_SSH' ? { gatewaySshId: gateway } : {}),
+        destinoMySql: { hostname: mysqlHostname.trim(), port: Number(mysqlPort) },
+        ...(tipo === 'MYSQL_SSH'
+          ? { gatewaySsh: { hostname: sshHostname.trim(), port: Number(sshPort) } }
+          : {}),
         baseDatos,
         credenciales: construirCredenciales(credenciales, tipo),
       };
       await crearPerfilConexionAdmin(clientId, entrada);
       setNombre('');
-      setDestino('');
-      setGateway('');
+      setMysqlHostname('');
+      setMysqlPort('3306');
+      setSshHostname('');
+      setSshPort('22');
       setBaseDatos('');
       await cargarPerfiles();
       setMensaje('Perfil de conexión registrado. Las credenciales no se muestran nuevamente.');
@@ -225,9 +232,9 @@ export function AdministracionPerfilesConexion({
         <summary id={`perfiles-${clientId}`}>Conexiones MySQL</summary>
         <div className="contenido-perfiles-conexion">
           <p className="texto-secundario">
-            El servidor permite únicamente destinos configurados. Las pruebas ejecutan{' '}
-            <code>SELECT 1</code>; nunca se muestra el usuario, la contraseña ni las llaves
-            guardadas.
+            Configura hostname y puerto como en tu cliente MySQL. El servidor solo conecta a los
+            endpoints aprobados por operaciones. Las pruebas ejecutan <code>SELECT 1</code>; nunca
+            se muestran credenciales guardadas.
           </p>
           {!clienteActivo ? (
             <p className="nota-conectividad" role="status">
@@ -280,33 +287,57 @@ export function AdministracionPerfilesConexion({
               </select>
             </div>
             <div className="campo">
-              <label htmlFor={`perfil-destino-${clientId}`}>ID de destino autorizado</label>
+              <label htmlFor={`perfil-mysql-host-${clientId}`}>MySQL Hostname</label>
               <input
-                id={`perfil-destino-${clientId}`}
+                id={`perfil-mysql-host-${clientId}`}
                 autoComplete="off"
-                pattern="[a-z0-9][a-z0-9_-]*"
-                maxLength={64}
+                maxLength={253}
                 required
-                value={destino}
-                onChange={(evento) => setDestino(evento.currentTarget.value)}
+                value={mysqlHostname}
+                onChange={(evento) => setMysqlHostname(evento.currentTarget.value)}
+              />
+            </div>
+            <div className="campo">
+              <label htmlFor={`perfil-mysql-port-${clientId}`}>MySQL Port</label>
+              <input
+                id={`perfil-mysql-port-${clientId}`}
+                type="number"
+                min={1}
+                max={65535}
+                required
+                value={mysqlPort}
+                onChange={(evento) => setMysqlPort(evento.currentTarget.value)}
               />
               <span className="ayuda-campo">
-                Debe coincidir con una entrada allowlisted por operaciones en el servidor.
+                El endpoint debe coincidir con uno aprobado en el servidor.
               </span>
             </div>
             {tipo === 'MYSQL_SSH' ? (
-              <div className="campo">
-                <label htmlFor={`perfil-gateway-${clientId}`}>ID de gateway SSH autorizado</label>
-                <input
-                  id={`perfil-gateway-${clientId}`}
-                  autoComplete="off"
-                  pattern="[a-z0-9][a-z0-9_-]*"
-                  maxLength={64}
-                  required
-                  value={gateway}
-                  onChange={(evento) => setGateway(evento.currentTarget.value)}
-                />
-              </div>
+              <>
+                <div className="campo">
+                  <label htmlFor={`perfil-ssh-host-${clientId}`}>SSH Hostname</label>
+                  <input
+                    id={`perfil-ssh-host-${clientId}`}
+                    autoComplete="off"
+                    maxLength={253}
+                    required
+                    value={sshHostname}
+                    onChange={(evento) => setSshHostname(evento.currentTarget.value)}
+                  />
+                </div>
+                <div className="campo">
+                  <label htmlFor={`perfil-ssh-port-${clientId}`}>SSH Port</label>
+                  <input
+                    id={`perfil-ssh-port-${clientId}`}
+                    type="number"
+                    min={1}
+                    max={65535}
+                    required
+                    value={sshPort}
+                    onChange={(evento) => setSshPort(evento.currentTarget.value)}
+                  />
+                </div>
+              </>
             ) : null}
             <div className="campo">
               <label htmlFor={`perfil-base-${clientId}`}>Base MySQL</label>
@@ -638,8 +669,10 @@ function FilaPerfilConexion({
   const [errorFila, setErrorFila] = useState<string | null>(null);
   const [nombre, setNombre] = useState(perfil.nombre);
   const [entorno, setEntorno] = useState(perfil.entorno);
-  const [destino, setDestino] = useState(perfil.destinoMySqlId);
-  const [gateway, setGateway] = useState(perfil.gatewaySshId ?? '');
+  const [mysqlHostname, setMysqlHostname] = useState(perfil.destinoMySql?.hostname ?? '');
+  const [mysqlPort, setMysqlPort] = useState(String(perfil.destinoMySql?.port ?? 3306));
+  const [sshHostname, setSshHostname] = useState(perfil.gatewaySsh?.hostname ?? '');
+  const [sshPort, setSshPort] = useState(String(perfil.gatewaySsh?.port ?? 22));
   const [baseDatos, setBaseDatos] = useState(perfil.baseDatos);
   const [nuevasCredenciales, setNuevasCredenciales] =
     useState<ValoresCredenciales>(CREDENCIALES_VACIAS);
@@ -657,8 +690,10 @@ function FilaPerfilConexion({
     const cambios: SolicitudActualizarPerfilConexionAdmin = {
       nombre,
       entorno,
-      destinoMySqlId: destino,
-      ...(perfil.tipo === 'MYSQL_SSH' ? { gatewaySshId: gateway } : {}),
+      destinoMySql: { hostname: mysqlHostname.trim(), port: Number(mysqlPort) },
+      ...(perfil.tipo === 'MYSQL_SSH'
+        ? { gatewaySsh: { hostname: sshHostname.trim(), port: Number(sshPort) } }
+        : {}),
       baseDatos,
     };
     await guardar(perfil, cambios);
@@ -756,28 +791,52 @@ function FilaPerfilConexion({
               </select>
             </div>
             <div className="campo">
-              <label htmlFor={`editar-destino-${perfil.id}`}>ID de destino autorizado</label>
+              <label htmlFor={`editar-mysql-host-${perfil.id}`}>MySQL Hostname</label>
               <input
-                id={`editar-destino-${perfil.id}`}
-                pattern="[a-z0-9][a-z0-9_-]*"
-                maxLength={64}
+                id={`editar-mysql-host-${perfil.id}`}
+                maxLength={253}
                 required
-                value={destino}
-                onChange={(evento) => setDestino(evento.currentTarget.value)}
+                value={mysqlHostname}
+                onChange={(evento) => setMysqlHostname(evento.currentTarget.value)}
+              />
+            </div>
+            <div className="campo">
+              <label htmlFor={`editar-mysql-port-${perfil.id}`}>MySQL Port</label>
+              <input
+                id={`editar-mysql-port-${perfil.id}`}
+                type="number"
+                min={1}
+                max={65535}
+                required
+                value={mysqlPort}
+                onChange={(evento) => setMysqlPort(evento.currentTarget.value)}
               />
             </div>
             {perfil.tipo === 'MYSQL_SSH' ? (
-              <div className="campo">
-                <label htmlFor={`editar-gateway-${perfil.id}`}>ID de gateway autorizado</label>
-                <input
-                  id={`editar-gateway-${perfil.id}`}
-                  pattern="[a-z0-9][a-z0-9_-]*"
-                  maxLength={64}
-                  required
-                  value={gateway}
-                  onChange={(evento) => setGateway(evento.currentTarget.value)}
-                />
-              </div>
+              <>
+                <div className="campo">
+                  <label htmlFor={`editar-ssh-host-${perfil.id}`}>SSH Hostname</label>
+                  <input
+                    id={`editar-ssh-host-${perfil.id}`}
+                    maxLength={253}
+                    required
+                    value={sshHostname}
+                    onChange={(evento) => setSshHostname(evento.currentTarget.value)}
+                  />
+                </div>
+                <div className="campo">
+                  <label htmlFor={`editar-ssh-port-${perfil.id}`}>SSH Port</label>
+                  <input
+                    id={`editar-ssh-port-${perfil.id}`}
+                    type="number"
+                    min={1}
+                    max={65535}
+                    required
+                    value={sshPort}
+                    onChange={(evento) => setSshPort(evento.currentTarget.value)}
+                  />
+                </div>
+              </>
             ) : null}
             <div className="campo">
               <label htmlFor={`editar-base-${perfil.id}`}>Base MySQL</label>

@@ -389,7 +389,8 @@ test('ADMIN ve los controles de conexión y el formulario elimina el secreto ant
   idsClientesE2e.push(clientId);
   await tarjeta.getByText('Editar y administrar ambientes SAP').click();
   await tarjeta.getByText('Conexiones MySQL', { exact: true }).click();
-  await expect(tarjeta.getByLabel('ID de destino autorizado')).toBeVisible();
+  await expect(tarjeta.getByLabel('MySQL Hostname')).toBeVisible();
+  await expect(tarjeta.getByLabel('MySQL Port')).toBeVisible();
   await expect(tarjeta.getByLabel('Usuario MySQL')).toBeVisible();
   await tarjeta.getByLabel('Nombre del perfil').focus();
   await expect(tarjeta.getByLabel('Nombre del perfil')).toBeFocused();
@@ -415,7 +416,8 @@ test('ADMIN ve los controles de conexión y el formulario elimina el secreto ant
   await page.setViewportSize({ width: 1280, height: 900 });
 
   await tarjeta.getByLabel('Nombre del perfil').fill('Perfil sintético');
-  await tarjeta.getByLabel('ID de destino autorizado').fill('destino-sin-configurar');
+  await tarjeta.getByLabel('MySQL Hostname').fill('destino-sin-configurar.example.test');
+  await tarjeta.getByLabel('MySQL Port').fill('3306');
   await tarjeta.getByLabel('Base MySQL').fill('base_sintetica');
   await tarjeta.getByLabel('Usuario MySQL').fill('usuario_sintetico');
   await tarjeta.getByLabel('Contraseña MySQL').fill(secretoSintetico);
