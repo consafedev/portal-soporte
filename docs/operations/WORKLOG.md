@@ -2529,3 +2529,21 @@ eload, se reinició únicamente cloudflared-consafedev.service; procesos web, AP
 - Archivos: `package.json`, `docs/operations/WORKLOG.md`, `docs/operations/TASK_BOARD.md`. UI/UX: no aplica.
 - Próximo paso: validar diff/secretos, commit focalizado, push normal a la rama existente y esperar GitHub Actions del SHA nuevo. Mantener PS-005.4 EN_REVISION al entregar.
 - Estado: EN_CURSO.
+
+### 2026-11-23T16:22:25-06:00 — Codex — PS-005.4 Task 6 — INICIO DE CORRECCIÓN DE IDENTIDAD CI
+- Base: commit publicado `56572a9280c56bfd64ec9e87a79c17c0b6614b1b`; PR #9 abierto, main sin cambios.
+- Objetivo: alinear la aserción de identidad de la prueba de migración con ambos modos explícitos que ofrece el harness, sin relajar su aislamiento.
+- Hallazgo GitHub run 45278398405: unitarias 48 archivos/426 tests PASS; fixture MySQL/SSH 11/11 PASS; integración PostgreSQL 9/10 archivos, 92 tests PASS, 1 suite falla en `connection-profile-destination-migrations.test.ts:50` antes de ejecutar el cuerpo.
+- Causa: la prueba acepta solo `portal_soporte_test`/`portal_test_app`, pero CI crea `portal_ps003_test`/`ps003_test` en modo `local-ephemeral`; otras pruebas del mismo directorio ya seleccionan identidad por `TEST_DATABASE_MODE` y mantienen la comprobación loopback.
+- Alcance previsto: ajustar únicamente la identidad esperada de esa prueba; verificarla en `portal_soporte_test` remoto y con nuevo CI local efímero. Sin DDL sobre base permanente, cliente real ni cambios de runtime.
+- UI/UX: no aplica.
+- Próximo paso: aplicar patrón de modo ya existente en las pruebas de migración de auth y acceso de clientes; prueba focal, comprobaciones y push normal.
+- Estado: EN_CURSO.
+
+### 2026-11-23T16:24:19-06:00 — Codex — PS-005.4 Task 6 — VERIFICACIÓN DE IDENTIDAD POR MODO
+- Corrección aplicada solo a `tests/integration/connection-profile-destination-migrations.test.ts`: selecciona `portal_ps003_test`/`ps003_test` para `local-ephemeral` y conserva `portal_soporte_test`/`portal_test_app` para `ssh-tunnel`; exige `inet_server_addr()` loopback en ambos modos. El patrón coincide con `client-access-migrations.test.ts` y `auth-migrations.test.ts`.
+- El run push 45278388046 también terminó FAILED en la suite de integración con la versión anterior del test; fixture MySQL/SSH SUCCESS. El commit nuevo tendrá un run limpio.
+- Verificación local: `prettier --check` de archivos modificados, `git diff --check` y `check:secrets` PASS. PostgreSQL local `NO EJECUTADO`: `initdb.exe` no está disponible y `PG_BIN_DIR` no está configurado.
+- Prueba remota focal `NO EJECUTADA`: `test:integration:remote` compiló API/connectors y el preflight detuvo la operación antes de abrir PostgreSQL porque el forward SSH actual no coincide con la identidad aprobada. No se conectó ni escribió en ninguna base.
+- Próximo paso: publicar cambio pequeño y esperar el CI del head actualizado; el runner efímero de GitHub verifica el caso `local-ephemeral`. PS-005.4 permanece EN_CURSO durante este follow-up.
+- Estado: EN_CURSO.

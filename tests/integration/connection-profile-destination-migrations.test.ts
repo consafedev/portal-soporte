@@ -32,6 +32,11 @@ async function prepararPostgresAislado(): Promise<void> {
     },
   });
 
+  const modo = process.env['TEST_DATABASE_MODE'] ?? 'local-ephemeral';
+  const identidadEsperada =
+    modo === 'ssh-tunnel'
+      ? { nombreBase: 'portal_soporte_test', rol: 'portal_test_app' }
+      : { nombreBase: 'portal_ps003_test', rol: 'ps003_test' };
   const [identidad] = await conexion<
     { readonly nombreBase: string; readonly rol: string; readonly loopback: boolean | null }[]
   >`
@@ -42,8 +47,8 @@ async function prepararPostgresAislado(): Promise<void> {
   `;
 
   if (
-    identidad?.nombreBase !== 'portal_soporte_test' ||
-    identidad.rol !== 'portal_test_app' ||
+    identidad?.nombreBase !== identidadEsperada.nombreBase ||
+    identidad.rol !== identidadEsperada.rol ||
     identidad.loopback !== true
   ) {
     await cerrarPostgresAislado();
