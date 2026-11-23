@@ -2247,3 +2247,12 @@ eload, se reinició únicamente cloudflared-consafedev.service; procesos web, AP
 - UI/UX: `.agents/skills/apple-design/SKILL.md` leída; se aplicaron nombres familiares Hostname/Port, agrupación de SSH, orden de teclado, estados visibles y responsive. Evidencia E2E visual PASS en escritorio/móvil, ambos temas; artefactos en `%TEMP%\portal-soporte-ps005-2-*.png`, sin datos reales.
 - Próximo paso: revisar `git diff`, confirmar ausencia de secretos, crear commit focal y publicar la rama por push normal; verificar GitHub Actions antes de cerrar.
 - Estado: EN_REVISION; Actions remotos pendientes.
+
+### [2026-11-23T10:08:42-06:00] PS-005.2 — CI SUCCESS y contrato Workbench
+- Agente/tarea/base: Codex · PS-005.2 · `codex/ps005-connection-credentials-e2e` · commit de código `a103268e5264d16e4110cc4d0642661c9dd48d8d`.
+- Verificación remota: GitHub Actions run `45212061221` SUCCESS; `Calidad y seguridad básica` y `Conectores MySQL y SSH con fixture sintético` completados correctamente.
+- Resultado funcional: la UI y el contrato API piden hostname/puerto de MySQL y, para túnel, hostname/puerto SSH; no piden IDs opacos. El backend conserva resolución por coincidencia exacta en la política operacional y falla cerrado para destinos no configurados; no se habilitó salida arbitraria.
+- Limitación: no se probó una conexión real a Arca ni se modificó la política remota. Para conectar ese cliente, el host/puerto debe estar autorizado por la configuración del servidor y se deben registrar credenciales desde el portal.
+- Seguridad y alcance: sin cambios a clientes, base productiva, servicios, Cloudflare, DNS o firewall; `rf-1:execute` continúa deshabilitado.
+- Próximo paso: comprobar que el destino de Arca esté configurado en la política del servidor y validar la conexión de solo lectura con un perfil y credenciales autorizados.
+- Estado: EN_REVISION.
