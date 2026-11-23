@@ -287,7 +287,12 @@ async function responderCatalogos(
   if (url.pathname.endsWith('/test') && metodo === 'POST') {
     estado.resultadosPrueba += 1;
     await respuestaJson({
-      code: estado.resultadosPrueba === 1 ? 'CONNECTED' : 'MYSQL_TLS_FAILED',
+      code:
+        estado.resultadosPrueba === 1
+          ? 'CONNECTED'
+          : estado.resultadosPrueba === 2
+            ? 'MYSQL_TLS_FAILED'
+            : 'DESTINATION_NOT_ALLOWED',
       completedAt: '2026-11-21T00:00:00.000Z',
     })(ruta);
     return;
@@ -407,6 +412,11 @@ test('ADMIN navega y revisa perfiles en escritorio y móvil sin datos reales', a
   await expect(perfil.getByRole('status')).toContainText('Conexión verificada.');
   await perfil.getByRole('button', { name: 'Probar conexión' }).click();
   await expect(perfil.getByRole('status')).toContainText('No se pudo validar el certificado TLS.');
+  await perfil.getByRole('button', { name: 'Probar conexión' }).click();
+  await expect(perfil.getByRole('status')).toContainText(
+    'El perfil no tiene un destino completo o no está disponible para esta operación.',
+  );
+  await expect(perfil.getByRole('status')).not.toContainText('configuración del servidor');
 
   await perfil.getByText('Editar perfil y sustituir credenciales').click();
   await perfil.getByLabel('Nombre del perfil').fill('Perfil editado visual sintético');

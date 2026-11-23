@@ -1004,7 +1004,8 @@ function traducirResultadoPrueba(codigo: string): string {
   const mensajes: Readonly<Record<string, string>> = {
     CONNECTED: 'Conexión verificada.',
     CONNECTOR_BUSY: 'Hay otra prueba en curso.',
-    DESTINATION_NOT_ALLOWED: 'El destino no está autorizado por la configuración del servidor.',
+    DESTINATION_NOT_ALLOWED:
+      'El perfil no tiene un destino completo o no está disponible para esta operación.',
     INVALID_CREDENTIALS: 'Las credenciales o el formato de llave no son compatibles.',
     SSH_KEY_FORMAT_UNSUPPORTED: 'La llave SSH debe ser PEM/OpenSSH o PuTTY PPK v2 RSA.',
     SSH_KEY_INVALID: 'La llave SSH no se pudo validar; revisa formato y passphrase.',
