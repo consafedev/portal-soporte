@@ -86,7 +86,7 @@ async function comprobarMigracionAditiva(): Promise<void> {
     "SELECT to_regclass('public.client_user_assignments') IS NOT NULL AS existe",
   );
 
-  expect(versiones.rows).toEqual([{ cantidad: 9 }]);
+  expect(versiones.rows).toEqual([{ cantidad: 11 }]);
   expect(tablas.rows.map((fila) => fila.nombre)).toEqual(
     [
       'audit_events',

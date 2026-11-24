@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type {
   EndpointConexionAdmin,
+  GatewaySshConexionAdmin,
   PerfilConexionAdminContrato,
   SolicitudActualizarPerfilConexionAdmin,
   SolicitudCrearPerfilConexionAdmin,
@@ -9,7 +10,10 @@ import type {
 import type { ActorAdministracionClientes } from '../../../../packages/core/src/clients/ports.js';
 import type {
   CambiosPerfilConexionPersistidos,
+  EndpointConexionPersistido,
+  GatewaySshPersistido,
   PerfilConexionCliente,
+  PerfilConexionPersistido,
   RepositorioPerfilesConexion,
 } from '../../../../packages/core/src/clients/connection-profile-ports.js';
 import type {
@@ -22,7 +26,13 @@ import type {
   SesionLecturaRf1,
 } from '../../../../packages/core/src/clients/secret-custody-ports.js';
 import type { RelojAuth } from '../../../../packages/core/src/auth/ports.js';
-import type { PoliticaDestinosConexion, ServicioCifradoSecretos } from '@portal-soporte/connectors';
+import {
+  ErrorPoliticaDestino,
+  normalizarEndpointConexionAdmin,
+  normalizarGatewaySshConexionAdmin,
+  type PoliticaDestinosConexion,
+  type ServicioCifradoSecretos,
+} from '@portal-soporte/connectors';
 import { calcularHuellaPerfilConexion } from './connection-profile-fingerprint.js';
 
 /** Error de dominio con código y estado HTTP controlados, sin valores de conexión. */
@@ -32,6 +42,7 @@ export class ErrorPerfilesConexion extends Error {
     public readonly code:
       | 'PROFILE_NAME_INVALID'
       | 'PROFILE_CONFIGURATION_INVALID'
+      | 'DESTINATION_INVALID'
       | 'DESTINATION_NOT_ALLOWED'
       | 'PROFILE_NOT_FOUND'
       | 'PROFILE_DUPLICATE'
@@ -54,7 +65,7 @@ export class ErrorPerfilesConexion extends Error {
 
 /** Administra perfiles y custodia credenciales únicamente en servicios server-side. */
 export class ServicioPerfilesConexion {
-  /** Crea el servicio con puertos aislados y configuración operacional allowlisted. */
+  /** Crea el servicio con custodia, broker y fallback operacional para perfiles legacy. */
   public constructor(
     private readonly repositorio: RepositorioPerfilesConexion,
     private readonly custodia: ServicioCifradoSecretos | null,
@@ -69,29 +80,27 @@ export class ServicioPerfilesConexion {
     return this.repositorio.listar(clientId);
   }
 
-  /** Cifra la solicitud antes de persistirla y audita alta/conflicto de forma segura. */
+  /** Normaliza y cifra la solicitud antes de persistir el destino ligado al perfil. */
   public async crear(
     clientId: string,
     entrada: SolicitudCrearPerfilConexionAdmin,
     actor: ActorAdministracionClientes,
   ): Promise<PerfilConexionCliente> {
     const nombre = normalizarNombrePerfil(entrada.nombre);
-    const destino = this.politica.buscarMySql(
-      entrada.destinoMySql.hostname,
-      entrada.destinoMySql.port,
+    const destino = normalizarDestinoAdmin(() =>
+      normalizarEndpointConexionAdmin(entrada.destinoMySql),
     );
     const gateway =
       entrada.gatewaySsh === undefined
-        ? undefined
-        : this.politica.buscarGatewaySsh(entrada.gatewaySsh.hostname, entrada.gatewaySsh.port);
+        ? null
+        : normalizarDestinoAdmin(() => normalizarGatewaySshConexionAdmin(entrada.gatewaySsh!));
     if (
-      destino === undefined ||
-      (entrada.tipo === 'MYSQL_SSH' && gateway === undefined) ||
-      (entrada.tipo === 'MYSQL_TCP' && entrada.gatewaySsh !== undefined)
+      (entrada.tipo === 'MYSQL_SSH' && gateway === null) ||
+      (entrada.tipo === 'MYSQL_TCP' && gateway !== null)
     ) {
-      throw new ErrorPerfilesConexion('DESTINATION_NOT_ALLOWED', 422);
+      throw new ErrorPerfilesConexion('PROFILE_CONFIGURATION_INVALID', 422);
     }
-    validarConfiguracionPerfil(entrada.tipo, gateway?.id, entrada.credenciales);
+    validarConfiguracionPerfil(entrada.tipo, gateway !== null, entrada.credenciales);
     const custodia = this.exigirCustodia();
     const id = this.generarId();
     const contexto = crearContextoSobre(clientId, id);
@@ -104,8 +113,10 @@ export class ServicioPerfilesConexion {
         nombre,
         tipo: entrada.tipo,
         entorno: entrada.entorno,
-        destinoMySqlId: destino.id,
-        gatewaySshId: gateway?.id ?? null,
+        destinoMySqlId: crearIdDestinoPerfil(id),
+        destinoMySql: destino,
+        gatewaySshId: gateway === null ? null : crearIdGatewayPerfil(id),
+        gatewaySsh: gateway,
         baseDatos: entrada.baseDatos,
         sobre,
         createdAt: this.reloj.ahora(),
@@ -129,39 +140,17 @@ export class ServicioPerfilesConexion {
     actor: ActorAdministracionClientes,
   ): Promise<PerfilConexionCliente> {
     const actual = await this.buscarPerfilRedactado(clientId, profileId);
-    const destino =
-      entrada.destinoMySql === undefined
-        ? this.politica.obtenerMySql(actual.destinoMySqlId)
-        : this.politica.buscarMySql(entrada.destinoMySql.hostname, entrada.destinoMySql.port);
-    const gateway =
-      entrada.gatewaySsh === undefined
-        ? actual.gatewaySshId === null
-          ? undefined
-          : this.politica.obtenerGatewaySsh(actual.gatewaySshId)
-        : entrada.gatewaySsh === null
-          ? undefined
-          : this.politica.buscarGatewaySsh(entrada.gatewaySsh.hostname, entrada.gatewaySsh.port);
-    if (
-      destino === undefined ||
-      (actual.tipo === 'MYSQL_SSH' && gateway === undefined) ||
-      (actual.tipo === 'MYSQL_TCP' &&
-        entrada.gatewaySsh !== undefined &&
-        entrada.gatewaySsh !== null)
-    ) {
-      throw new ErrorPerfilesConexion('DESTINATION_NOT_ALLOWED', 422);
-    }
-    validarConfiguracionPerfil(actual.tipo, gateway?.id, undefined);
-    const destinoMySqlId = destino.id;
-    const gatewaySshId = gateway?.id;
-    this.exigirDestinoPermitido(destinoMySqlId, gatewaySshId);
+    const destinoModificado =
+      entrada.destinoMySql !== undefined || entrada.gatewaySsh !== undefined;
+    const cambiosDestino: Pick<
+      CambiosPerfilConexionPersistidos,
+      'destinoMySqlId' | 'destinoMySql' | 'gatewaySshId' | 'gatewaySsh'
+    > = destinoModificado ? this.crearCambiosDestino(actual, entrada, profileId) : {};
 
     const cambios: CambiosPerfilConexionPersistidos = {
       ...(entrada.nombre === undefined ? {} : { nombre: normalizarNombrePerfil(entrada.nombre) }),
       ...(entrada.entorno === undefined ? {} : { entorno: entrada.entorno }),
-      ...(entrada.destinoMySql === undefined ? {} : { destinoMySqlId }),
-      ...(entrada.gatewaySsh === undefined
-        ? {}
-        : { gatewaySshId: entrada.gatewaySsh === null ? null : gatewaySshId }),
+      ...cambiosDestino,
       ...(entrada.baseDatos === undefined ? {} : { baseDatos: entrada.baseDatos }),
       ...(entrada.estado === undefined ? {} : { estado: entrada.estado }),
       updatedAt: this.reloj.ahora(),
@@ -189,8 +178,15 @@ export class ServicioPerfilesConexion {
     actor: ActorAdministracionClientes,
   ): Promise<PerfilConexionCliente> {
     const perfil = await this.buscarPerfilRedactado(clientId, profileId);
-    validarConfiguracionPerfil(perfil.tipo, perfil.gatewaySshId ?? undefined, entrada.credenciales);
-    this.exigirDestinoPermitido(perfil.destinoMySqlId, perfil.gatewaySshId ?? undefined);
+    const solicitud = this.crearSolicitudBroker(perfil);
+    if (solicitud === undefined) {
+      throw new ErrorPerfilesConexion('DESTINATION_NOT_ALLOWED', 422);
+    }
+    validarConfiguracionPerfil(
+      perfil.tipo,
+      solicitud.gatewaySsh !== undefined || solicitud.gatewaySshId !== undefined,
+      entrada.credenciales,
+    );
     const custodia = this.exigirCustodia();
     const sobre = await this.cifrarCredenciales(
       custodia,
@@ -222,12 +218,8 @@ export class ServicioPerfilesConexion {
       throw new ErrorPerfilesConexion('PROFILE_NOT_FOUND', 404);
     }
 
-    const destino = this.politica.obtenerMySql(perfil.destinoMySqlId);
-    const gateway =
-      perfil.gatewaySshId === null
-        ? undefined
-        : this.politica.obtenerGatewaySsh(perfil.gatewaySshId);
-    if (destino === undefined || (perfil.tipo === 'MYSQL_SSH' && gateway === undefined)) {
+    const solicitud = this.crearSolicitudBroker(perfil);
+    if (solicitud === undefined) {
       return this.auditarPrueba(clientId, profileId, actor, 'DESTINATION_NOT_ALLOWED');
     }
     if (this.custodia === null) {
@@ -241,14 +233,6 @@ export class ServicioPerfilesConexion {
         perfil.sobre,
         crearContextoSobre(clientId, profileId),
       );
-      const solicitud: PerfilConexionPrueba = {
-        id: perfil.id,
-        clientId: perfil.clientId,
-        tipo: perfil.tipo,
-        destinoMySqlId: perfil.destinoMySqlId,
-        ...(perfil.gatewaySshId === null ? {} : { gatewaySshId: perfil.gatewaySshId }),
-        baseDatos: perfil.baseDatos,
-      };
       resultado = await this.broker.probar(solicitud, secreto);
     } catch (error: unknown) {
       const codigoErrorCustodia = obtenerCodigoErrorCustodia(error);
@@ -288,22 +272,11 @@ export class ServicioPerfilesConexion {
     if (perfil === null) {
       throw new ErrorPerfilesConexion('PROFILE_NOT_FOUND', 404);
     }
-    this.exigirDestinoPermitido(
-      perfil.destinoMySqlId,
-      perfil.gatewaySshId === null ? undefined : perfil.gatewaySshId,
-    );
+    const solicitud = this.exigirSolicitudBroker(perfil);
     const custodia = this.exigirCustodia();
     let secreto: Buffer | null = null;
     try {
       secreto = await custodia.descifrar(perfil.sobre, crearContextoSobre(clientId, profileId));
-      const solicitud: PerfilConexionPrueba = {
-        id: perfil.id,
-        clientId: perfil.clientId,
-        tipo: perfil.tipo,
-        destinoMySqlId: perfil.destinoMySqlId,
-        ...(perfil.gatewaySshId === null ? {} : { gatewaySshId: perfil.gatewaySshId }),
-        baseDatos: perfil.baseDatos,
-      };
       return await this.broker.abrirLecturaRf1(solicitud, secreto, senal);
     } catch (error: unknown) {
       throw convertirErrorLecturaRf1(error);
@@ -335,22 +308,11 @@ export class ServicioPerfilesConexion {
     if (calcularHuellaPerfilConexion(perfil) !== huellaEsperada) {
       throw new ErrorPerfilesConexion('PROFILE_CHANGED', 409);
     }
-    this.exigirDestinoPermitido(
-      perfil.destinoMySqlId,
-      perfil.gatewaySshId === null ? undefined : perfil.gatewaySshId,
-    );
+    const solicitud = this.exigirSolicitudBroker(perfil);
     const custodia = this.exigirCustodia();
     let secreto: Buffer | null = null;
     try {
       secreto = await custodia.descifrar(perfil.sobre, crearContextoSobre(clientId, profileId));
-      const solicitud: PerfilConexionPrueba = {
-        id: perfil.id,
-        clientId: perfil.clientId,
-        tipo: perfil.tipo,
-        destinoMySqlId: perfil.destinoMySqlId,
-        ...(perfil.gatewaySshId === null ? {} : { gatewaySshId: perfil.gatewaySshId }),
-        baseDatos: perfil.baseDatos,
-      };
       return await this.broker.abrirInsercionRf1(solicitud, secreto, senal);
     } catch (error: unknown) {
       throw convertirErrorLecturaRf1(error);
@@ -359,23 +321,127 @@ export class ServicioPerfilesConexion {
     }
   }
 
-  /** Comprueba y resuelve destinos desde allowlist operacional, nunca desde host API. */
-  private exigirDestinoPermitido(destinoMySqlId: string, gatewaySshId?: string): void {
-    if (
-      this.politica.obtenerMySql(destinoMySqlId) === undefined ||
-      (gatewaySshId !== undefined && this.politica.obtenerGatewaySsh(gatewaySshId) === undefined)
-    ) {
+  /** Obtiene un endpoint persistido o resuelve uno legacy exclusivamente por su ID interno. */
+  private obtenerDestinoPerfil(
+    perfil: PerfilConexionCliente,
+  ): EndpointConexionPersistido | undefined {
+    if (perfil.destinoMySql !== undefined && perfil.destinoMySql !== null) {
+      return perfil.destinoMySql;
+    }
+    const legacy = this.politica.obtenerMySql(perfil.destinoMySqlId);
+    return legacy === undefined ? undefined : endpointVisible(legacy);
+  }
+
+  /** Obtiene el gateway persistido o el gateway legacy asociado a su ID interno. */
+  private obtenerGatewayPerfil(perfil: PerfilConexionCliente): GatewaySshPersistido | null {
+    if (perfil.gatewaySsh !== undefined && perfil.gatewaySsh !== null) {
+      return perfil.gatewaySsh;
+    }
+    if (perfil.gatewaySshId === null) {
+      return null;
+    }
+    const legacy = this.politica.obtenerGatewaySsh(perfil.gatewaySshId);
+    return legacy === undefined ? null : gatewayVisible(legacy);
+  }
+
+  /** Valida y prepara un cambio coherente de endpoints, promoviendo legacy solo si ADMIN edita destino. */
+  private crearCambiosDestino(
+    actual: PerfilConexionCliente,
+    entrada: SolicitudActualizarPerfilConexionAdmin,
+    profileId: string,
+  ): Pick<
+    CambiosPerfilConexionPersistidos,
+    'destinoMySqlId' | 'destinoMySql' | 'gatewaySshId' | 'gatewaySsh'
+  > {
+    const destino =
+      entrada.destinoMySql === undefined
+        ? this.obtenerDestinoPerfil(actual)
+        : normalizarDestinoAdmin(() => normalizarEndpointConexionAdmin(entrada.destinoMySql!));
+    const gateway =
+      entrada.gatewaySsh === undefined
+        ? this.obtenerGatewayPerfil(actual)
+        : entrada.gatewaySsh === null
+          ? null
+          : normalizarDestinoAdmin(() => normalizarGatewaySshConexionAdmin(entrada.gatewaySsh!));
+    if (destino === undefined) {
       throw new ErrorPerfilesConexion('DESTINATION_NOT_ALLOWED', 422);
     }
+    if (
+      (actual.tipo === 'MYSQL_SSH' && gateway === null) ||
+      (actual.tipo === 'MYSQL_TCP' && gateway !== null)
+    ) {
+      throw new ErrorPerfilesConexion('PROFILE_CONFIGURATION_INVALID', 422);
+    }
+    validarConfiguracionPerfil(actual.tipo, gateway !== null, undefined);
+    return {
+      destinoMySqlId: crearIdDestinoPerfil(profileId),
+      destinoMySql: destino,
+      gatewaySshId: gateway === null ? null : crearIdGatewayPerfil(profileId),
+      gatewaySsh: gateway,
+    };
+  }
+
+  /** Construye el destino de broker solo desde el perfil o referencias legacy internas. */
+  private crearSolicitudBroker(perfil: PerfilConexionCliente): PerfilConexionPrueba | undefined {
+    const tieneEndpointPerfil =
+      (perfil.destinoMySql !== null && perfil.destinoMySql !== undefined) ||
+      (perfil.gatewaySsh !== null && perfil.gatewaySsh !== undefined);
+    if (tieneEndpointPerfil) {
+      if (
+        perfil.destinoMySql === null ||
+        perfil.destinoMySql === undefined ||
+        (perfil.tipo === 'MYSQL_SSH' &&
+          (perfil.gatewaySsh === null || perfil.gatewaySsh === undefined)) ||
+        (perfil.tipo === 'MYSQL_TCP' &&
+          perfil.gatewaySsh !== null &&
+          perfil.gatewaySsh !== undefined)
+      ) {
+        return undefined;
+      }
+      return {
+        id: perfil.id,
+        clientId: perfil.clientId,
+        tipo: perfil.tipo,
+        destinoMySql: perfil.destinoMySql,
+        ...(perfil.gatewaySsh === null || perfil.gatewaySsh === undefined
+          ? {}
+          : { gatewaySsh: perfil.gatewaySsh }),
+        baseDatos: perfil.baseDatos,
+      };
+    }
+
+    if (
+      this.politica.obtenerMySql(perfil.destinoMySqlId) === undefined ||
+      (perfil.tipo === 'MYSQL_SSH' &&
+        (perfil.gatewaySshId === null ||
+          this.politica.obtenerGatewaySsh(perfil.gatewaySshId) === undefined)) ||
+      (perfil.tipo === 'MYSQL_TCP' && perfil.gatewaySshId !== null)
+    ) {
+      return undefined;
+    }
+    return {
+      id: perfil.id,
+      clientId: perfil.clientId,
+      tipo: perfil.tipo,
+      destinoMySqlId: perfil.destinoMySqlId,
+      ...(perfil.gatewaySshId === null ? {} : { gatewaySshId: perfil.gatewaySshId }),
+      baseDatos: perfil.baseDatos,
+    };
+  }
+
+  /** Exige una solicitud de broker íntegra antes de descifrar credenciales. */
+  private exigirSolicitudBroker(perfil: PerfilConexionPersistido): PerfilConexionPrueba {
+    const solicitud = this.crearSolicitudBroker(perfil);
+    if (solicitud === undefined) {
+      throw new ErrorPerfilesConexion('DESTINATION_NOT_ALLOWED', 422);
+    }
+    return solicitud;
   }
 
   /** Proyecta endpoints autorizados para ADMIN sin exponer referencias operacionales internas. */
   public presentarPerfilAdmin(perfil: PerfilConexionCliente): PerfilConexionAdminContrato {
-    const destino = this.politica.obtenerMySql(perfil.destinoMySqlId);
-    const gateway =
-      perfil.gatewaySshId === null
-        ? undefined
-        : this.politica.obtenerGatewaySsh(perfil.gatewaySshId);
+    const destino = this.obtenerDestinoPerfil(perfil);
+    const gateway = this.obtenerGatewayPerfil(perfil);
     return {
       id: perfil.id,
       clientId: perfil.clientId,
@@ -383,7 +449,7 @@ export class ServicioPerfilesConexion {
       tipo: perfil.tipo,
       entorno: perfil.entorno,
       destinoMySql: destino === undefined ? null : endpointVisible(destino),
-      gatewaySsh: gateway === undefined ? null : endpointVisible(gateway),
+      gatewaySsh: gateway === null ? null : gatewayVisible(gateway),
       baseDatos: perfil.baseDatos,
       estado: perfil.estado,
       createdAt: perfil.createdAt.toISOString(),
@@ -456,7 +522,7 @@ function normalizarNombrePerfil(valor: string): string {
   return nombre;
 }
 
-/** Copia únicamente hostname y puerto desde la política, sin ID ni dirección fijada. */
+/** Copia hostname y puerto de un endpoint interno sin ID ni dirección fijada. */
 function endpointVisible(valor: {
   readonly hostname: string;
   readonly port: number;
@@ -464,10 +530,37 @@ function endpointVisible(valor: {
   return { hostname: valor.hostname, port: valor.port };
 }
 
+/** Proyecta el gateway SSH sin IDs internos y conservando su fingerprint pública. */
+function gatewayVisible(valor: GatewaySshPersistido): GatewaySshConexionAdmin {
+  return { ...endpointVisible(valor), fingerprint: valor.fingerprint };
+}
+
+/** Traduce la validación sintáctica de destinos a un error HTTP estable y redactado. */
+function normalizarDestinoAdmin<T>(normalizar: () => T): T {
+  try {
+    return normalizar();
+  } catch (error: unknown) {
+    if (error instanceof ErrorPoliticaDestino) {
+      throw new ErrorPerfilesConexion('DESTINATION_INVALID', 422);
+    }
+    throw error;
+  }
+}
+
+/** Crea una referencia interna estable ligada al UUID del perfil, no al destino externo. */
+function crearIdDestinoPerfil(profileId: string): string {
+  return `perfil-${profileId.toLowerCase()}`;
+}
+
+/** Crea una referencia interna de gateway ligada al perfil y oculta a las rutas públicas. */
+function crearIdGatewayPerfil(profileId: string): string {
+  return `gateway-${profileId.toLowerCase()}`;
+}
+
 /** Rechaza rutas SSH o pares TLS incoherentes antes de cifrar las credenciales. */
 function validarConfiguracionPerfil(
   tipo: 'MYSQL_TCP' | 'MYSQL_SSH',
-  gatewaySshId: string | null | undefined,
+  gatewayConfigurado: boolean,
   credenciales: SolicitudCrearPerfilConexionAdmin['credenciales'] | undefined,
 ): void {
   const usaSsh = credenciales?.ssh !== undefined;
@@ -476,13 +569,10 @@ function validarConfiguracionPerfil(
   const tlsIncompleto = certificadoTls !== llaveTls;
   const sshInvalido =
     tipo === 'MYSQL_SSH'
-      ? gatewaySshId === undefined ||
-        gatewaySshId === null ||
-        (credenciales !== undefined && !usaSsh)
-      : (gatewaySshId !== undefined && gatewaySshId !== null) ||
-        (credenciales !== undefined && usaSsh);
+      ? !gatewayConfigurado || (credenciales !== undefined && !usaSsh)
+      : gatewayConfigurado || (credenciales !== undefined && usaSsh);
   if (sshInvalido || tlsIncompleto) {
-    throw new ErrorPerfilesConexion('PROFILE_CONFIGURATION_INVALID', 400);
+    throw new ErrorPerfilesConexion('PROFILE_CONFIGURATION_INVALID', 422);
   }
 }
 

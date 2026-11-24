@@ -36,7 +36,9 @@ const MENSAJES_CLIENTES: Readonly<Record<string, string>> = {
   SAP_ENVIRONMENT_DUPLICATE: 'Ese código ya existe en el cliente.',
   SAP_ENVIRONMENT_NAME_INVALID: 'El nombre del ambiente debe tener entre 2 y 120 caracteres.',
   SAP_ENVIRONMENT_NOT_FOUND: 'No se encontró el ambiente SAP solicitado para ese cliente.',
-  DESTINATION_NOT_ALLOWED: 'El destino no está habilitado en la configuración del servidor.',
+  DESTINATION_NOT_ALLOWED:
+    'El perfil no tiene un destino completo o no está disponible para esta operación.',
+  DESTINATION_INVALID: 'Revisa el hostname, puerto y fingerprint SSH del destino.',
   MYSQL_CONNECTION_FAILED:
     'No fue posible conectar con MySQL. Revisa la configuración sin compartir sus secretos.',
   MYSQL_AUTHENTICATION_FAILED: 'MySQL rechazó las credenciales configuradas.',

@@ -36,8 +36,11 @@ const restriccionesEsperadasPrueba = [
   ['client_connection_profiles', 'client_connection_profiles_status_check', 'c'],
   ['client_connection_profiles', 'client_connection_profiles_name_check', 'c'],
   ['client_connection_profiles', 'client_connection_profiles_destination_check', 'c'],
+  ['client_connection_profiles', 'client_connection_profiles_destination_endpoint_check', 'c'],
   ['client_connection_profiles', 'client_connection_profiles_database_check', 'c'],
   ['client_connection_profiles', 'client_connection_profiles_gateway_check', 'c'],
+  ['client_connection_profiles', 'client_connection_profiles_gateway_endpoint_check', 'c'],
+  ['client_connection_profiles', 'client_connection_profiles_complete_endpoint_check', 'c'],
   ['client_user_assignments', 'client_user_assignments_client_id_clients_id_fk', 'f'],
   ['client_user_assignments', 'client_user_assignments_granted_by_user_id_users_id_fk', 'f'],
   ['client_user_assignments', 'client_user_assignments_pkey', 'p'],
@@ -147,6 +150,8 @@ function crearEstadoMigrado(
   incluirPerfiles = true,
   incluirAccesoCliente = true,
   incluirRestriccionExecuteDeshabilitado = false,
+  incluirRestriccionesEndpoint = true,
+  incluirRestriccionEndpointCompleta = true,
 ): EstadoEsquemaBasePrueba {
   const tablas = [
     '__drizzle_migrations',
@@ -232,6 +237,13 @@ function crearEstadoMigrado(
           (incluirClientes ||
             (restriccion.tabla !== 'client_sap_environments' && restriccion.tabla !== 'clients')) &&
           (incluirPerfiles || restriccion.tabla !== 'client_connection_profiles') &&
+          (incluirRestriccionesEndpoint ||
+            ![
+              'client_connection_profiles_destination_endpoint_check',
+              'client_connection_profiles_gateway_endpoint_check',
+            ].includes(restriccion.nombre)) &&
+          (incluirRestriccionEndpointCompleta ||
+            restriccion.nombre !== 'client_connection_profiles_complete_endpoint_check') &&
           (incluirAccesoCliente ||
             (restriccion.tabla !== 'client_capabilities' &&
               restriccion.tabla !== 'client_user_assignments')),
@@ -354,6 +366,8 @@ describe('validación del estado persistente de la base de pruebas', () => {
     'hash-0006',
     'hash-0007',
     'hash-0008',
+    'hash-0009',
+    'hash-0010',
   ].map((hash) => [hash]);
 
   it('acepta una base nueva antes de aplicar migraciones', () => {
@@ -375,11 +389,51 @@ describe('validación del estado persistente de la base de pruebas', () => {
     ).toBe('migrado');
   });
 
-  it('acepta el esquema con la capacidad execute deshabilitada antes de migrar su constraint', () => {
-    const estadoAnterior = crearEstadoMigrado(hashesEsperados.slice(0, -1), true, true, true, true);
+  it('acepta el estado exacto 0009 como pendiente de la migración correctiva 0010', () => {
+    const estadoAnterior = crearEstadoMigrado(
+      hashesEsperados.slice(0, -1),
+      true,
+      true,
+      true,
+      false,
+      true,
+      false,
+    );
 
     expect(validarEstadoEsquemaBasePrueba(estadoAnterior, hashesEsperados)).toBe(
       'migracion-pendiente',
+    );
+  });
+
+  it('acepta el estado exacto 0008 como pendiente de las migraciones 0009 y 0010', () => {
+    const estadoAnterior = crearEstadoMigrado(
+      hashesEsperados.slice(0, -2),
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+    );
+
+    expect(validarEstadoEsquemaBasePrueba(estadoAnterior, hashesEsperados)).toBe(
+      'migracion-pendiente',
+    );
+  });
+
+  it('rechaza un estado anterior a 0008 en lugar de asumir que puede saltarse migraciones', () => {
+    const estadoAntiguo = crearEstadoMigrado(
+      hashesEsperados.slice(0, -3),
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+    );
+
+    expect(() => validarEstadoEsquemaBasePrueba(estadoAntiguo, hashesEsperados)).toThrow(
+      'La base de pruebas contiene objetos o datos fuera del estado aprobado',
     );
   });
 
@@ -394,6 +448,8 @@ describe('validación del estado persistente de la base de pruebas', () => {
       'hash-0006',
       'hash-0007',
       'hash-0008',
+      'hash-0009',
+      'hash-0010',
     ].map((hash) => [`${hash}-windows`, `${hash}-unix`]);
     const estado = crearEstadoMigrado(variantes);
 

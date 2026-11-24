@@ -81,7 +81,7 @@ export async function registrarRutasAdminPerfilesConexion(
       return respuesta.code(201).send(dependencias.perfiles.presentarPerfilAdmin(perfil));
     }
 
-    /** Modifica etiqueta, ambiente, allowlist o estado sin aceptar secretos. */
+    /** Modifica etiqueta, ambiente, endpoint del perfil o estado sin aceptar secretos. */
     async function actualizar(
       solicitud: FastifyRequest<{
         Params: ParametrosClientePerfil;
@@ -113,8 +113,17 @@ export async function registrarRutasAdminPerfilesConexion(
       return dependencias.perfiles.presentarPerfilAdmin(perfil);
     }
 
-    /** Ejecuta la prueba de solo lectura y responde con un código estable redactado. */
-    async function probar(solicitud: FastifyRequest<{ Params: ParametrosClientePerfil }>) {
+    /** Ejecuta solo la prueba de perfil guardado y rechaza destinos enviados en el body. */
+    async function probar(
+      solicitud: FastifyRequest<{ Params: ParametrosClientePerfil }>,
+      respuesta: FastifyReply,
+    ) {
+      if (tieneCuerpoNoVacio(solicitud.body)) {
+        return respuesta.code(400).send({
+          code: 'INVALID_REQUEST',
+          message: 'La prueba usa el destino guardado en el perfil.',
+        });
+      }
       const resultado = await dependencias.perfiles.probar(
         solicitud.params.clientId,
         solicitud.params.profileId,
@@ -210,6 +219,7 @@ export async function registrarRutasAdminPerfilesConexion(
           params: clienteYPerfilParamsSchema,
           response: {
             200: resultadoPruebaPerfilAdminSchema,
+            400: errorClienteAdminSchema,
             404: errorClienteAdminSchema,
           },
         },
@@ -217,6 +227,17 @@ export async function registrarRutasAdminPerfilesConexion(
       probar,
     );
   });
+}
+
+/** Detecta cuerpos operativos que intenten introducir un destino distinto al del perfil. */
+function tieneCuerpoNoVacio(cuerpo: unknown): boolean {
+  return (
+    cuerpo !== undefined &&
+    (typeof cuerpo !== 'object' ||
+      cuerpo === null ||
+      Array.isArray(cuerpo) ||
+      Object.keys(cuerpo).length > 0)
+  );
 }
 
 /** Traduce fallos de validación/dominio sin imprimir body, host, usuario o secreto. */
@@ -279,7 +300,9 @@ function traducirErrorPerfil(codigo: ErrorPerfilesConexion['code']): string {
     case 'PROFILE_CONFIGURATION_INVALID':
       return 'La ruta de conexión, el gateway o los certificados no son coherentes.';
     case 'DESTINATION_NOT_ALLOWED':
-      return 'El destino no está habilitado por la configuración de seguridad.';
+      return 'El destino configurado no está disponible para esta operación.';
+    case 'DESTINATION_INVALID':
+      return 'Revisa el hostname, puerto y fingerprint del destino.';
     case 'PROFILE_NOT_FOUND':
       return 'No se encontró el perfil activo indicado.';
     case 'PROFILE_CHANGED':

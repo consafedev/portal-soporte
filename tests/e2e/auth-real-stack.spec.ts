@@ -364,8 +364,8 @@ test('SUPPORT cambia su contraseña y el otro navegador queda revocado', async (
   }
 });
 
-/** Comprueba el panel de perfiles y que el servidor falle cerrado sin destino allowlisted. */
-test('ADMIN ve los controles de conexión y el formulario elimina el secreto ante rechazo', async ({
+/** Comprueba que el formulario borre el secreto cuando el keyring no está disponible. */
+test('ADMIN ve los controles de conexión y el formulario elimina el secreto sin keyring', async ({
   page,
 }) => {
   await iniciarSesionEnNavegador(page, credencialesAdmin, '/settings/clients', 'Clientes');
@@ -423,7 +423,9 @@ test('ADMIN ve los controles de conexión y el formulario elimina el secreto ant
   await tarjeta.getByLabel('Contraseña MySQL').fill(secretoSintetico);
   await tarjeta.getByRole('button', { name: 'Guardar perfil' }).click();
 
-  await expect(tarjeta.getByRole('alert')).toContainText('destino no está habilitado');
+  await expect(tarjeta.getByRole('alert')).toContainText(
+    'La custodia segura todavía no está configurada',
+  );
   await expect(tarjeta.getByLabel('Contraseña MySQL')).toHaveValue('');
   expect(await page.locator('body').innerText()).not.toContain(secretoSintetico);
   expect(await page.locator('body').innerText()).not.toContain('password-sintetico');

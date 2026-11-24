@@ -36,4 +36,18 @@ describe('huella segura de perfil de conexión', () => {
       calcularHuellaPerfilConexion(PERFIL),
     );
   });
+
+  it('cambia al modificar el hostname aunque la hora de actualización no cambie', () => {
+    const perfilConDestino = {
+      ...PERFIL,
+      destinoMySql: { hostname: 'mysql.original.test', port: 3306 },
+    };
+
+    expect(
+      calcularHuellaPerfilConexion({
+        ...perfilConDestino,
+        destinoMySql: { hostname: 'mysql.alternativo.test', port: 3306 },
+      }),
+    ).not.toBe(calcularHuellaPerfilConexion(perfilConDestino));
+  });
 });

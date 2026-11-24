@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { expect, test, type Page, type Route } from '@playwright/test';
 import type { RespuestaUsuarioPublico } from '../../../packages/contracts/src/auth.js';
 import type {
+  AccesoClienteAdminContrato,
   AmbienteSapClienteAdminContrato,
   ClienteAdminContrato,
   PerfilConexionAdminContrato,
@@ -48,6 +49,24 @@ const ambienteVisual: AmbienteSapClienteAdminContrato = {
   updatedAt: '2026-11-21T00:00:00.000Z',
 };
 
+const accesoClienteVisual: AccesoClienteAdminContrato = {
+  asignaciones: [],
+  capacidades: [
+    {
+      clientId: clienteVisual.id,
+      capabilityId: 'rf-1:read',
+      enabled: false,
+      changedAt: null,
+    },
+    {
+      clientId: clienteVisual.id,
+      capabilityId: 'rf-1:execute',
+      enabled: false,
+      changedAt: null,
+    },
+  ],
+};
+
 /** Operación administrativa observada por el backend simulado del test visual. */
 type OperacionCapturadaCredenciales = 'CREAR_PERFIL' | 'REEMPLAZAR_CREDENCIALES';
 
@@ -61,6 +80,8 @@ interface SolicitudCredencialesCapturada {
 
 /** Metadatos de endpoint enviados al API, sin copiar el paquete de credenciales. */
 interface SolicitudPerfilCapturada {
+  /** Operación visible que originó el payload de metadatos. */
+  readonly operacion: 'CREAR' | 'ACTUALIZAR';
   readonly nombre: string | undefined;
   readonly tipo: PerfilConexionAdminContrato['tipo'];
   readonly destinoMySql: unknown;
@@ -185,6 +206,7 @@ async function responderCatalogos(
     const tipoPerfil = solicitud['tipo'] === 'MYSQL_SSH' ? 'MYSQL_SSH' : 'MYSQL_TCP';
     const nombrePerfil = typeof solicitud['nombre'] === 'string' ? solicitud['nombre'] : undefined;
     estado.solicitudesPerfiles.push({
+      operacion: 'CREAR',
       nombre: nombrePerfil,
       tipo: tipoPerfil,
       destinoMySql: solicitud['destinoMySql'],
@@ -228,19 +250,49 @@ async function responderCatalogos(
   }
   if (/\/connection-profiles\/[0-9a-f-]+$/iu.test(url.pathname) && metodo === 'PATCH') {
     const cambios = ruta.request().postDataJSON() as Record<string, unknown>;
+    const perfilId = /\/connection-profiles\/([0-9a-f-]+)$/iu.exec(url.pathname)?.[1];
+    const indicePerfil = estado.perfiles.findIndex((elemento) => elemento.id === perfilId);
+    const perfilBase =
+      (indicePerfil >= 0 ? estado.perfiles[indicePerfil] : undefined) ?? perfilVisual;
+    const nombreActualizado =
+      typeof cambios['nombre'] === 'string' ? cambios['nombre'] : perfilBase.nombre;
+    estado.solicitudesPerfiles.push({
+      operacion: 'ACTUALIZAR',
+      nombre: nombreActualizado,
+      tipo: perfilBase.tipo,
+      destinoMySql: cambios['destinoMySql'] ?? perfilBase.destinoMySql,
+      gatewaySsh: cambios['gatewaySsh'] ?? perfilBase.gatewaySsh,
+      incluyeIdsInternos:
+        Object.hasOwn(cambios, 'destinoMySqlId') || Object.hasOwn(cambios, 'gatewaySshId'),
+    });
     const perfilActualizado: PerfilConexionAdminContrato = {
-      ...(estado.perfiles.at(-1) ?? perfilVisual),
-      nombre: typeof cambios['nombre'] === 'string' ? cambios['nombre'] : perfilVisual.nombre,
+      ...perfilBase,
+      nombre: nombreActualizado,
+      destinoMySql:
+        (cambios['destinoMySql'] as PerfilConexionAdminContrato['destinoMySql'] | undefined) ??
+        perfilBase.destinoMySql,
+      gatewaySsh:
+        (cambios['gatewaySsh'] as PerfilConexionAdminContrato['gatewaySsh'] | undefined) ??
+        perfilBase.gatewaySsh,
+      entorno:
+        (cambios['entorno'] as PerfilConexionAdminContrato['entorno'] | undefined) ??
+        perfilBase.entorno,
+      baseDatos: (cambios['baseDatos'] as string | undefined) ?? perfilBase.baseDatos,
       updatedAt: '2026-11-21T00:01:00.000Z',
     };
-    estado.perfiles[estado.perfiles.length - 1] = perfilActualizado;
+    if (indicePerfil >= 0) estado.perfiles[indicePerfil] = perfilActualizado;
     await respuestaJson(perfilActualizado)(ruta);
     return;
   }
   if (url.pathname.endsWith('/test') && metodo === 'POST') {
     estado.resultadosPrueba += 1;
     await respuestaJson({
-      code: estado.resultadosPrueba === 1 ? 'CONNECTED' : 'MYSQL_TLS_FAILED',
+      code:
+        estado.resultadosPrueba === 1
+          ? 'CONNECTED'
+          : estado.resultadosPrueba === 2
+            ? 'MYSQL_TLS_FAILED'
+            : 'DESTINATION_NOT_ALLOWED',
       completedAt: '2026-11-21T00:00:00.000Z',
     })(ruta);
     return;
@@ -251,6 +303,10 @@ async function responderCatalogos(
   }
   if (/\/sap-environments$/u.test(url.pathname) && metodo === 'GET') {
     await respuestaJson([ambienteVisual])(ruta);
+    return;
+  }
+  if (/\/admin\/clients\/[0-9a-f-]+\/access$/iu.test(url.pathname) && metodo === 'GET') {
+    await respuestaJson(accesoClienteVisual)(ruta);
     return;
   }
   await respuestaJson({ code: 'VISUAL_FIXTURE_ROUTE_UNEXPECTED' }, 500)(ruta);
@@ -269,6 +325,7 @@ test('ADMIN navega y revisa perfiles en escritorio y móvil sin datos reales', a
   await page.addInitScript(() => localStorage.setItem('portal-soporte-theme', 'light'));
   await page.route('**/api/v1/auth/me', respuestaJson({ user: administradorVisual }));
   await page.route('**/api/v1/auth/csrf', respuestaJson({ token: tokenCsrf }));
+  await page.route('**/api/v1/admin/users**', respuestaJson([]));
   await page.route('**/api/v1/me/preferences', async (ruta) => {
     if (ruta.request().method() === 'GET') {
       await respuestaJson({ theme: 'light' })(ruta);
@@ -282,6 +339,10 @@ test('ADMIN navega y revisa perfiles en escritorio y móvil sin datos reales', a
   await expect(page.getByRole('heading', { name: 'Clientes', exact: true })).toBeVisible();
   const tarjeta = page.getByRole('article', { name: clienteVisual.nombre });
   await expect(tarjeta).toBeVisible();
+  await expect(page.getByRole('note')).toContainText(
+    'El servidor valida la seguridad de cada destino',
+  );
+  await expect(page.getByRole('note')).not.toContainText('destinos permitidos');
   await page.addStyleTag({ content: 'nextjs-portal { display: none !important; }' });
   await page.screenshot({
     path: join(tmpdir(), 'portal-soporte-ps005-2-clientes-desktop.png'),
@@ -298,6 +359,12 @@ test('ADMIN navega y revisa perfiles en escritorio y móvil sin datos reales', a
   });
   await tarjeta.getByText('Conexiones MySQL', { exact: true }).click();
   await expect(tarjeta.getByLabel('Nombre del perfil')).toBeVisible();
+  await expect(
+    tarjeta.getByText(/Registra aquí el destino MySQL que usas en tu cliente/u),
+  ).toBeVisible();
+  await expect(tarjeta.getByText(/endpoints aprobados por operaciones/u)).toHaveCount(0);
+  await expect(tarjeta.getByText(/aprobado en el servidor/u)).toHaveCount(0);
+  await expect(tarjeta.getByText(/destinos permitidos/u)).toHaveCount(0);
   await page.keyboard.press('Tab');
   await expect(tarjeta.getByLabel('Nombre del perfil')).toBeFocused();
   const secretoSintetico = 'clave-visual-sintetica-no-real';
@@ -321,7 +388,9 @@ test('ADMIN navega y revisa perfiles en escritorio y móvil sin datos reales', a
   await expect(
     perfil.getByRole('heading', { name: 'Perfil creado visual sintético' }),
   ).toBeVisible();
-  await expect(tarjeta.getByRole('status')).toContainText('credenciales no se muestran nuevamente');
+  await expect(
+    tarjeta.getByRole('status').filter({ hasText: 'credenciales no se muestran nuevamente' }),
+  ).toBeVisible();
   const formularioAlta = tarjeta.locator('form.formulario-perfil-conexion').first();
   expect((await formularioAlta.getByLabel('Contraseña MySQL').inputValue()) === '').toBe(true);
   expect(await interfazContieneSecreto(page, secretoSintetico)).toBe(false);
@@ -333,7 +402,8 @@ test('ADMIN navega y revisa perfiles en escritorio y móvil sin datos reales', a
   );
   expect(contieneSecreto(solicitudMySql, secretoSintetico)).toBe(true);
   const perfilMySqlCapturado = estado.solicitudesPerfiles.find(
-    (solicitud) => solicitud.nombre === 'Perfil creado visual sintético',
+    (solicitud) =>
+      solicitud.operacion === 'CREAR' && solicitud.nombre === 'Perfil creado visual sintético',
   );
   expect(perfilMySqlCapturado?.destinoMySql).toEqual({ hostname: 'db.visual.test', port: 3306 });
   expect(perfilMySqlCapturado?.incluyeIdsInternos).toBe(false);
@@ -342,6 +412,11 @@ test('ADMIN navega y revisa perfiles en escritorio y móvil sin datos reales', a
   await expect(perfil.getByRole('status')).toContainText('Conexión verificada.');
   await perfil.getByRole('button', { name: 'Probar conexión' }).click();
   await expect(perfil.getByRole('status')).toContainText('No se pudo validar el certificado TLS.');
+  await perfil.getByRole('button', { name: 'Probar conexión' }).click();
+  await expect(perfil.getByRole('status')).toContainText(
+    'El perfil no tiene un destino completo o no está disponible para esta operación.',
+  );
+  await expect(perfil.getByRole('status')).not.toContainText('configuración del servidor');
 
   await perfil.getByText('Editar perfil y sustituir credenciales').click();
   await perfil.getByLabel('Nombre del perfil').fill('Perfil editado visual sintético');
@@ -377,15 +452,28 @@ test('ADMIN navega y revisa perfiles en escritorio y móvil sin datos reales', a
   await tarjeta.getByLabel('Ruta de conexión').selectOption('MYSQL_SSH');
   await expect(tarjeta.getByLabel('SSH Hostname')).toBeVisible();
   await expect(tarjeta.getByLabel('SSH Port')).toBeVisible();
+  await expect(tarjeta.getByLabel('Huella SHA-256 del servidor SSH')).toHaveAttribute(
+    'required',
+    '',
+  );
+  await expect(tarjeta.getByLabel('Huella SHA-256 del servidor SSH')).toHaveAttribute(
+    'pattern',
+    '^SHA256:[A-Za-z0-9+/]{43}$',
+  );
   await expect(tarjeta.getByLabel('Método de autenticación SSH')).toBeVisible();
   await expect(
     tarjeta.getByLabel('Llave privada SSH (archivo PEM/OpenSSH o PPK v2 RSA)'),
   ).toHaveAttribute('type', 'file');
+  const campoHuellaSsh = tarjeta.getByLabel('Huella SHA-256 del servidor SSH');
+  await tarjeta.getByLabel('SSH Port').press('Tab');
+  await expect(campoHuellaSsh).toBeFocused();
 
   const secretoSshSintetico = 'contraseña-ssh-visual-sintetica';
+  const fingerprintSshVisual = `SHA256:${'A'.repeat(43)}`;
   await formularioAlta.getByLabel('Nombre del perfil').fill('SSH con contraseña sintética');
   await formularioAlta.getByLabel('SSH Hostname').fill('ssh.visual.test');
   await formularioAlta.getByLabel('SSH Port').fill('22');
+  await formularioAlta.getByLabel('Huella SHA-256 del servidor SSH').fill(fingerprintSshVisual);
   await formularioAlta.getByLabel('MySQL Hostname').fill('db.visual.test');
   await formularioAlta.getByLabel('MySQL Port').fill('3306');
   await formularioAlta.getByLabel('Base MySQL').fill('base_visual');
@@ -430,13 +518,48 @@ test('ADMIN navega y revisa perfiles en escritorio y móvil sin datos reales', a
     ),
   ).toBe(true);
   expect(await interfazContieneSecreto(page, secretoSshSintetico)).toBe(false);
+  const perfilSshPasswordCapturado = estado.solicitudesPerfiles.find(
+    (solicitud) => solicitud.operacion === 'CREAR' && solicitud.nombre === nombrePerfilSshPassword,
+  );
+  expect(perfilSshPasswordCapturado?.gatewaySsh).toEqual({
+    hostname: 'ssh.visual.test',
+    port: 22,
+    fingerprint: fingerprintSshVisual,
+  });
   await expect(formularioAlta.getByLabel('Método de autenticación SSH')).toHaveValue('PRIVATE_KEY');
+
+  const articuloSshPassword = tarjeta.getByRole('article', { name: nombrePerfilSshPassword });
+  await articuloSshPassword.getByText('Editar perfil y sustituir credenciales').click();
+  const fingerprintSshActualizada = `SHA256:${'B'.repeat(43)}`;
+  await articuloSshPassword
+    .getByLabel('Huella SHA-256 del servidor SSH')
+    .fill(fingerprintSshActualizada);
+  await articuloSshPassword.getByRole('button', { name: 'Guardar configuración' }).click();
+  await expect
+    .poll(() =>
+      estado.solicitudesPerfiles.some(
+        (solicitud) =>
+          solicitud.operacion === 'ACTUALIZAR' && solicitud.nombre === nombrePerfilSshPassword,
+      ),
+    )
+    .toBe(true);
+  const perfilSshEditado = estado.solicitudesPerfiles.find(
+    (solicitud) =>
+      solicitud.operacion === 'ACTUALIZAR' && solicitud.nombre === nombrePerfilSshPassword,
+  );
+  expect(perfilSshEditado?.gatewaySsh).toEqual({
+    hostname: 'ssh.visual.test',
+    port: 22,
+    fingerprint: fingerprintSshActualizada,
+  });
+  expect(perfilSshEditado?.incluyeIdsInternos).toBe(false);
 
   const contenidoLlaveSintetica =
     '-----BEGIN OPENSSH PRIVATE KEY-----\nLLAVE-SINTETICA-NO-REAL\n-----END OPENSSH PRIVATE KEY-----';
   await formularioAlta.getByLabel('Nombre del perfil').fill('SSH con llave sintética');
   await formularioAlta.getByLabel('SSH Hostname').fill('ssh.visual.test');
   await formularioAlta.getByLabel('SSH Port').fill('22');
+  await formularioAlta.getByLabel('Huella SHA-256 del servidor SSH').fill(fingerprintSshVisual);
   await formularioAlta.getByLabel('MySQL Hostname').fill('db.visual.test');
   await formularioAlta.getByLabel('MySQL Port').fill('3306');
   await formularioAlta.getByLabel('Base MySQL').fill('base_visual');

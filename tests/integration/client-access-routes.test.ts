@@ -298,7 +298,12 @@ function crearPerfilFixture(id: string, clientId: string, displayName: string) {
     profileType: 'MYSQL_TCP' as const,
     environment: 'TEST' as const,
     destinationId: 'mysql-fixture',
+    destinationHostname: 'mysql.soporte-interno.sintetico.test',
+    destinationPort: 3306,
     gatewayId: null,
+    gatewayHostname: null,
+    gatewayPort: null,
+    gatewayFingerprint: null,
     databaseName: 'fixture_db',
     secretEnvelope: {
       version: 1 as const,
@@ -463,6 +468,9 @@ describe('rutas de acceso por cliente sobre PostgreSQL aislado', () => {
     expect(jsonPerfiles).not.toContain('destinoMySqlId');
     expect(jsonPerfiles).not.toContain('gatewaySshId');
     expect(jsonPerfiles).not.toContain('databaseName');
+    expect(jsonPerfiles).not.toContain('mysql.soporte-interno.sintetico.test');
+    expect(jsonPerfiles).not.toContain('destinationHostname');
+    expect(jsonPerfiles).not.toContain('gatewayFingerprint');
   });
 
   it('serializa concesiones concurrentes y conserva una sola asignación activa', async () => {

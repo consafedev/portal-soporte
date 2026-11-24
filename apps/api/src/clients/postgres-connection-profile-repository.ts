@@ -3,6 +3,8 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 import type {
   AltaPerfilConexionPersistido,
   CambiosPerfilConexionPersistidos,
+  EndpointConexionPersistido,
+  GatewaySshPersistido,
   PerfilConexionCliente,
   PerfilConexionPersistido,
   RepositorioPerfilesConexion,
@@ -11,7 +13,7 @@ import type {
 import type { ActorAdministracionClientes } from '../../../../packages/core/src/clients/ports.js';
 import type { ResultadoPruebaConexion } from '../../../../packages/core/src/clients/secret-custody-ports.js';
 import type { BaseDatosAuth } from '../db/client.js';
-import { auditEvents, clientConnectionProfiles } from '../db/schema.js';
+import { auditEvents, clientConnectionProfiles, clients } from '../db/schema.js';
 
 /** Columnas de perfil que se pueden mapear sin cargar la credencial cifrada. */
 type FilaPerfilConexionMapeable = Pick<
@@ -22,7 +24,12 @@ type FilaPerfilConexionMapeable = Pick<
   | 'profileType'
   | 'environment'
   | 'destinationId'
+  | 'destinationHostname'
+  | 'destinationPort'
   | 'gatewayId'
+  | 'gatewayHostname'
+  | 'gatewayPort'
+  | 'gatewayFingerprint'
   | 'databaseName'
   | 'status'
   | 'createdAt'
@@ -44,7 +51,12 @@ export class RepositorioPerfilesConexionPostgres implements RepositorioPerfilesC
         profileType: clientConnectionProfiles.profileType,
         environment: clientConnectionProfiles.environment,
         destinationId: clientConnectionProfiles.destinationId,
+        destinationHostname: clientConnectionProfiles.destinationHostname,
+        destinationPort: clientConnectionProfiles.destinationPort,
         gatewayId: clientConnectionProfiles.gatewayId,
+        gatewayHostname: clientConnectionProfiles.gatewayHostname,
+        gatewayPort: clientConnectionProfiles.gatewayPort,
+        gatewayFingerprint: clientConnectionProfiles.gatewayFingerprint,
         databaseName: clientConnectionProfiles.databaseName,
         status: clientConnectionProfiles.status,
         createdAt: clientConnectionProfiles.createdAt,
@@ -76,7 +88,12 @@ export class RepositorioPerfilesConexionPostgres implements RepositorioPerfilesC
             profileType: entrada.tipo,
             environment: entrada.entorno,
             destinationId: entrada.destinoMySqlId,
+            destinationHostname: entrada.destinoMySql?.hostname ?? null,
+            destinationPort: entrada.destinoMySql?.port ?? null,
             gatewayId: entrada.gatewaySshId,
+            gatewayHostname: entrada.gatewaySsh?.hostname ?? null,
+            gatewayPort: entrada.gatewaySsh?.port ?? null,
+            gatewayFingerprint: entrada.gatewaySsh?.fingerprint ?? null,
             databaseName: entrada.baseDatos,
             secretEnvelope: entrada.sobre,
             status: 'ACTIVE',
@@ -126,7 +143,20 @@ export class RepositorioPerfilesConexionPostgres implements RepositorioPerfilesC
           ...(cambios.destinoMySqlId === undefined
             ? {}
             : { destinationId: cambios.destinoMySqlId }),
+          ...(cambios.destinoMySql === undefined
+            ? {}
+            : {
+                destinationHostname: cambios.destinoMySql?.hostname ?? null,
+                destinationPort: cambios.destinoMySql?.port ?? null,
+              }),
           ...(cambios.gatewaySshId === undefined ? {} : { gatewayId: cambios.gatewaySshId }),
+          ...(cambios.gatewaySsh === undefined
+            ? {}
+            : {
+                gatewayHostname: cambios.gatewaySsh?.hostname ?? null,
+                gatewayPort: cambios.gatewaySsh?.port ?? null,
+                gatewayFingerprint: cambios.gatewaySsh?.fingerprint ?? null,
+              }),
           ...(cambios.baseDatos === undefined ? {} : { databaseName: cambios.baseDatos }),
           ...(cambios.estado === undefined ? {} : { status: cambios.estado }),
           updatedAt: cambios.updatedAt,
@@ -181,7 +211,12 @@ export class RepositorioPerfilesConexionPostgres implements RepositorioPerfilesC
           profileType: clientConnectionProfiles.profileType,
           environment: clientConnectionProfiles.environment,
           destinationId: clientConnectionProfiles.destinationId,
+          destinationHostname: clientConnectionProfiles.destinationHostname,
+          destinationPort: clientConnectionProfiles.destinationPort,
           gatewayId: clientConnectionProfiles.gatewayId,
+          gatewayHostname: clientConnectionProfiles.gatewayHostname,
+          gatewayPort: clientConnectionProfiles.gatewayPort,
+          gatewayFingerprint: clientConnectionProfiles.gatewayFingerprint,
           databaseName: clientConnectionProfiles.databaseName,
           status: clientConnectionProfiles.status,
           createdAt: clientConnectionProfiles.createdAt,
@@ -202,23 +237,25 @@ export class RepositorioPerfilesConexionPostgres implements RepositorioPerfilesC
     });
   }
 
-  /** Recupera el sobre en memoria solo de un perfil activo y del cliente indicado. */
+  /** Recupera el sobre solo si el perfil y su cliente están activos y vinculados. */
   public async obtenerParaPrueba(
     clientId: string,
     profileId: string,
   ): Promise<PerfilConexionPersistido | null> {
     const [fila] = await this.database
-      .select()
+      .select({ perfil: clientConnectionProfiles })
       .from(clientConnectionProfiles)
+      .innerJoin(clients, eq(clients.id, clientConnectionProfiles.clientId))
       .where(
         and(
           eq(clientConnectionProfiles.clientId, clientId),
           eq(clientConnectionProfiles.id, profileId),
           eq(clientConnectionProfiles.status, 'ACTIVE'),
+          eq(clients.status, 'ACTIVE'),
         ),
       )
       .limit(1);
-    return fila === undefined ? null : mapearPerfilPersistido(fila);
+    return fila === undefined ? null : mapearPerfilPersistido(fila.perfil);
   }
 
   /** Registra un resultado sanitizado aun si el conector rechazó o agotó su tiempo. */
@@ -252,6 +289,12 @@ function mapearPerfilConexion(fila: FilaPerfilConexionMapeable): PerfilConexionC
     entorno: fila.environment,
     destinoMySqlId: fila.destinationId,
     gatewaySshId: fila.gatewayId,
+    destinoMySql: mapearEndpointPersistido(fila.destinationHostname, fila.destinationPort),
+    gatewaySsh: mapearGatewayPersistido(
+      fila.gatewayHostname,
+      fila.gatewayPort,
+      fila.gatewayFingerprint,
+    ),
     baseDatos: fila.databaseName,
     estado: fila.status,
     createdAt: fila.createdAt,
@@ -263,7 +306,45 @@ function mapearPerfilConexion(fila: FilaPerfilConexionMapeable): PerfilConexionC
 function mapearPerfilPersistido(
   fila: typeof clientConnectionProfiles.$inferSelect,
 ): PerfilConexionPersistido {
-  return { ...mapearPerfilConexion(fila), sobre: fila.secretEnvelope };
+  return {
+    ...mapearPerfilConexion(fila),
+    sobre: fila.secretEnvelope,
+    destinoMySql: mapearEndpointPersistido(fila.destinationHostname, fila.destinationPort),
+    gatewaySsh: mapearGatewayPersistido(
+      fila.gatewayHostname,
+      fila.gatewayPort,
+      fila.gatewayFingerprint,
+    ),
+  };
+}
+
+/** Convierte hostname y puerto nullable en un endpoint interno o falla ante una fila parcial. */
+function mapearEndpointPersistido(
+  hostname: string | null,
+  puerto: number | null,
+): EndpointConexionPersistido | null {
+  if (hostname === null && puerto === null) {
+    return null;
+  }
+  if (hostname === null || puerto === null || !Number.isInteger(puerto)) {
+    throw new Error('CONNECTION_PROFILE_DESTINATION_INCOMPLETE');
+  }
+  return { hostname, port: puerto };
+}
+
+/** Convierte el gateway nullable en un endpoint SSH completo y verifica su fingerprint presente. */
+function mapearGatewayPersistido(
+  hostname: string | null,
+  puerto: number | null,
+  fingerprint: string | null,
+): GatewaySshPersistido | null {
+  if (hostname === null && puerto === null && fingerprint === null) {
+    return null;
+  }
+  if (hostname === null || puerto === null || fingerprint === null || !Number.isInteger(puerto)) {
+    throw new Error('CONNECTION_PROFILE_GATEWAY_INCOMPLETE');
+  }
+  return { hostname, port: puerto, fingerprint };
 }
 
 /** Registra metadatos auditables sin nombres, usuarios, hosts ni valores secretos. */

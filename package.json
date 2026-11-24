@@ -20,7 +20,7 @@
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "typecheck": "corepack pnpm@12.21.0 -r --workspace-concurrency=2 --if-present run typecheck && corepack pnpm@12.21.0 exec tsc --noEmit -p tsconfig.tests.json",
-    "test": "vitest run",
+    "test": "corepack pnpm@12.21.0 --filter @portal-soporte/connectors run build && corepack pnpm@12.21.0 exec vitest run",
     "test:mysql-fixture": "bash scripts/with-mysql-fixture.sh",
     "test:integration": "corepack pnpm@12.21.0 --filter @portal-soporte/api run build && node scripts/with-test-postgres.ts",
     "test:integration:remote": "corepack pnpm@12.21.0 --filter @portal-soporte/api run build && node --env-file=.env.infra-001.local scripts/with-test-postgres.ts",

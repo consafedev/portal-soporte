@@ -41,8 +41,22 @@ export interface SobreSecretoCifrado {
   readonly tagDato: string;
 }
 
-/** Tipo de perfil MySQL y ruta de red elegidos en el catálogo, no por el navegador. */
+/** Tipo de perfil MySQL y ruta de red persistidos en el catálogo del Portal. */
 export type TipoPerfilConexionMySql = 'MYSQL_TCP' | 'MYSQL_SSH';
+
+/** Endpoint configurado por ADMIN dentro del perfil, antes de resolver DNS. */
+export interface EndpointMySqlPerfil {
+  /** Hostname DNS o literal IP validado y persistido en el Portal. */
+  readonly hostname: string;
+  /** Puerto MySQL validado y persistido en el Portal. */
+  readonly port: number;
+}
+
+/** Gateway SSH configurado por ADMIN junto con una huella confirmada. */
+export interface GatewaySshPerfil extends EndpointMySqlPerfil {
+  /** Fingerprint OpenSSH SHA-256 verificada para cada handshake SSH. */
+  readonly fingerprint: string;
+}
 
 /** Datos no secretos de un perfil autorizable por el broker de conexiones. */
 export interface PerfilConexionPrueba {
@@ -50,12 +64,16 @@ export interface PerfilConexionPrueba {
   readonly id: string;
   /** UUID del cliente propietario del perfil. */
   readonly clientId: string;
-  /** Ruta de red admitida por la configuración operacional. */
+  /** Ruta de conexión persistida en el perfil. */
   readonly tipo: TipoPerfilConexionMySql;
-  /** Identificador de destino MySQL de la allowlist externa. */
-  readonly destinoMySqlId: string;
-  /** Identificador del gateway SSH aprobado cuando el perfil usa túnel. */
+  /** Identificador de allowlist conservado solo para perfiles legacy. */
+  readonly destinoMySqlId?: string;
+  /** Identificador de gateway conservado solo para perfiles legacy. */
   readonly gatewaySshId?: string;
+  /** Endpoint por perfil; su IP se resuelve y valida en cada operación. */
+  readonly destinoMySql?: EndpointMySqlPerfil;
+  /** Gateway persistido; obligatorio junto con destinoMySql para MYSQL_SSH. */
+  readonly gatewaySsh?: GatewaySshPerfil;
   /** Nombre de la base seleccionada por ADMIN, validado y limitado. */
   readonly baseDatos: string;
 }
@@ -158,14 +176,14 @@ export interface SesionLecturaRf1 {
 export interface ClientConnectionBroker {
   /**
    * Ejecuta exclusivamente la prueba de solo lectura `SELECT 1` y borra el paquete recibido.
-   * @param perfil Perfil allowlisted.
+   * @param perfil Perfil persistido con endpoint propio o referencia legacy autorizada.
    * @param secretos Buffer mutable de credenciales que se borra.
    * @returns Resultado sanitizado de conectividad.
    */
   probar(perfil: PerfilConexionPrueba, secretos: Uint8Array): Promise<ResultadoPruebaConexion>;
   /**
    * Abre una sesión RF-1 con lecturas tipadas, cancelación y sin exponer SQL arbitrario.
-   * @param perfil Perfil allowlisted.
+   * @param perfil Perfil persistido con endpoint propio o referencia legacy autorizada.
    * @param secretos Buffer mutable de credenciales que se borra.
    * @param senal Cancelación de la solicitud autorizada.
    * @returns Sesión limitada que el llamador debe cerrar en `finally`.

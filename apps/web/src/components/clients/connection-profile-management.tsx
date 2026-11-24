@@ -85,6 +85,7 @@ export function AdministracionPerfilesConexion({
   const [mysqlPort, setMysqlPort] = useState('3306');
   const [sshHostname, setSshHostname] = useState('');
   const [sshPort, setSshPort] = useState('22');
+  const [sshFingerprint, setSshFingerprint] = useState('');
   const [baseDatos, setBaseDatos] = useState('');
   const [credenciales, setCredenciales] = useState<ValoresCredenciales>(CREDENCIALES_VACIAS);
 
@@ -116,6 +117,7 @@ export function AdministracionPerfilesConexion({
     if (siguiente === 'MYSQL_TCP') {
       setSshHostname('');
       setSshPort('22');
+      setSshFingerprint('');
       setCredenciales((actuales) => ({
         ...actuales,
         sshUsername: '',
@@ -141,7 +143,13 @@ export function AdministracionPerfilesConexion({
         entorno,
         destinoMySql: { hostname: mysqlHostname.trim(), port: Number(mysqlPort) },
         ...(tipo === 'MYSQL_SSH'
-          ? { gatewaySsh: { hostname: sshHostname.trim(), port: Number(sshPort) } }
+          ? {
+              gatewaySsh: {
+                hostname: sshHostname.trim(),
+                port: Number(sshPort),
+                fingerprint: sshFingerprint.trim(),
+              },
+            }
           : {}),
         baseDatos,
         credenciales: construirCredenciales(credenciales, tipo),
@@ -152,6 +160,7 @@ export function AdministracionPerfilesConexion({
       setMysqlPort('3306');
       setSshHostname('');
       setSshPort('22');
+      setSshFingerprint('');
       setBaseDatos('');
       await cargarPerfiles();
       setMensaje('Perfil de conexión registrado. Las credenciales no se muestran nuevamente.');
@@ -232,9 +241,9 @@ export function AdministracionPerfilesConexion({
         <summary id={`perfiles-${clientId}`}>Conexiones MySQL</summary>
         <div className="contenido-perfiles-conexion">
           <p className="texto-secundario">
-            Configura hostname y puerto como en tu cliente MySQL. El servidor solo conecta a los
-            endpoints aprobados por operaciones. Las pruebas ejecutan <code>SELECT 1</code>; nunca
-            se muestran credenciales guardadas.
+            Registra aquí el destino MySQL que usas en tu cliente. Confirma la identidad del
+            servidor SSH por un canal confiable antes de guardar su huella. Probar conexión ejecuta
+            solo <code>SELECT 1</code>; las credenciales guardadas no se muestran.
           </p>
           {!clienteActivo ? (
             <p className="nota-conectividad" role="status">
@@ -309,7 +318,7 @@ export function AdministracionPerfilesConexion({
                 onChange={(evento) => setMysqlPort(evento.currentTarget.value)}
               />
               <span className="ayuda-campo">
-                El endpoint debe coincidir con uno aprobado en el servidor.
+                Usa el hostname y el puerto configurados en tu cliente MySQL.
               </span>
             </div>
             {tipo === 'MYSQL_SSH' ? (
@@ -336,6 +345,28 @@ export function AdministracionPerfilesConexion({
                     value={sshPort}
                     onChange={(evento) => setSshPort(evento.currentTarget.value)}
                   />
+                </div>
+                <div className="campo">
+                  <label htmlFor={`perfil-ssh-fingerprint-${clientId}`}>
+                    Huella SHA-256 del servidor SSH
+                  </label>
+                  <input
+                    id={`perfil-ssh-fingerprint-${clientId}`}
+                    type="text"
+                    autoComplete="off"
+                    maxLength={50}
+                    pattern="^SHA256:[A-Za-z0-9+/]{43}$"
+                    title="Usa SHA256: seguido de 43 caracteres Base64 sin signo igual final."
+                    aria-describedby={`perfil-ssh-fingerprint-ayuda-${clientId}`}
+                    required
+                    value={sshFingerprint}
+                    onChange={(evento) => setSshFingerprint(evento.currentTarget.value)}
+                  />
+                  <span id={`perfil-ssh-fingerprint-ayuda-${clientId}`} className="ayuda-campo">
+                    Obtén la huella de la clave pública del host con{' '}
+                    <code>ssh-keygen -lf clave-publica-host -E sha256</code> y confírmala por un
+                    canal independiente. Formato esperado: SHA256: y 43 caracteres.
+                  </span>
                 </div>
               </>
             ) : null}
@@ -673,6 +704,7 @@ function FilaPerfilConexion({
   const [mysqlPort, setMysqlPort] = useState(String(perfil.destinoMySql?.port ?? 3306));
   const [sshHostname, setSshHostname] = useState(perfil.gatewaySsh?.hostname ?? '');
   const [sshPort, setSshPort] = useState(String(perfil.gatewaySsh?.port ?? 22));
+  const [sshFingerprint, setSshFingerprint] = useState(perfil.gatewaySsh?.fingerprint ?? '');
   const [baseDatos, setBaseDatos] = useState(perfil.baseDatos);
   const [nuevasCredenciales, setNuevasCredenciales] =
     useState<ValoresCredenciales>(CREDENCIALES_VACIAS);
@@ -692,7 +724,13 @@ function FilaPerfilConexion({
       entorno,
       destinoMySql: { hostname: mysqlHostname.trim(), port: Number(mysqlPort) },
       ...(perfil.tipo === 'MYSQL_SSH'
-        ? { gatewaySsh: { hostname: sshHostname.trim(), port: Number(sshPort) } }
+        ? {
+            gatewaySsh: {
+              hostname: sshHostname.trim(),
+              port: Number(sshPort),
+              fingerprint: sshFingerprint.trim(),
+            },
+          }
         : {}),
       baseDatos,
     };
@@ -836,6 +874,27 @@ function FilaPerfilConexion({
                     onChange={(evento) => setSshPort(evento.currentTarget.value)}
                   />
                 </div>
+                <div className="campo">
+                  <label htmlFor={`editar-ssh-fingerprint-${perfil.id}`}>
+                    Huella SHA-256 del servidor SSH
+                  </label>
+                  <input
+                    id={`editar-ssh-fingerprint-${perfil.id}`}
+                    type="text"
+                    autoComplete="off"
+                    maxLength={50}
+                    pattern="^SHA256:[A-Za-z0-9+/]{43}$"
+                    title="Usa SHA256: seguido de 43 caracteres Base64 sin signo igual final."
+                    aria-describedby={`editar-ssh-fingerprint-ayuda-${perfil.id}`}
+                    required
+                    value={sshFingerprint}
+                    onChange={(evento) => setSshFingerprint(evento.currentTarget.value)}
+                  />
+                  <span id={`editar-ssh-fingerprint-ayuda-${perfil.id}`} className="ayuda-campo">
+                    Confirma la huella de la clave pública del host por un canal independiente.
+                    Formato esperado: SHA256: y 43 caracteres.
+                  </span>
+                </div>
               </>
             ) : null}
             <div className="campo">
@@ -945,7 +1004,8 @@ function traducirResultadoPrueba(codigo: string): string {
   const mensajes: Readonly<Record<string, string>> = {
     CONNECTED: 'Conexión verificada.',
     CONNECTOR_BUSY: 'Hay otra prueba en curso.',
-    DESTINATION_NOT_ALLOWED: 'El destino no está autorizado por la configuración del servidor.',
+    DESTINATION_NOT_ALLOWED:
+      'El perfil no tiene un destino completo o no está disponible para esta operación.',
     INVALID_CREDENTIALS: 'Las credenciales o el formato de llave no son compatibles.',
     SSH_KEY_FORMAT_UNSUPPORTED: 'La llave SSH debe ser PEM/OpenSSH o PuTTY PPK v2 RSA.',
     SSH_KEY_INVALID: 'La llave SSH no se pudo validar; revisa formato y passphrase.',

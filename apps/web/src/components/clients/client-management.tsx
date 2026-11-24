@@ -189,8 +189,8 @@ export function AdministracionClientes(): JSX.Element {
       </section>
 
       <p className="nota-conectividad" role="note">
-        Las pruebas de conexión son de solo lectura y requieren destinos permitidos y custodia de
-        llaves configurados de forma segura en el servidor.
+        Las pruebas son de solo lectura: ejecutan SELECT 1. El servidor valida la seguridad de cada
+        destino y la custodia de credenciales.
       </p>
     </div>
   );

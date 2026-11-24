@@ -89,8 +89,13 @@ type ColumnasPerfilConexionRestricciones = {
   databaseName: AnyPgColumn;
   clientId: AnyPgColumn;
   destinationId: AnyPgColumn;
+  destinationHostname: AnyPgColumn;
+  destinationPort: AnyPgColumn;
   displayName: AnyPgColumn;
   gatewayId: AnyPgColumn;
+  gatewayHostname: AnyPgColumn;
+  gatewayPort: AnyPgColumn;
+  gatewayFingerprint: AnyPgColumn;
   profileType: AnyPgColumn;
   environment: AnyPgColumn;
   status: AnyPgColumn;
@@ -294,6 +299,18 @@ function definirRestriccionesPerfilConexion(columnas: ColumnasPerfilConexionRest
       'client_connection_profiles_gateway_check',
       sql`(${columnas.profileType} = 'MYSQL_SSH' AND ${columnas.gatewayId} ~ '^[a-z0-9][a-z0-9_-]{0,63}$') OR (${columnas.profileType} = 'MYSQL_TCP' AND ${columnas.gatewayId} IS NULL)`,
     ),
+    destinoEndpointCompleto: check(
+      'client_connection_profiles_destination_endpoint_check',
+      sql`(${columnas.destinationHostname} IS NULL AND ${columnas.destinationPort} IS NULL) OR (${columnas.destinationHostname} IS NOT NULL AND btrim(${columnas.destinationHostname}) <> '' AND ${columnas.destinationPort} BETWEEN 1 AND 65535)`,
+    ),
+    gatewayEndpointCoherente: check(
+      'client_connection_profiles_gateway_endpoint_check',
+      sql`(${columnas.destinationHostname} IS NULL AND ${columnas.destinationPort} IS NULL AND ${columnas.gatewayHostname} IS NULL AND ${columnas.gatewayPort} IS NULL AND ${columnas.gatewayFingerprint} IS NULL) OR (${columnas.profileType} = 'MYSQL_TCP' AND ${columnas.destinationHostname} IS NOT NULL AND ${columnas.destinationPort} BETWEEN 1 AND 65535 AND ${columnas.gatewayHostname} IS NULL AND ${columnas.gatewayPort} IS NULL AND ${columnas.gatewayFingerprint} IS NULL) OR (${columnas.profileType} = 'MYSQL_SSH' AND ${columnas.destinationHostname} IS NOT NULL AND ${columnas.destinationPort} BETWEEN 1 AND 65535 AND ${columnas.gatewayHostname} IS NOT NULL AND btrim(${columnas.gatewayHostname}) <> '' AND ${columnas.gatewayPort} BETWEEN 1 AND 65535 AND ${columnas.gatewayFingerprint} ~ '^SHA256:[A-Za-z0-9+/]{43}$')`,
+    ),
+    endpointPerfilCompleto: check(
+      'client_connection_profiles_complete_endpoint_check',
+      sql`(${columnas.destinationHostname} IS NULL AND ${columnas.destinationPort} IS NULL AND ${columnas.gatewayHostname} IS NULL AND ${columnas.gatewayPort} IS NULL AND ${columnas.gatewayFingerprint} IS NULL) OR (${columnas.profileType} = 'MYSQL_TCP' AND ${columnas.destinationHostname} IS NOT NULL AND btrim(${columnas.destinationHostname}) <> '' AND ${columnas.destinationPort} IS NOT NULL AND ${columnas.destinationPort} BETWEEN 1 AND 65535 AND ${columnas.gatewayHostname} IS NULL AND ${columnas.gatewayPort} IS NULL AND ${columnas.gatewayFingerprint} IS NULL) OR (${columnas.profileType} = 'MYSQL_SSH' AND ${columnas.destinationHostname} IS NOT NULL AND btrim(${columnas.destinationHostname}) <> '' AND ${columnas.destinationPort} IS NOT NULL AND ${columnas.destinationPort} BETWEEN 1 AND 65535 AND ${columnas.gatewayHostname} IS NOT NULL AND btrim(${columnas.gatewayHostname}) <> '' AND ${columnas.gatewayPort} IS NOT NULL AND ${columnas.gatewayPort} BETWEEN 1 AND 65535 AND ${columnas.gatewayFingerprint} IS NOT NULL AND ${columnas.gatewayFingerprint} ~ '^SHA256:[A-Za-z0-9+/]{43}$')`,
+    ),
   };
 }
 
@@ -386,7 +403,12 @@ export const clientConnectionProfiles = esquemaPortal.table(
     profileType: text('profile_type').$type<'MYSQL_TCP' | 'MYSQL_SSH'>().notNull(),
     environment: text('environment').$type<'PRODUCTION' | 'TEST'>().notNull(),
     destinationId: varchar('destination_id', { length: 64 }).notNull(),
+    destinationHostname: varchar('destination_hostname', { length: 253 }),
+    destinationPort: integer('destination_port'),
     gatewayId: varchar('gateway_id', { length: 64 }),
+    gatewayHostname: varchar('gateway_hostname', { length: 253 }),
+    gatewayPort: integer('gateway_port'),
+    gatewayFingerprint: varchar('gateway_fingerprint', { length: 50 }),
     databaseName: varchar('database_name', { length: 64 }).notNull(),
     secretEnvelope: jsonb('secret_envelope').$type<SobreSecretoCifrado>().notNull(),
     status: text('status').$type<'ACTIVE' | 'DISABLED'>().notNull().default('ACTIVE'),

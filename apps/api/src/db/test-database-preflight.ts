@@ -220,8 +220,11 @@ const restriccionesMigradasEsperadas = [
   ['client_connection_profiles', 'client_connection_profiles_status_check', 'c'],
   ['client_connection_profiles', 'client_connection_profiles_name_check', 'c'],
   ['client_connection_profiles', 'client_connection_profiles_destination_check', 'c'],
+  ['client_connection_profiles', 'client_connection_profiles_destination_endpoint_check', 'c'],
   ['client_connection_profiles', 'client_connection_profiles_database_check', 'c'],
   ['client_connection_profiles', 'client_connection_profiles_gateway_check', 'c'],
+  ['client_connection_profiles', 'client_connection_profiles_gateway_endpoint_check', 'c'],
+  ['client_connection_profiles', 'client_connection_profiles_complete_endpoint_check', 'c'],
   ['client_user_assignments', 'client_user_assignments_client_id_clients_id_fk', 'f'],
   ['client_user_assignments', 'client_user_assignments_granted_by_user_id_users_id_fk', 'f'],
   ['client_user_assignments', 'client_user_assignments_pkey', 'p'],
@@ -253,16 +256,20 @@ const restriccionesMigradasEsperadas = [
   tipo: tipo!,
 }));
 
-/** Estado exacto de 0007 justo antes de retirar la restricción de execute en 0008. */
-const restriccionesPreviasRf1ExecuteEsperadas = [
-  ...restriccionesMigradasEsperadas,
-  {
-    esquema: 'portal',
-    tabla: 'client_capabilities',
-    nombre: 'client_capabilities_execute_disabled_check',
-    tipo: 'c',
-  },
-].sort(compararRestricciones);
+/** Estado exacto 0008, anterior a las migraciones aditivas de destinos 0009 y 0010. */
+const restriccionesPreviasDestinos0008Esperadas = restriccionesMigradasEsperadas
+  .filter(
+    ({ nombre }) =>
+      nombre !== 'client_connection_profiles_destination_endpoint_check' &&
+      nombre !== 'client_connection_profiles_gateway_endpoint_check' &&
+      nombre !== 'client_connection_profiles_complete_endpoint_check',
+  )
+  .sort(compararRestricciones);
+
+/** Estado exacto 0009, anterior a la restricción completa correctiva 0010. */
+const restriccionesPreviasDestinos0009Esperadas = restriccionesMigradasEsperadas
+  .filter(({ nombre }) => nombre !== 'client_connection_profiles_complete_endpoint_check')
+  .sort(compararRestricciones);
 
 /**
  * Consulta y valida en modo read-only la identidad del rol PostgreSQL de pruebas.
@@ -590,7 +597,7 @@ export function validarMismaInstanciaBasePrueba(
 }
 
 /**
- * Acepta una base nueva, el estado exacto anterior a 0008 o el esquema actual vacío.
+ * Acepta una base nueva, el estado exacto 0008/0009 pendiente o el esquema completo vacío.
  * @param estado Inventario de catálogos y conteos obtenidos en modo read-only.
  * @param hashesEsperados Hashes de migración calculados desde los archivos versionados.
  * @returns Estado vacío, inmediatamente anterior a una migración o ya migrado.
@@ -659,40 +666,41 @@ export function validarEstadoEsquemaBasePrueba(
   const relacionesActualesEsperadas =
     JSON.stringify(relaciones) ===
     JSON.stringify([...relacionesMigradasEsperadas].sort(compararObjetosEsquema));
-  const restriccionesPreviasRf1ExecuteActuales =
-    JSON.stringify(restricciones) === JSON.stringify(restriccionesPreviasRf1ExecuteEsperadas);
+  const restriccionesPreviasDestinos0008Actuales =
+    JSON.stringify(restricciones) === JSON.stringify(restriccionesPreviasDestinos0008Esperadas);
+  const restriccionesPreviasDestinos0009Actuales =
+    JSON.stringify(restricciones) === JSON.stringify(restriccionesPreviasDestinos0009Esperadas);
   const restriccionesActualesEsperadas =
     JSON.stringify(restricciones) === JSON.stringify(restriccionesEsperadas);
   const secuenciasEsperadasExactas =
     JSON.stringify(secuencias) ===
     JSON.stringify([...secuenciasEsperadas].sort(compararObjetosEsquema));
   const ledgerActualEsperado = coincidenHashesDeMigracion(hashes, hashesEsperados);
-  const ledgerAnteriorEsperado = coincidenHashesDeMigracion(hashes, hashesEsperados.slice(0, -1));
-  const esquemaPrevioRf1ExecuteSeguro =
+  const esquemaBaseVersionadaSinDatosSegura =
     hashesEsperados.length > 0 &&
     esquemasPortalEsperados &&
     tablasActualesEsperadas &&
     secuenciasEsperadasExactas &&
     relacionesActualesEsperadas &&
-    restriccionesPreviasRf1ExecuteActuales &&
-    ledgerAnteriorEsperado &&
     objetosAdicionalesLimpios &&
     filasSinDatos &&
     estado.filas.invariantes === 1;
-  if (esquemaPrevioRf1ExecuteSeguro) {
+  const ledger0008Esperado = coincidenHashesDeMigracion(hashes, hashesEsperados.slice(0, -2));
+  const ledger0009Esperado = coincidenHashesDeMigracion(hashes, hashesEsperados.slice(0, -1));
+  const esquemaPrevio0008Seguro =
+    esquemaBaseVersionadaSinDatosSegura &&
+    restriccionesPreviasDestinos0008Actuales &&
+    ledger0008Esperado;
+  const esquemaPrevio0009Seguro =
+    esquemaBaseVersionadaSinDatosSegura &&
+    restriccionesPreviasDestinos0009Actuales &&
+    ledger0009Esperado;
+  if (esquemaPrevio0008Seguro || esquemaPrevio0009Seguro) {
     return 'migracion-pendiente';
   }
 
   const estadoMigrado =
-    esquemasPortalEsperados &&
-    tablasActualesEsperadas &&
-    secuenciasEsperadasExactas &&
-    relacionesActualesEsperadas &&
-    restriccionesActualesEsperadas &&
-    ledgerActualEsperado &&
-    objetosAdicionalesLimpios &&
-    filasSinDatos &&
-    estado.filas.invariantes === 1;
+    esquemaBaseVersionadaSinDatosSegura && restriccionesActualesEsperadas && ledgerActualEsperado;
 
   if (!estadoMigrado) {
     const diferencias = [
