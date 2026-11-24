@@ -1517,6 +1517,96 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+.zona-carga-rf1 {
+  position: relative;
+  display: grid;
+  min-height: 7rem;
+  align-content: center;
+  justify-items: center;
+  gap: 0.35rem;
+  overflow-wrap: anywhere;
+  padding: 1.25rem;
+  border: 1px dashed var(--borde);
+  border-radius: 0.85rem;
+  color: var(--texto);
+  background: var(--superficie-secundaria);
+  cursor: pointer;
+  text-align: center;
+  transition:
+    border-color 160ms ease-out,
+    background-color 160ms ease-out,
+    transform 160ms ease-out;
+}
+
+.zona-carga-rf1:hover,
+.zona-carga-rf1-activa {
+  border-color: var(--acento);
+  background: color-mix(in srgb, var(--acento) 9%, var(--superficie));
+}
+
+.zona-carga-rf1:active {
+  transform: scale(0.995);
+}
+
+.zona-carga-rf1:focus-within {
+  outline: 0.2rem solid var(--foco);
+  outline-offset: 0.18rem;
+}
+
+.selector-archivos-rf1 {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.selector-modo-rf1,
+.referencias-factura-rf1 {
+  display: grid;
+  gap: 0.85rem;
+  min-width: 0;
+  margin: 0;
+  padding: 1rem;
+  border: 1px solid var(--borde);
+  border-radius: 0.75rem;
+}
+
+.selector-modo-rf1 legend,
+.referencias-factura-rf1 legend {
+  padding-inline: 0.35rem;
+  font-weight: 650;
+}
+
+.selector-modo-rf1 > label {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  cursor: pointer;
+}
+
+.selector-modo-rf1 > p {
+  margin: 0;
+}
+
+.lista-documentos-rf1 {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.referencias-factura-grid-rf1 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zona-carga-rf1 {
+    transition: none;
+  }
+}
+
 .seccion-resultados-rf1 {
   display: grid;
   min-width: 0;
@@ -1603,6 +1693,10 @@ button:disabled {
     align-items: flex-start;
     flex-direction: column;
     gap: 0.1rem;
+  }
+
+  .referencias-factura-grid-rf1 {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .formulario-rf1 > button {

@@ -24,7 +24,10 @@ import { ServicioVistaPreviaRf1 } from '../../apps/api/src/clients/rf1-preview-s
 import { ServicioInsercionRf1 } from '../../apps/api/src/clients/rf1-insertion-service.js';
 import { PostgresAuthRepository } from '../../apps/api/src/auth/postgres-auth-repository.js';
 import { ServicioPreferenciasUsuario } from '../../packages/core/src/preferences/service.js';
-import type { SeleccionSociedadArchivoRf1Contrato } from '../../packages/contracts/src/clients.js';
+import type {
+  DocumentosFacturaRf1Contrato,
+  SeleccionSociedadArchivoRf1Contrato,
+} from '../../packages/contracts/src/clients.js';
 import { RepositorioPreferenciasUsuarioPostgres } from '../../apps/api/src/preferences/postgres-user-preferences-repository.js';
 import { crearServidorAuth } from '../../apps/api/src/server.js';
 import type { RelojAuth } from '../../packages/core/src/auth/ports.js';
@@ -172,6 +175,7 @@ function crearMultipart(
   archivos: readonly Buffer[],
   boundary = 'rf1-fixture-boundary',
   seleccionesSociedad?: readonly SeleccionSociedadArchivoRf1Contrato[],
+  documentos?: readonly DocumentosFacturaRf1Contrato[],
 ): { readonly boundary: string; readonly payload: Buffer } {
   const partes: Buffer[] = [];
   for (const archivo of archivos) {
@@ -190,6 +194,13 @@ function crearMultipart(
       ),
     );
   }
+  if (documentos !== undefined) {
+    partes.push(
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="documentos"\r\n\r\n${JSON.stringify(documentos)}\r\n`,
+      ),
+    );
+  }
   partes.push(Buffer.from(`--${boundary}--\r\n`));
   return { boundary, payload: Buffer.concat(partes) };
 }
@@ -199,6 +210,7 @@ function crearMultipart(
  * @param archivos - XML sintéticos del mismo lote.
  * @param profileId - Perfil perteneciente al cliente fixture.
  * @param seleccionesSociedad - Selecciones por índice opcionales del lote.
+ * @param documentos - Referencias opcionales por factura.
  * @returns Respuesta inyectada de Fastify, sin contactar clientes externos.
  */
 async function enviarLote(
@@ -206,11 +218,13 @@ async function enviarLote(
   archivos: readonly Buffer[],
   profileId = idPerfil,
   seleccionesSociedad?: readonly SeleccionSociedadArchivoRf1Contrato[],
+  documentos?: readonly DocumentosFacturaRf1Contrato[],
 ) {
   const { boundary, payload } = crearMultipart(
     archivos,
     'rf1-fixture-boundary',
     seleccionesSociedad,
+    documentos,
   );
   return exigirAplicacion().inject({
     method: 'POST',
@@ -590,6 +604,27 @@ describe('vista previa RF-1 con autorización y PostgreSQL aislado', () => {
     expect(indiceDuplicado.statusCode).toBe(400);
     expect(indiceDuplicado.json()).toMatchObject({ code: 'MULTIPART_SELECTION_INVALID' });
     expect(aperturasBroker).toBe(aperturasAntes);
+  });
+
+  it('valida las referencias opcionales existentes antes de consultar el broker', async () => {
+    const antes = aperturasBroker;
+    const archivo = crearXmlSintetico();
+    const aceptada = await enviarLote(cookieAdmin, [archivo], idPerfil, undefined, [
+      { indiceArchivo: 0, ordenCompra: 'OC-SINTETICA' },
+    ]);
+    const indiceFueraDelLote = await enviarLote(cookieAdmin, [archivo], idPerfil, undefined, [
+      { indiceArchivo: 1, entradaMercancia: 'EM-SINTETICA' },
+    ]);
+    const longitudExcedida = await enviarLote(cookieAdmin, [archivo], idPerfil, undefined, [
+      { indiceArchivo: 0, documentoContable: '12345678901' },
+    ]);
+
+    expect(aceptada.statusCode).toBe(200);
+    expect(indiceFueraDelLote.statusCode).toBe(400);
+    expect(indiceFueraDelLote.json()).toMatchObject({ code: 'MULTIPART_DOCUMENTS_INVALID' });
+    expect(longitudExcedida.statusCode).toBe(400);
+    expect(longitudExcedida.json()).toMatchObject({ code: 'MULTIPART_DOCUMENTS_INVALID' });
+    expect(aperturasBroker).toBe(antes + 1);
   });
 
   it('bloquea una sociedad/ambiente falsificado que no devolvió el catálogo', async () => {

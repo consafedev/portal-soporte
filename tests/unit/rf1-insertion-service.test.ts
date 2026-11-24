@@ -208,6 +208,55 @@ describe('servicio de inserción RF-1 con autorización y confirmación efímera
     expect(perfiles.abrirInsercionRf1).not.toHaveBeenCalled();
   });
 
+  it('liga las referencias opcionales al token de confirmación de la vista previa', async () => {
+    const { servicio, perfiles } = crearDependencias({ enabled: true });
+    const solicitudConReferencias = {
+      ...SOLICITUD,
+      documentos: [{ indiceArchivo: 0, ordenCompra: 'OC-SINTETICA-1' }],
+    };
+    const confirmado = await servicio.prepararConfirmacion(solicitudConReferencias, [VISTA_LISTA]);
+    const solicitudAlterada = {
+      ...solicitudConReferencias,
+      documentos: [{ indiceArchivo: 0, ordenCompra: 'OC-SINTETICA-2' }],
+    };
+
+    await expect(
+      servicio.ejecutar(solicitudAlterada, confirmado.confirmationToken!),
+    ).rejects.toMatchObject({ code: 'RF1_CONFIRMATION_INVALID', statusCode: 409 });
+    expect(perfiles.abrirInsercionRf1).not.toHaveBeenCalled();
+  });
+
+  it('mapea las cuatro referencias opcionales a los campos existentes del ejecutor', async () => {
+    const { servicio, insertar } = crearDependencias({ enabled: true });
+    const solicitudConReferencias = {
+      ...SOLICITUD,
+      documentos: [
+        {
+          indiceArchivo: 0,
+          ordenCompra: 'OC-SINTETICA',
+          entradaMercancia: 'EM-SINTETICA',
+          documentoContable: 'DC-SINTETICO',
+          documentoPago: 'DP-SINTETICO',
+        },
+      ],
+    };
+    const confirmado = await servicio.prepararConfirmacion(solicitudConReferencias, [VISTA_LISTA]);
+
+    await servicio.ejecutar(solicitudConReferencias, confirmado.confirmationToken!);
+
+    expect(insertar).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentos: {
+          ordenCompra: 'OC-SINTETICA',
+          entradaMercancia: 'EM-SINTETICA',
+          documentoContable: 'DC-SINTETICO',
+          documentoPago: 'DP-SINTETICO',
+        },
+      }),
+      expect.any(Function),
+    );
+  });
+
   it('no abre una conexión de escritura si no puede auditar la solicitud confirmada', async () => {
     const { servicio, perfiles, auditoria } = crearDependencias({ enabled: true });
     const confirmado = await servicio.prepararConfirmacion(SOLICITUD, [VISTA_LISTA]);

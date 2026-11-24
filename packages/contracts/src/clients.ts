@@ -552,6 +552,32 @@ export const seleccionesSociedadRf1Schema = Type.Array(seleccionSociedadArchivoR
   description: 'Selecciones explícitas indexadas en el mismo orden que los archivos recibidos.',
 });
 
+/** Etiquetas operativas opcionales que se mapean a columnas ya existentes de factura. */
+export const documentosFacturaRf1Schema = Type.Object(
+  {
+    indiceArchivo: Type.Integer({ minimum: 0, maximum: 99 }),
+    ordenCompra: Type.Optional(Type.String({ maxLength: 2000 })),
+    entradaMercancia: Type.Optional(Type.String({ maxLength: 2000 })),
+    documentoContable: Type.Optional(Type.String({ maxLength: 10 })),
+    documentoPago: Type.Optional(Type.String({ maxLength: 10 })),
+  },
+  {
+    additionalProperties: false,
+    description:
+      'Valores opcionales de interfaz asociados a columnas existentes, ligados por índice al CFDI.',
+  },
+);
+
+/** Tipo de las referencias opcionales para un CFDI dentro de un lote. */
+export type DocumentosFacturaRf1Contrato = Static<typeof documentosFacturaRf1Schema>;
+
+/** Lista acotada de referencias opcionales por archivo para vista previa y confirmación. */
+export const documentosArchivosRf1Schema = Type.Array(documentosFacturaRf1Schema, {
+  minItems: 1,
+  maxItems: 100,
+  description: 'Campos opcionales de factura existentes asociados a cada índice de archivo.',
+});
+
 /** Campos fiscales serializables que puede presentar la vista previa sin XML original. */
 const facturaVistaPreviaRf1Schema = Type.Object(
   {

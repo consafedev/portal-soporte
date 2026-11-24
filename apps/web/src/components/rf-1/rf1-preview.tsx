@@ -2,8 +2,10 @@
 
 import {
   useEffect,
+  useRef,
   useState,
   type ChangeEvent,
+  type DragEvent,
   type JSX,
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
@@ -11,15 +13,11 @@ import type {
   EstatusVistaPreviaRf1Contrato,
   ResultadoArchivoVistaPreviaRf1Contrato,
   ResultadoInsercionRf1Contrato,
+  DocumentosFacturaRf1Contrato,
   SeleccionSociedadArchivoRf1Contrato,
 } from '@portal-soporte/contracts/clients';
+import { ErrorApiClientes, listarPerfilesConexionAdmin } from '../../lib/client-admin-api';
 import {
-  ErrorApiClientes,
-  listarAmbientesSapAdmin,
-  listarPerfilesConexionAdmin,
-} from '../../lib/client-admin-api';
-import {
-  listarAmbientesSapCliente,
   listarClientesAutorizados,
   listarPerfilesConexionCliente,
 } from '../../lib/client-access-api';
@@ -47,6 +45,9 @@ interface PerfilSeleccionable {
   /** Entorno funcional declarado para el cliente. */
   readonly entorno: 'PRODUCTION' | 'TEST';
 }
+
+/** Campos opcionales del formulario, mapeados únicamente a columnas ya existentes. */
+type CamposDocumentalesRf1 = Omit<DocumentosFacturaRf1Contrato, 'indiceArchivo'>;
 
 /** Relaciona un nombre de archivo local con el resultado fiscal redactado. */
 interface ResultadoConArchivo {
@@ -78,13 +79,15 @@ export function VistaPreviaRf1(): JSX.Element {
   const esAdmin = usuario.role === 'ADMIN';
   const [clientes, setClientes] = useState<readonly ClienteSeleccionable[]>([]);
   const [clienteId, setClienteId] = useState('');
-  const [ambientes, setAmbientes] = useState<
-    readonly { id: string; nombre: string; codigo: string }[]
-  >([]);
   const [perfiles, setPerfiles] = useState<readonly PerfilSeleccionable[]>([]);
   const [perfilId, setPerfilId] = useState('');
+  const [modo, setModo] = useState<'PREVIEW' | 'REAL'>('PREVIEW');
   const [estatus, setEstatus] = useState<EstatusVistaPreviaRf1Contrato>('PAGADA');
   const [archivos, setArchivos] = useState<readonly File[]>([]);
+  const [documentosPorArchivo, setDocumentosPorArchivo] = useState<
+    Readonly<Record<number, CamposDocumentalesRf1>>
+  >({});
+  const [zonaCargaActiva, setZonaCargaActiva] = useState(false);
   const [resultados, setResultados] = useState<readonly ResultadoConArchivo[]>([]);
   const [tokenConfirmacion, setTokenConfirmacion] = useState<string | null>(null);
   const [ejecucionDisponible, setEjecucionDisponible] = useState(false);
@@ -100,6 +103,7 @@ export function VistaPreviaRf1(): JSX.Element {
   const [insertando, setInsertando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
+  const selectorArchivos = useRef<HTMLInputElement>(null);
 
   /** Carga únicamente el catálogo que corresponde al rol ya confirmado por el marco. */
   useEffect(() => {
@@ -134,7 +138,7 @@ export function VistaPreviaRf1(): JSX.Element {
     };
   }, []);
 
-  /** Consulta ambientes y perfiles del cliente seleccionado y descarta respuestas obsoletas. */
+  /** Consulta perfiles del cliente seleccionado y descarta respuestas obsoletas. */
   useEffect(() => {
     let vigente = true;
 
@@ -149,18 +153,10 @@ export function VistaPreviaRf1(): JSX.Element {
       setCargandoDetalle(true);
       setError(null);
       try {
-        const [respuestaAmbientes, respuestaPerfiles] = await Promise.all([
-          esAdmin ? listarAmbientesSapAdmin(clienteId) : listarAmbientesSapCliente(clienteId),
-          esAdmin
-            ? listarPerfilesConexionAdmin(clienteId)
-            : listarPerfilesConexionCliente(clienteId),
-        ]);
+        const respuestaPerfiles = esAdmin
+          ? await listarPerfilesConexionAdmin(clienteId)
+          : await listarPerfilesConexionCliente(clienteId);
         if (vigente) {
-          setAmbientes(
-            respuestaAmbientes
-              .filter((ambiente) => ambiente.estado === 'ACTIVE')
-              .map(({ id, nombre, codigo }) => ({ id, nombre, codigo })),
-          );
           setPerfiles(
             respuestaPerfiles
               .filter((perfil) => perfil.estado === 'ACTIVE')
@@ -184,20 +180,22 @@ export function VistaPreviaRf1(): JSX.Element {
     };
   }, [clienteId, esAdmin]);
 
-  /** Valida los archivos seleccionados en memoria antes de habilitar una subida. */
-  function seleccionarArchivos(evento: ChangeEvent<HTMLInputElement>): void {
-    const seleccion = Array.from(evento.currentTarget.files ?? []);
+  /** Valida los archivos seleccionados o soltados antes de aceptar el lote en memoria.
+   * @param seleccion - Archivos elegidos por el selector o zona de arrastre.
+   * @effects Limpia resultados y confirmaciones previas al cambiar el lote.
+   */
+  function procesarSeleccionArchivos(seleccion: readonly File[]): void {
     setArchivos([]);
     setResultados([]);
     invalidarConfirmacionInsercion();
     setSeleccionesSociedad({});
+    setDocumentosPorArchivo({});
     setAviso(null);
     setError(null);
 
     const errorValidacion = validarArchivos(seleccion);
     if (errorValidacion !== null) {
       setError(errorValidacion);
-      evento.currentTarget.value = '';
       return;
     }
 
@@ -207,20 +205,74 @@ export function VistaPreviaRf1(): JSX.Element {
     );
   }
 
+  /** Reenvía al validador los archivos elegidos con el selector nativo del navegador. */
+  function seleccionarArchivos(evento: ChangeEvent<HTMLInputElement>): void {
+    procesarSeleccionArchivos(Array.from(evento.currentTarget.files ?? []));
+    evento.currentTarget.value = '';
+  }
+
+  /** Mantiene visible el estado de arrastre sin iniciar una operación de red. */
+  function manejarArrastreArchivos(evento: DragEvent<HTMLLabelElement>): void {
+    evento.preventDefault();
+    setZonaCargaActiva(true);
+  }
+
+  /** Limpia el énfasis de arrastre cuando el puntero sale de la zona de carga. */
+  function manejarSalidaArrastre(evento: DragEvent<HTMLLabelElement>): void {
+    evento.preventDefault();
+    if (evento.currentTarget === evento.target) {
+      setZonaCargaActiva(false);
+    }
+  }
+
+  /** Acepta archivos soltados y los somete a los mismos límites que el selector nativo. */
+  function manejarSoltarArchivos(evento: DragEvent<HTMLLabelElement>): void {
+    evento.preventDefault();
+    setZonaCargaActiva(false);
+    procesarSeleccionArchivos(Array.from(evento.dataTransfer.files));
+  }
+
   /** Cambia de cliente y elimina del formulario cualquier dato del cliente anterior. */
   function manejarCambioCliente(evento: ChangeEvent<HTMLSelectElement>): void {
     const siguienteClienteId = evento.currentTarget.value;
     setClienteId(siguienteClienteId);
-    setAmbientes([]);
     setPerfiles([]);
     setPerfilId('');
     setArchivos([]);
+    setDocumentosPorArchivo({});
     setResultados([]);
     invalidarConfirmacionInsercion();
     setSeleccionesSociedad({});
     setAviso(null);
     setError(null);
     setCargandoDetalle(siguienteClienteId.length > 0);
+  }
+
+  /** Cambia el modo elegido y fuerza una nueva previsualización antes de operar. */
+  function manejarCambioModo(siguienteModo: 'PREVIEW' | 'REAL'): void {
+    setModo(siguienteModo);
+    setResultados([]);
+    invalidarConfirmacionInsercion();
+    setAviso(null);
+    setError(null);
+  }
+
+  /** Actualiza una referencia opcional del CFDI y descarta cualquier confirmación anterior.
+   * @param indiceArchivo - Índice del archivo al que pertenece el valor.
+   * @param campo - Referencia de factura ya existente que se mapeará al guardar.
+   * @param valor - Texto capturado por el usuario sin recorte ni normalización silenciosa.
+   */
+  function manejarCambioDocumento(
+    indiceArchivo: number,
+    campo: keyof CamposDocumentalesRf1,
+    valor: string,
+  ): void {
+    setDocumentosPorArchivo((actuales) => ({
+      ...actuales,
+      [indiceArchivo]: { ...actuales[indiceArchivo], [campo]: valor },
+    }));
+    setResultados([]);
+    invalidarConfirmacionInsercion();
   }
 
   /**
@@ -245,7 +297,14 @@ export function VistaPreviaRf1(): JSX.Element {
       setSeleccionesSociedad({});
     }
     try {
-      const respuesta = await previsualizarRf1(clienteId, perfilId, estatus, archivos, selecciones);
+      const respuesta = await previsualizarRf1(
+        clienteId,
+        perfilId,
+        estatus,
+        archivos,
+        selecciones,
+        obtenerDocumentosRf1(documentosPorArchivo),
+      );
       setTokenConfirmacion(respuesta.confirmationToken);
       setEjecucionDisponible(respuesta.executionAvailable);
       setResultados(
@@ -338,6 +397,7 @@ export function VistaPreviaRf1(): JSX.Element {
         archivos,
         tokenConfirmacion,
         selecciones,
+        obtenerDocumentosRf1(documentosPorArchivo),
       );
       setResultadosInsercion(
         respuesta.map((resultado, indice) => ({
@@ -427,24 +487,6 @@ export function VistaPreviaRf1(): JSX.Element {
 
             {clienteId.length > 0 ? (
               <>
-                <div className="resumen-rf1" aria-label="Ambientes SAP disponibles">
-                  <h3>Ambientes SAP disponibles</h3>
-                  {cargandoDetalle ? (
-                    <p role="status">Cargando perfiles y ambientes…</p>
-                  ) : ambientes.length > 0 ? (
-                    <ul>
-                      {ambientes.map((ambiente) => (
-                        <li key={ambiente.id}>
-                          <span>{ambiente.nombre}</span>
-                          <span className="texto-secundario">{ambiente.codigo}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="texto-secundario">No hay ambientes SAP activos disponibles.</p>
-                  )}
-                </div>
-
                 <div className="campo">
                   <label htmlFor="rf1-perfil">Perfil de conexión</label>
                   <select
@@ -475,8 +517,38 @@ export function VistaPreviaRf1(): JSX.Element {
                   ) : null}
                 </div>
 
+                <fieldset className="selector-modo-rf1">
+                  <legend>Modo de trabajo</legend>
+                  <label>
+                    <input
+                      type="radio"
+                      name="rf1-modo"
+                      value="PREVIEW"
+                      checked={modo === 'PREVIEW'}
+                      onChange={() => manejarCambioModo('PREVIEW')}
+                      disabled={insertando}
+                    />
+                    Vista previa
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="rf1-modo"
+                      value="REAL"
+                      checked={modo === 'REAL'}
+                      onChange={() => manejarCambioModo('REAL')}
+                      disabled={insertando}
+                    />
+                    Operación real
+                  </label>
+                  <p className="texto-secundario">
+                    La operación real siempre vuelve a validar el lote y solicita confirmación antes
+                    de insertar.
+                  </p>
+                </fieldset>
+
                 <div className="campo">
-                  <label htmlFor="rf1-estatus">Estatus para la vista previa</label>
+                  <label htmlFor="rf1-estatus">Estatus de la factura</label>
                   <select
                     id="rf1-estatus"
                     value={estatus}
@@ -495,15 +567,28 @@ export function VistaPreviaRf1(): JSX.Element {
 
                 {perfilId.length > 0 ? (
                   <div className="campo">
-                    <label htmlFor="rf1-archivos">Archivos CFDI XML</label>
-                    <input
-                      id="rf1-archivos"
-                      type="file"
-                      accept=".xml,application/xml,text/xml"
-                      multiple
-                      onChange={seleccionarArchivos}
-                      disabled={insertando}
-                    />
+                    <label
+                      className={`zona-carga-rf1${zonaCargaActiva ? ' zona-carga-rf1-activa' : ''}`}
+                      htmlFor="rf1-archivos"
+                      onDragEnter={manejarArrastreArchivos}
+                      onDragOver={manejarArrastreArchivos}
+                      onDragLeave={manejarSalidaArrastre}
+                      onDrop={manejarSoltarArchivos}
+                    >
+                      <input
+                        ref={selectorArchivos}
+                        id="rf1-archivos"
+                        className="selector-archivos-rf1"
+                        type="file"
+                        aria-label="Archivos CFDI XML"
+                        accept=".xml,application/xml,text/xml"
+                        multiple
+                        onChange={seleccionarArchivos}
+                        disabled={insertando}
+                      />
+                      <strong>Arrastra tus XML aquí</strong>
+                      <span>o haz clic en el recuadro para adjuntarlos</span>
+                    </label>
                     <p className="texto-secundario">
                       Hasta {MAXIMO_ARCHIVOS} archivos XML, {formatearBytes(MAXIMO_BYTES_ARCHIVO)}{' '}
                       por archivo y {formatearBytes(MAXIMO_BYTES_LOTE)} en total. Los archivos solo
@@ -513,14 +598,59 @@ export function VistaPreviaRf1(): JSX.Element {
                 ) : null}
 
                 {archivos.length > 0 ? (
-                  <ul className="lista-archivos-rf1" aria-label="Archivos listos">
+                  <section
+                    className="lista-documentos-rf1"
+                    aria-label="Referencias opcionales por CFDI"
+                  >
                     {archivos.map((archivo, indice) => (
-                      <li key={`${archivo.name}-${indice}`}>
-                        <span>{archivo.name}</span>
-                        <span className="texto-secundario">{formatearBytes(archivo.size)}</span>
-                      </li>
+                      <fieldset
+                        className="referencias-factura-rf1"
+                        key={`${archivo.name}-${indice}`}
+                      >
+                        <legend>
+                          {archivo.name} · {formatearBytes(archivo.size)}
+                        </legend>
+                        <div className="referencias-factura-grid-rf1">
+                          <CampoDocumentoRf1
+                            id={`rf1-noa-${indice}`}
+                            etiqueta="Orden de compra"
+                            valor={documentosPorArchivo[indice]?.ordenCompra ?? ''}
+                            maxLength={2000}
+                            onChange={(valor) =>
+                              manejarCambioDocumento(indice, 'ordenCompra', valor)
+                            }
+                          />
+                          <CampoDocumentoRf1
+                            id={`rf1-nea-${indice}`}
+                            etiqueta="Entrada de mercancía"
+                            valor={documentosPorArchivo[indice]?.entradaMercancia ?? ''}
+                            maxLength={2000}
+                            onChange={(valor) =>
+                              manejarCambioDocumento(indice, 'entradaMercancia', valor)
+                            }
+                          />
+                          <CampoDocumentoRf1
+                            id={`rf1-documento-contable-${indice}`}
+                            etiqueta="Documento Contable"
+                            valor={documentosPorArchivo[indice]?.documentoContable ?? ''}
+                            maxLength={10}
+                            onChange={(valor) =>
+                              manejarCambioDocumento(indice, 'documentoContable', valor)
+                            }
+                          />
+                          <CampoDocumentoRf1
+                            id={`rf1-documento-pago-${indice}`}
+                            etiqueta="Documento de Pago"
+                            valor={documentosPorArchivo[indice]?.documentoPago ?? ''}
+                            maxLength={10}
+                            onChange={(valor) =>
+                              manejarCambioDocumento(indice, 'documentoPago', valor)
+                            }
+                          />
+                        </div>
+                      </fieldset>
                     ))}
-                  </ul>
+                  </section>
                 ) : null}
 
                 <button
@@ -535,7 +665,11 @@ export function VistaPreviaRf1(): JSX.Element {
                   }
                   onClick={manejarAnalisis}
                 >
-                  {analizando ? 'Analizando…' : 'Analizar vista previa'}
+                  {analizando
+                    ? 'Analizando…'
+                    : modo === 'PREVIEW'
+                      ? 'Analizar vista previa'
+                      : 'Validar antes de operar'}
                 </button>
               </>
             ) : null}
@@ -566,9 +700,9 @@ export function VistaPreviaRf1(): JSX.Element {
               </button>
             </div>
           ) : null}
-          {todosLosResultadosListos ? (
+          {modo === 'REAL' && todosLosResultadosListos ? (
             <section className="panel-confirmacion-rf1" aria-labelledby="rf1-confirmar-titulo">
-              <h2 id="rf1-confirmar-titulo">Inserción de facturas</h2>
+              <h2 id="rf1-confirmar-titulo">Confirmar operación real</h2>
               <p>
                 Se solicitará insertar {resultados.length}{' '}
                 {resultados.length === 1 ? 'factura' : 'facturas'} como{' '}
@@ -577,8 +711,8 @@ export function VistaPreviaRf1(): JSX.Element {
               </p>
               {!ejecucionDisponible || tokenConfirmacion === null ? (
                 <p className="texto-secundario" role="note">
-                  La inserción está deshabilitada para este cliente o por la compuerta global del
-                  servidor.
+                  El servidor no ha habilitado la inserción para este cliente. No se realizará
+                  ningún cambio en la base de datos.
                 </p>
               ) : null}
               <button
@@ -613,6 +747,41 @@ export function VistaPreviaRf1(): JSX.Element {
           ) : null}
         </>
       ) : null}
+    </div>
+  );
+}
+
+/** Presenta una etiqueta operativa y valida longitud antes de una petición multipart.
+ * @param id - Identificador accesible único para el CFDI correspondiente.
+ * @param etiqueta - Nombre funcional de la referencia, no una nueva columna.
+ * @param valor - Contenido efímero actualmente editado por el usuario.
+ * @param maxLength - Longitud máxima de la columna existente que recibirá el dato.
+ * @param onChange - Actualiza el estado efímero asociado a ese CFDI.
+ * @returns Campo accesible de texto sin valores automáticos ni datos inferidos.
+ */
+function CampoDocumentoRf1({
+  id,
+  etiqueta,
+  valor,
+  maxLength,
+  onChange,
+}: {
+  readonly id: string;
+  readonly etiqueta: string;
+  readonly valor: string;
+  readonly maxLength: number;
+  readonly onChange: (valor: string) => void;
+}): JSX.Element {
+  return (
+    <div className="campo">
+      <label htmlFor={id}>{etiqueta} (opcional)</label>
+      <input
+        id={id}
+        type="text"
+        value={valor}
+        maxLength={maxLength}
+        onChange={(evento) => onChange(evento.currentTarget.value)}
+      />
     </div>
   );
 }
@@ -822,6 +991,23 @@ function validarArchivos(archivos: readonly File[]): string | null {
     return `El tamaño total no puede superar ${formatearBytes(MAXIMO_BYTES_LOTE)}.`;
   }
   return null;
+}
+
+/** Serializa solamente referencias con valor y mantiene su relación con cada archivo.
+ * @param valores - Referencias efímeras indexadas por los archivos seleccionados.
+ * @returns Entradas indexadas que coinciden con el contrato de columnas existentes.
+ */
+function obtenerDocumentosRf1(
+  valores: Readonly<Record<number, CamposDocumentalesRf1>>,
+): readonly DocumentosFacturaRf1Contrato[] {
+  return Object.entries(valores).flatMap(([indice, documentos]) => {
+    const presentes = Object.fromEntries(
+      Object.entries(documentos).filter(([, valor]) => valor !== undefined && valor.trim() !== ''),
+    ) as Omit<CamposDocumentalesRf1, never>;
+    return Object.keys(presentes).length === 0
+      ? []
+      : [{ indiceArchivo: Number(indice), ...presentes }];
+  });
 }
 
 /** Convierte bytes a una unidad legible para límites y archivos en interfaz. */

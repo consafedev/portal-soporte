@@ -17,6 +17,7 @@ import {
 } from '../../apps/api/src/db/schema.js';
 import type {
   ResultadoArchivoVistaPreviaRf1Contrato,
+  DocumentosFacturaRf1Contrato,
   SeleccionSociedadArchivoRf1Contrato,
 } from '../../packages/contracts/src/clients.js';
 
@@ -44,6 +45,8 @@ interface ObservacionPreview {
   readonly contextoPresente: boolean;
   /** Selecciones sintéticas observadas sin conservar XML, cookies ni CSRF. */
   readonly seleccionesSociedad: readonly SeleccionSociedadArchivoRf1Contrato[];
+  /** Referencias de factura sintéticas ligadas a los archivos, sin contenido fiscal. */
+  readonly documentos: readonly DocumentosFacturaRf1Contrato[];
 }
 
 const idCliente = randomUUID();
@@ -213,7 +216,7 @@ test('SUPPORT autorizado carga XML y ve resultados de preview sin inserción', a
     ),
   ).toBeVisible();
   await page.getByLabel('Cliente').selectOption(idCliente);
-  await expect(page.getByText('Ambiente SAP de prueba', { exact: true })).toBeVisible();
+  await expect(page.getByText('Ambientes SAP disponibles', { exact: true })).toHaveCount(0);
   await page.getByLabel('Perfil de conexión').selectOption(idPerfil);
   await expect(page.getByText('Entorno operativo: Pruebas', { exact: true })).toBeVisible();
 
@@ -257,6 +260,7 @@ test('SUPPORT autorizado carga XML y ve resultados de preview sin inserción', a
       archivos: 4,
       contextoPresente: true,
       seleccionesSociedad: [],
+      documentos: [],
     },
     {
       metodo: 'POST',
@@ -265,6 +269,7 @@ test('SUPPORT autorizado carga XML y ve resultados de preview sin inserción', a
       archivos: 4,
       contextoPresente: true,
       seleccionesSociedad: [{ indiceArchivo: 1, sociedad: '2000', ambienteSap: 'ERP-DEV' }],
+      documentos: [],
     },
   ]);
 });
@@ -296,8 +301,18 @@ test('ADMIN selecciona un cliente activo y obtiene una fila lista para revisión
   await page.getByLabel('Cliente').selectOption(idCliente);
   await page.getByLabel('Perfil de conexión').selectOption(idPerfil);
   await expect(page.getByText('Entorno operativo: Pruebas', { exact: true })).toBeVisible();
-  await page.getByLabel('Archivos CFDI XML').setInputFiles(archivoXml('solo-preview.xml'));
-  await page.getByRole('button', { name: 'Analizar vista previa' }).click();
+  await page.getByLabel('Operación real').check();
+  await page.locator('.zona-carga-rf1').evaluate((zona) => {
+    const archivos = new DataTransfer();
+    archivos.items.add(new File(['<cfdi/>'], 'solo-preview.xml', { type: 'application/xml' }));
+    zona.dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer: archivos }));
+  });
+  await expect(page.getByText('1 archivo listo para analizar.', { exact: true })).toBeVisible();
+  await page.getByLabel('Orden de compra (opcional)').fill('OC-TEST-42');
+  await page.getByLabel('Entrada de mercancía (opcional)').fill('EM-TEST-17');
+  await page.getByLabel('Documento Contable (opcional)').fill('DC-TEST-8');
+  await page.getByLabel('Documento de Pago (opcional)').fill('DP-TEST-3');
+  await page.getByRole('button', { name: 'Validar antes de operar' }).click();
   await expect(
     page.getByRole('table', { name: 'Resultados de vista previa de Insertar Facturas en BD' }),
   ).toContainText('SUP-42');
@@ -310,10 +325,19 @@ test('ADMIN selecciona un cliente activo y obtiene una fila lista para revisión
   await expect(
     page.getByRole('button', { name: 'Confirmar inserción de 1 factura' }),
   ).toBeDisabled();
-  await expect(page.getByText(/compuerta global del servidor/u)).toBeVisible();
+  await expect(page.getByText(/servidor no ha habilitado la inserción/u)).toBeVisible();
   await expect(page.getByText('destino-sintetico-interno', { exact: true })).toHaveCount(0);
   await expect(page.getByText('base_sintetica_interna', { exact: true })).toHaveCount(0);
   expect(observaciones).toHaveLength(1);
+  expect(observaciones[0]?.documentos).toEqual([
+    {
+      indiceArchivo: 0,
+      ordenCompra: 'OC-TEST-42',
+      entradaMercancia: 'EM-TEST-17',
+      documentoContable: 'DC-TEST-8',
+      documentoPago: 'DP-TEST-3',
+    },
+  ]);
 });
 
 /**
@@ -503,6 +527,7 @@ async function instalarRespuestaPreview(
       const url = new URL(solicitud.url());
       const cuerpo = solicitud.postDataBuffer() ?? Buffer.alloc(0);
       const seleccionesSociedad = leerSeleccionesMultipart(cuerpo);
+      const documentos = leerDocumentosMultipart(cuerpo);
       const archivos = [
         'factura-lista.xml',
         'factura-sociedades.xml',
@@ -520,6 +545,7 @@ async function instalarRespuestaPreview(
           (url.searchParams.get('estatus') === 'PAGADA' ||
             url.searchParams.get('estatus') === 'CONTABILIZADO'),
         seleccionesSociedad,
+        documentos,
       });
       await ruta.fulfill({
         status: 200,
@@ -532,6 +558,28 @@ async function instalarRespuestaPreview(
       });
     },
   );
+}
+
+/** Lee solo el JSON sintético de referencias opcionales enviado por el navegador de prueba.
+ * @param cuerpo - Buffer efímero de una solicitud multipart sintética.
+ * @returns Valores de referencia sin XML, cookies ni tokens.
+ * @throws Error si el campo sintético no contiene JSON válido.
+ */
+function leerDocumentosMultipart(cuerpo: Buffer): ObservacionPreview['documentos'] {
+  const marcaCampo = Buffer.from('name="documentos"', 'utf8');
+  const inicioCampo = cuerpo.indexOf(marcaCampo);
+  if (inicioCampo < 0) {
+    return [];
+  }
+  const separador = Buffer.from('\r\n\r\n', 'utf8');
+  const inicioJson = cuerpo.indexOf(separador, inicioCampo) + separador.byteLength;
+  const finJson = cuerpo.indexOf(Buffer.from('\r\n', 'utf8'), inicioJson);
+  if (inicioJson < separador.byteLength || finJson < inicioJson) {
+    throw new Error('El multipart sintético no contiene referencias válidas.');
+  }
+  return JSON.parse(
+    cuerpo.subarray(inicioJson, finJson).toString('utf8'),
+  ) as ObservacionPreview['documentos'];
 }
 
 /** Lee solo la selección sintética del multipart observado por E2E.

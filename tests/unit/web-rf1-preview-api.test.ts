@@ -88,6 +88,32 @@ describe('cliente HTTP same-origin para vista previa RF-1', () => {
     expect(formulario.get('seleccionesSociedad')).toBe(JSON.stringify(selecciones));
   });
 
+  it('envía referencias opcionales asociadas por índice sin crear campos de esquema', async () => {
+    const archivo = crearArchivoSintetico('factura-referencias.xml');
+    const documentos = [
+      {
+        indiceArchivo: 0,
+        ordenCompra: 'OC-42',
+        entradaMercancia: 'EM-17',
+        documentoContable: 'DC-8',
+        documentoPago: 'DP-3',
+      },
+    ];
+    fetchMock.mockResolvedValueOnce(crearRespuestaCsrf()).mockResolvedValueOnce(
+      crearRespuestaJson({
+        resultados: [{ status: 'READY' }],
+        executionAvailable: false,
+        confirmationToken: null,
+      }),
+    );
+
+    await previsualizarRf1(CLIENT_ID, PROFILE_ID, 'PAGADA', [archivo], [], documentos);
+
+    const formulario = fetchMock.mock.calls[1]?.[1]?.body as FormData;
+    expect([...formulario.keys()]).toEqual(['files', 'documentos']);
+    expect(JSON.parse(String(formulario.get('documentos')))).toEqual(documentos);
+  });
+
   it('envía la confirmación opaca en multipart con CSRF y sin caché', async () => {
     const archivo = crearArchivoSintetico('factura-confirmada.xml');
     const confirmacion = 'b'.repeat(43);
@@ -112,6 +138,22 @@ describe('cliente HTTP same-origin para vista previa RF-1', () => {
     });
     const formulario = opciones?.body as FormData;
     expect([...formulario.keys()]).toEqual(['files', 'confirmationToken']);
+    expect(formulario.get('confirmationToken')).toBe(confirmacion);
+  });
+
+  it('reenvía las referencias revisadas junto con la confirmación de operación', async () => {
+    const archivo = crearArchivoSintetico('factura-operacion.xml');
+    const confirmacion = 'c'.repeat(43);
+    const documentos = [{ indiceArchivo: 0, documentoPago: 'PAGO-SINTETICO' }];
+    fetchMock
+      .mockResolvedValueOnce(crearRespuestaCsrf())
+      .mockResolvedValueOnce(crearRespuestaJson([{ status: 'INSERTADA_VERIFICADA' }]));
+
+    await ejecutarRf1(CLIENT_ID, PROFILE_ID, 'PAGADA', [archivo], confirmacion, [], documentos);
+
+    const formulario = fetchMock.mock.calls[1]?.[1]?.body as FormData;
+    expect([...formulario.keys()]).toEqual(['files', 'documentos', 'confirmationToken']);
+    expect(JSON.parse(String(formulario.get('documentos')))).toEqual(documentos);
     expect(formulario.get('confirmationToken')).toBe(confirmacion);
   });
 

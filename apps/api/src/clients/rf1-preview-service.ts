@@ -11,7 +11,10 @@ import {
   type VistaPreviaCfdiRf1,
 } from '../../../../modules/rf-1/src/preview.js';
 import type { SesionLecturaRf1 } from '../../../../packages/core/src/clients/secret-custody-ports.js';
-import type { SeleccionSociedadArchivoRf1Contrato } from '../../../../packages/contracts/src/clients.js';
+import type {
+  DocumentosFacturaRf1Contrato,
+  SeleccionSociedadArchivoRf1Contrato,
+} from '../../../../packages/contracts/src/clients.js';
 
 /** Identidad de solicitud autenticada que debe revalidarse contra el estado PostgreSQL actual. */
 export interface ActorVistaPreviaRf1 extends ActorAccesoCliente {
@@ -35,6 +38,8 @@ export interface SolicitudServicioVistaPreviaRf1 {
   readonly archivos: readonly Uint8Array[];
   /** Selecciones de catálogo por índice de archivo, validadas otra vez por el dominio. */
   readonly seleccionesSociedad?: readonly SeleccionSociedadArchivoRf1Contrato[];
+  /** Referencias opcionales por CFDI, conservadas solo para la confirmación de inserción. */
+  readonly documentos?: readonly DocumentosFacturaRf1Contrato[];
   /** Señal para cancelar el broker cuando vence o se cierra la petición. */
   readonly senal: AbortSignal;
 }

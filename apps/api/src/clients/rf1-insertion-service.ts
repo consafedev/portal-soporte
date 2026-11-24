@@ -2,11 +2,15 @@ import { createHash } from 'node:crypto';
 import type { EscritorAuditoriaAuth, RelojAuth } from '../../../../packages/core/src/auth/ports.js';
 import type { PerfilConexionCliente } from '../../../../packages/core/src/clients/connection-profile-ports.js';
 import type {
+  DocumentosFacturaRf1,
   EntradaMapeoFacturaRf1,
   ResultadoInsercionFacturaRf1,
   DecisionAutorizacionEscrituraRf1,
 } from '../../../../packages/core/src/clients/rf1-insertion-ports.js';
-import type { SeleccionSociedadArchivoRf1Contrato } from '../../../../packages/contracts/src/clients.js';
+import type {
+  DocumentosFacturaRf1Contrato,
+  SeleccionSociedadArchivoRf1Contrato,
+} from '../../../../packages/contracts/src/clients.js';
 import type { VistaPreviaCfdiRf1 } from '../../../../modules/rf-1/src/preview.js';
 import type { ServicioAccesoCliente } from './client-access-service.js';
 import {
@@ -201,7 +205,12 @@ export class ServicioInsercionRf1 {
     const resultados: ResultadoInsercionFacturaRf1[] = [];
     try {
       for (const [indice, vista] of resultadosPreview.entries()) {
-        const entrada = convertirVistaAEntrada(vista, this.reloj.ahora());
+        const documentos = solicitud.documentos?.find((valor) => valor.indiceArchivo === indice);
+        const entrada = convertirVistaAEntrada(
+          vista,
+          this.reloj.ahora(),
+          convertirDocumentos(documentos),
+        );
         /**
          * Vuelve a consultar el permiso y la revisión del perfil antes del DML de esta factura.
          * @returns Decisión cerrada del guard que consume el conector antes de insertar.
@@ -332,6 +341,7 @@ function loteListo(resultados: readonly VistaPreviaCfdiRf1[], cantidadArchivos: 
 function convertirVistaAEntrada(
   vista: VistaPreviaCfdiRf1,
   fechaCarga: Date,
+  documentos?: DocumentosFacturaRf1,
 ): EntradaMapeoFacturaRf1 {
   if (
     vista.status !== 'READY' ||
@@ -346,7 +356,31 @@ function convertirVistaAEntrada(
     resolution: vista.resolution,
     estatus: vista.estatus,
     fechaCarga,
+    ...(documentos === undefined ? {} : { documentos }),
   };
+}
+
+/** Traduce las etiquetas del contrato web a la semántica existente del conector.
+ * @param documentos - Valores opcionales de un archivo, ya validados por el contrato HTTP.
+ * @returns Campos existentes de `factura`, o `undefined` si el usuario los dejó vacíos.
+ */
+function convertirDocumentos(
+  documentos: DocumentosFacturaRf1Contrato | undefined,
+): DocumentosFacturaRf1 | undefined {
+  if (documentos === undefined) {
+    return undefined;
+  }
+  const mapeo: DocumentosFacturaRf1 = {
+    ...(documentos.ordenCompra === undefined ? {} : { ordenCompra: documentos.ordenCompra }),
+    ...(documentos.entradaMercancia === undefined
+      ? {}
+      : { entradaMercancia: documentos.entradaMercancia }),
+    ...(documentos.documentoContable === undefined
+      ? {}
+      : { documentoContable: documentos.documentoContable }),
+    ...(documentos.documentoPago === undefined ? {} : { documentoPago: documentos.documentoPago }),
+  };
+  return Object.keys(mapeo).length === 0 ? undefined : mapeo;
 }
 
 /**
@@ -370,6 +404,9 @@ function calcularDigest(
       sociedad: seleccion.sociedad,
       ambienteSap: seleccion.ambienteSap,
     }));
+  const documentos = [...(solicitud.documentos ?? [])]
+    .sort((izquierda, derecha) => izquierda.indiceArchivo - derecha.indiceArchivo)
+    .map(({ indiceArchivo, ...valores }) => ({ indiceArchivo, ...valores }));
   hash.update(
     JSON.stringify({
       actorUserId: solicitud.actor.actorUserId,
@@ -377,6 +414,7 @@ function calcularDigest(
       profileId: solicitud.profileId,
       estatus: solicitud.estatus,
       selecciones,
+      documentos,
       huellaPerfil,
       cantidad: solicitud.archivos.length,
       resultados: resultados.map((resultado) => ({

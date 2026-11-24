@@ -2,6 +2,7 @@ import {
   respuestaVistaPreviaRf1Schema,
   resultadosInsercionRf1Schema,
   type EstatusVistaPreviaRf1Contrato,
+  type DocumentosFacturaRf1Contrato,
   type RespuestaVistaPreviaRf1Contrato,
   type ResultadosInsercionRf1Contrato,
   type SeleccionSociedadArchivoRf1Contrato,
@@ -16,6 +17,7 @@ import { ErrorApiClientes, leerRespuesta, obtenerTokenCsrf } from './client-admi
  * @param estatus - Estado funcional cerrado para la vista previa, sin habilitar inserciones.
  * @param files - Archivos seleccionados; se envían como multipart sin guardarlos en disco.
  * @param seleccionesSociedad - Pares elegidos de las opciones reales recibidas para cada archivo.
+ * @param documentos - Valores opcionales existentes ligados al índice de cada CFDI.
  * @returns Resultados redactados y un token opaco opcional emitido solo cuando hay permiso.
  * @throws ErrorApiClientes si falla CSRF, red, autorización o validación de la respuesta.
  */
@@ -25,6 +27,7 @@ export async function previsualizarRf1(
   estatus: EstatusVistaPreviaRf1Contrato,
   files: readonly File[],
   seleccionesSociedad: readonly SeleccionSociedadArchivoRf1Contrato[] = [],
+  documentos: readonly DocumentosFacturaRf1Contrato[] = [],
 ): Promise<RespuestaVistaPreviaRf1Contrato> {
   const tokenCsrf = await obtenerTokenCsrf();
   const formulario = new FormData();
@@ -33,6 +36,9 @@ export async function previsualizarRf1(
   }
   if (seleccionesSociedad.length > 0) {
     formulario.append('seleccionesSociedad', JSON.stringify(seleccionesSociedad));
+  }
+  if (documentos.length > 0) {
+    formulario.append('documentos', JSON.stringify(documentos));
   }
   const parametros = new URLSearchParams({ profileId, estatus });
   const ruta = `/api/v1/clients/${encodeURIComponent(clientId)}/modules/rf-1/preview?${parametros.toString()}`;
@@ -57,6 +63,7 @@ export async function previsualizarRf1(
  * @param files Mismos archivos originales conservados en memoria desde el preview.
  * @param confirmationToken Token efímero de un solo uso emitido por el preview.
  * @param seleccionesSociedad Pares explícitos elegidos en el catálogo de ese perfil.
+ * @param documentos Campos opcionales que deben coincidir con los validados en preview.
  * @returns Estado individual de cada factura sin mensajes de base de datos.
  * @throws ErrorApiClientes si CSRF, autorización, red o contrato de respuesta falla.
  */
@@ -67,9 +74,10 @@ export async function ejecutarRf1(
   files: readonly File[],
   confirmationToken: string,
   seleccionesSociedad: readonly SeleccionSociedadArchivoRf1Contrato[] = [],
+  documentos: readonly DocumentosFacturaRf1Contrato[] = [],
 ): Promise<ResultadosInsercionRf1Contrato> {
   const tokenCsrf = await obtenerTokenCsrf();
-  const formulario = crearFormulario(files, seleccionesSociedad);
+  const formulario = crearFormulario(files, seleccionesSociedad, documentos);
   formulario.append('confirmationToken', confirmationToken);
   const parametros = new URLSearchParams({ profileId, estatus });
   const ruta = `/api/v1/clients/${encodeURIComponent(clientId)}/modules/rf-1/execute?${parametros.toString()}`;
@@ -86,10 +94,11 @@ export async function ejecutarRf1(
   return leerRespuesta(respuesta, resultadosInsercionRf1Schema);
 }
 
-/** Serializa archivos y selecciones sin guardar ni transformar los bytes de origen. */
+/** Serializa archivos, selecciones y referencias opcionales sin alterar el XML original. */
 function crearFormulario(
   files: readonly File[],
   seleccionesSociedad: readonly SeleccionSociedadArchivoRf1Contrato[],
+  documentos: readonly DocumentosFacturaRf1Contrato[],
 ): FormData {
   const formulario = new FormData();
   for (const archivo of files) {
@@ -97,6 +106,9 @@ function crearFormulario(
   }
   if (seleccionesSociedad.length > 0) {
     formulario.append('seleccionesSociedad', JSON.stringify(seleccionesSociedad));
+  }
+  if (documentos.length > 0) {
+    formulario.append('documentos', JSON.stringify(documentos));
   }
   return formulario;
 }

@@ -4,11 +4,13 @@ import { Value } from '@sinclair/typebox/value';
 import {
   clienteParamsSchema,
   errorClienteAdminSchema,
+  documentosArchivosRf1Schema,
   respuestaVistaPreviaRf1Schema,
   resultadosInsercionRf1Schema,
   seleccionesSociedadRf1Schema,
   solicitudVistaPreviaRf1Schema,
   type EstatusVistaPreviaRf1Contrato,
+  type DocumentosFacturaRf1Contrato,
   type ParametrosCliente,
   type SeleccionSociedadArchivoRf1Contrato,
   type SolicitudVistaPreviaRf1Contrato,
@@ -25,15 +27,15 @@ import { ErrorInsercionRf1, type ServicioInsercionRf1 } from '../clients/rf1-ins
 const MAXIMO_ARCHIVOS = 100;
 const MAXIMO_BYTES_POR_ARCHIVO = 5 * 1024 * 1024;
 const MAXIMO_BYTES_POR_LOTE = 25 * 1024 * 1024;
-const MAXIMO_BYTES_SELECCIONES = 16 * 1024;
+const MAXIMO_BYTES_CAMPOS_RF1 = 512 * 1024;
 const LIMITE_TIEMPO_SOLICITUD_MS = 30_000;
 const LIMITES_MULTIPART = {
   files: MAXIMO_ARCHIVOS,
-  fields: 1,
-  parts: MAXIMO_ARCHIVOS + 1,
+  fields: 2,
+  parts: MAXIMO_ARCHIVOS + 2,
   fileSize: MAXIMO_BYTES_POR_ARCHIVO,
   fieldNameSize: 32,
-  fieldSize: MAXIMO_BYTES_SELECCIONES,
+  fieldSize: MAXIMO_BYTES_CAMPOS_RF1,
   headerPairs: 64,
 } as const;
 
@@ -125,6 +127,7 @@ export async function registrarRutasVistaPreviaRf1(
           estatus: solicitud.query.estatus as EstatusVistaPreviaRf1Contrato,
           archivos,
           seleccionesSociedad: lote.seleccionesSociedad,
+          documentos: lote.documentos,
           senal: controlador.signal,
         };
         const resultados = await dependencias.vistaPrevia.ejecutar(solicitudServicio);
@@ -285,6 +288,7 @@ export async function registrarRutasVistaPreviaRf1(
             estatus: solicitud.query.estatus as EstatusVistaPreviaRf1Contrato,
             archivos,
             seleccionesSociedad: lote.seleccionesSociedad,
+            documentos: lote.documentos,
             senal: controlador.signal,
           },
           lote.confirmationToken,
@@ -356,19 +360,22 @@ async function leerArchivosMultipart(
 ): Promise<{
   readonly archivos: readonly Buffer[];
   readonly seleccionesSociedad: readonly SeleccionSociedadArchivoRf1Contrato[];
+  readonly documentos: readonly DocumentosFacturaRf1Contrato[];
   readonly confirmationToken?: string;
 }> {
   const archivos: Buffer[] = [];
   let totalBytes = 0;
   let recibioSelecciones = false;
+  let recibioDocumentos = false;
   let confirmationToken: string | undefined;
   let jsonSelecciones: string | undefined;
+  let jsonDocumentos: string | undefined;
   try {
     for await (const parte of solicitud.parts({
       limits: {
         ...LIMITES_MULTIPART,
-        fields: exigirConfirmacion ? 2 : 1,
-        parts: MAXIMO_ARCHIVOS + (exigirConfirmacion ? 2 : 1),
+        fields: exigirConfirmacion ? 3 : 2,
+        parts: MAXIMO_ARCHIVOS + (exigirConfirmacion ? 3 : 2),
       },
     })) {
       if (senal.aborted) {
@@ -385,6 +392,17 @@ async function leerArchivosMultipart(
           /^[A-Za-z0-9_-]{43}$/u.test(parte.value)
         ) {
           confirmationToken = parte.value;
+          continue;
+        }
+        if (
+          parte.fieldname === 'documentos' &&
+          !recibioDocumentos &&
+          !parte.fieldnameTruncated &&
+          !parte.valueTruncated &&
+          typeof parte.value === 'string'
+        ) {
+          recibioDocumentos = true;
+          jsonDocumentos = parte.value;
           continue;
         }
         if (
@@ -420,9 +438,11 @@ async function leerArchivosMultipart(
       throw new ErrorCargaVistaPrevia('BATCH_EMPTY', 400);
     }
     const seleccionesSociedad = validarSeleccionesSociedad(jsonSelecciones, archivos.length);
+    const documentos = validarDocumentosRf1(jsonDocumentos, archivos.length);
     return {
       archivos,
       seleccionesSociedad,
+      documentos,
       ...(confirmationToken === undefined ? {} : { confirmationToken }),
     };
   } catch (error: unknown) {
@@ -434,6 +454,39 @@ async function leerArchivosMultipart(
     }
     throw traducirErrorMultipart(error);
   }
+}
+
+/** Valida referencias opcionales ligadas a índices únicos del lote, sin aceptar datos extra.
+ * @param json - Campo multipart opcional serializado por el cliente.
+ * @param cantidadArchivos - Número de archivos aceptados en la solicitud.
+ * @returns Referencias tipadas y acotadas a los archivos recibidos.
+ * @throws ErrorCargaVistaPrevia si la forma, longitudes o índices incumplen el contrato.
+ */
+function validarDocumentosRf1(
+  json: string | undefined,
+  cantidadArchivos: number,
+): readonly DocumentosFacturaRf1Contrato[] {
+  if (json === undefined) {
+    return [];
+  }
+  let valor: unknown;
+  try {
+    valor = JSON.parse(json) as unknown;
+  } catch {
+    throw new ErrorCargaVistaPrevia('MULTIPART_DOCUMENTS_INVALID', 400);
+  }
+  if (!Value.Check(documentosArchivosRf1Schema, valor)) {
+    throw new ErrorCargaVistaPrevia('MULTIPART_DOCUMENTS_INVALID', 400);
+  }
+  const documentos = valor as readonly DocumentosFacturaRf1Contrato[];
+  const indices = new Set<number>();
+  for (const documento of documentos) {
+    if (documento.indiceArchivo >= cantidadArchivos || indices.has(documento.indiceArchivo)) {
+      throw new ErrorCargaVistaPrevia('MULTIPART_DOCUMENTS_INVALID', 400);
+    }
+    indices.add(documento.indiceArchivo);
+  }
+  return documentos;
 }
 
 /** Valida estructura, unicidad e índices del campo opcional antes de abrir el broker.
@@ -610,6 +663,7 @@ class ErrorCargaVistaPrevia extends Error {
       | 'BATCH_TOO_LARGE'
       | 'FILE_TOO_LARGE'
       | 'MULTIPART_FIELD_INVALID'
+      | 'MULTIPART_DOCUMENTS_INVALID'
       | 'MULTIPART_SELECTION_INVALID'
       | 'MULTIPART_INVALID'
       | 'MULTIPART_REQUIRED'
@@ -644,6 +698,7 @@ function mensajeCarga(error: ErrorCargaVistaPrevia): string {
     case 'REQUEST_ABORTED':
       return 'La solicitud fue cancelada antes de terminar.';
     case 'MULTIPART_FIELD_INVALID':
+    case 'MULTIPART_DOCUMENTS_INVALID':
     case 'MULTIPART_SELECTION_INVALID':
     case 'MULTIPART_INVALID':
       return 'El cuerpo multipart no tiene el formato permitido.';

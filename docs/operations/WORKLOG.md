@@ -180,6 +180,16 @@
 - Próximo paso: revisión final y commit local atómico; solicitar autorización expresa para push normal; después comprobar GitHub Actions. PS-002 y PS-002.2 quedan EN_REVISION. Riesgo GHSA abierto y no autorizado para producción.
 - Estado: EN_REVISION.
 
+### 2026-11-24T00:52:20-06:00 — Codex — PS-009 — INICIO DE AJUSTE RF-1
+- Base Git: `main` `7d28cc2e7d2c55e71afab116440c8d1e1b8c14f0`; se preservan cambios documentales locales existentes en WORKLOG y TASK_BOARD.
+- Objetivo: retirar la consulta/listado independiente de ambientes SAP de la UI RF-1; permitir modo vista previa u operación real, incorporar cuatro referencias opcionales sobre columnas existentes (`noa`, `nea`, `nodocumentocontable`, `nodocumentopago`) y habilitar carga XML por clic o arrastre.
+- Alcance previsto: contrato multipart, validación, vínculo de referencias con confirmación de escritura, pantalla RF-1, pruebas focales y evidencia de la skill Apple Design. Sin migración ni columnas nuevas.
+- Skills leídas: `.agents/skills/portal-soporte-workflow/SKILL.md`, referencias de documentación/puerta UI, `.agents/skills/apple-design/SKILL.md` y `superpowers:test-driven-development`.
+- Riesgo: la autenticación exitosa de MySQL fue `SELECT 1`; no satisface VT-01..VT-09 ni autoriza a saltar el gate server-side de escritura. Se preserva la compuerta hasta registrar evidencia técnica de destino.
+- Pruebas previstas: E2E RF-1 focal de carga/modos/campos; unitarias del contrato multipart; lint/typecheck/build focales pertinentes. Revisión de diff y secretos. Despliegue solo tras confirmar que el cambio no abre DML sin las puertas exigidas.
+- UI/UX: skill Apple Design leída; aplicar selección directa, carga accesible por teclado, feedback inmediato, responsive y `prefers-reduced-motion`; validación visual manual: pendiente/NO EJECUTADA.
+- Estado: EN_CURSO.
+
 
 ### [2026-11-17T19:20:26-06:00] PS-002.2 · Codex · CORRECCIÓN DE REGISTRO
 - Se detectó que un borrador local de bitácora había recibido secuencias de escape de la consola y alteraba artificialmente líneas previas. Se restauró WORKLOG.md byte por byte desde el blob de HEAD, hash 36363255056ab40fa69b7a0fd8ff761099419025, y se reanexaron las entradas de esta tarea con saltos de línea correctos.
@@ -2724,3 +2734,25 @@ eload, se reinició únicamente cloudflared-consafedev.service; procesos web, AP
 - Riesgo y decisión: no se aceptan certificados arbitrarios a ciegas; el bundle proporciona confianza automática a CA públicas AWS RDS y el trust estándar. Un destino privado/autofirmado necesita CA explícita. SMTP sigue deshabilitado; AP-013/AP-014, UFW y riesgo de dependencias permanecen según tablero.
 - UI/UX: no aplica; no hubo cambios visuales.
 - Estado: EN_REVISION.
+
+### 2026-11-24T00:32:28-06:00 — Codex — PS-005.4 / PS-007 / PS-008 / PS-009 — CONEXIÓN Y PREVIEW REAL
+- Base: `main` `7d28cc2e7d2c55e71afab116440c8d1e1b8c14f0`; árbol limpio antes de registrar evidencia.
+- El propietario confirmó por captura el resultado `CONNECTED` para el perfil Arca PRO. El flujo “Probar conexión” es de solo lectura y ejecuta `SELECT 1`; no se observaron ni copiaron credenciales.
+- El propietario aportó un CFDI de prueba y autorizó su análisis en el Portal público. Se cargó un solo XML desde la UI de ADMIN, cliente Arca, perfil Arca PRO, entorno operativo Producción y estado solicitado PAGADA. El backend devolvió `Vista previa completa`; resumen resolvió sociedad/proveedor con ambiente SAP `E1P`. En esta bitácora el UUID se conserva solo como `6F7F…B166`; no se guardó el XML, los RFC completos ni el importe.
+- No se ejecutaron INSERT, UPDATE ni DELETE; la UI mostró la compuerta de inserción deshabilitada. No se habilitó `rf-1:execute` ni se modificó perfil/cliente, esquema, permisos o infraestructura.
+- Evidencia y limitaciones: el formulario informa que no hay ambientes SAP activos registrados, aunque el lookup en la BD real resolvió `E1P`; hay una inconsistencia visual/configurativa que debe revisarse. No se confirmó la columna de duplicados ni se inspeccionaron todas las columnas del resultado (la revisión horizontal quedó interrumpida cuando el propietario tomó control). El estado “Vista previa completa” no sustituye VT-01..VT-09 ni la comprobación explícita de duplicado.
+- Próximo paso: inspeccionar en pantalla las columnas restantes del resultado y confirmar UUID duplicado/ausente; completar VT-01..VT-09 únicamente con lecturas/metadatos autorizados. Después preparar informe de preflight. No insertar sin autorización expresa para una sola factura.
+- Riesgos: permanecen sin validar DDL/índices/triggers/permisos efectivos/retención VT-01..VT-09, respaldo específico de destino y revisión independiente del mapeo. AP-013, AP-014, Cloudflare Access excluido, SMTP deshabilitado y UFW sin cambios.
+- UI/UX: no se modificó interfaz; Apple Design no aplica. Se utilizó el Portal existente para la operación de solo lectura.
+- Estado: EN_REVISION.
+
+### [2026-11-24T01:15:49-06:00] PS-009 / PS-007 / PS-008 — Codex — IMPLEMENTACIÓN DE REFERENCIAS, DROPZONE Y MODO DE OPERACIÓN
+- **Agente y base:** Codex; rama main, base 7d28cc2e7d2c55e71afab116440c8d1e1b8c14f0 = origin/main al inicio. Cambios locales existentes conservados.
+- **Objetivo y alcance:** retirar la dependencia visual del catálogo/conexión SAP, conservar el lookup de sociedad/proveedor/contexto fiscal ya aprobado, añadir cuatro referencias opcionales por CFDI mapeadas a columnas existentes y adjuntar XML con selector o arrastrar/soltar. Exponer selector Preview/Operación real y conservar autorización, token y confirmación de backend.
+- **Decisión del propietario:** el 2026-11-24 autorizó abrir el modo de operación real. Esta autorización se aplicará al gate global del Portal; cada cliente seguirá requiriendo capacidad rf-1:execute, previsualización coincidente y confirmación de un solo uso. En esta iteración no se ejecuta INSERT. La conexión SELECT 1 y la vista previa no verifican DDL ni permisos de escritura; VT-01..VT-09 se conservan como riesgos técnicos pendientes y no se declaran satisfechas.
+- **UI/UX:** se leyó .agents/skills/apple-design/SKILL.md antes de revisar/modificar la interfaz y UI_UX_APPLE_GATE.md; se aplican carga directa, feedback visible, accesibilidad por teclado/foco, responsive y prefers-reduced-motion. E2E de carga sintética ejecutada; revisión visual manual/móvil: NO EJECUTADA.
+- **Archivos previstos/modificados:** contratos compartidos, servicio/rutas de preview/inserción, cliente/API web, componente y estilos RF-1, pruebas unitarias/integración/E2E, tablero y bitácora.
+- **Riesgos:** el propietario autorizó abrir el gate global; VT-01..VT-09 quedan como riesgos técnicos no acreditados y se reportan abiertamente. No se añadió esquema ni se alterarán los datos originales del CFDI; SMTP deshabilitado y auditoría/dependencias conservan riesgos previos.
+- **Validaciones previstas:** unitarias focales, integración PostgreSQL aislada, E2E aislado, lint, typecheck, build con API_INTERNAL_ORIGIN efímero, formato y escaneo de secretos; CI remoto y despliegue del Portal solo después de revisar resultado.
+- **Artefactos/próximo paso:** preparar cambio focalizado, push normal autorizado por el propietario en este historial, esperar GitHub Actions y desplegar únicamente el Portal si CI pasa; conservar rollback.
+- **Estado:** EN_CURSO.
