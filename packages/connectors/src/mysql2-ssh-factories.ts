@@ -6,6 +6,7 @@ import {
   type Connection,
   type ConnectionOptions,
 } from 'mysql2/promise';
+import { getCACertificates } from 'node:tls';
 import type { Client as ClienteSsh2, ConnectConfig } from 'ssh2';
 import type {
   AutenticacionSshPrueba,
@@ -30,8 +31,20 @@ const cargarModuloCommonJs = createRequire(import.meta.url);
 const ssh2 = cargarModuloCommonJs('ssh2') as typeof import('ssh2');
 const { Client, utils } = ssh2;
 
-/** Fábrica real de una conexión MySQL efímera con TLS obligatorio. */
+/** Fábrica real MySQL efímera con validación TLS y raíces CA adicionales opcionales. */
 export class FabricaConexionMysql2 implements FabricaConexionMySql {
+  /** Bundle CA operacional adicional, combinado con raíces Node y CA del perfil. */
+  private readonly caAdicional: string | undefined;
+
+  /**
+   * Crea la fábrica con un bundle adicional de autoridades confiables para MySQL.
+   *
+   * @param caAdicional Bundle PEM de CA adicionales; nunca desactiva verificación de identidad.
+   */
+  public constructor(caAdicional?: string) {
+    this.caAdicional = caAdicional;
+  }
+
   /** Abre el socket al IP fijado y valida el hostname del certificado TLS. */
   public async conectar(
     datos: DatosConexionMySql,
@@ -64,7 +77,9 @@ export class FabricaConexionMysql2 implements FabricaConexionMySql {
 
     let conexion: Connection | undefined;
     try {
-      conexion = await crearConexionMysql(crearOpcionesConexionMysql(datos, socket));
+      conexion = await crearConexionMysql(
+        crearOpcionesConexionMysql(datos, socket, this.caAdicional),
+      );
       socket.removeListener('error', silenciarErrorTemprano);
       if (senal.aborted) {
         conexion.destroy();
@@ -257,13 +272,23 @@ export class FabricaTunelSsh2 implements FabricaTunelSsh {
   }
 }
 
-/** Construye opciones mysql2 con socket preconectado, TLS validado y capacidades mínimas. */
+/**
+ * Construye opciones mysql2 con socket preconectado y TLS obligatorio.
+ *
+ * @param datos Destino fijado, credenciales temporales y material TLS del perfil.
+ * @param stream Socket TCP fijado o forward SSH previamente validado.
+ * @param caAdicional Bundle CA operativo que se combina con las raíces estándar y del perfil.
+ * @returns Opciones limitadas de mysql2 con hostname, TLS y SQL múltiple controlados.
+ */
 export function crearOpcionesConexionMysql(
   datos: DatosConexionMySql,
   stream: NodeJS.ReadWriteStream,
+  caAdicional?: string,
 ): ConnectionOptions {
+  const ca = combinarAutoridadesCertificadoras(datos.tls.ca, caAdicional);
   const ssl: NonNullable<ConnectionOptions['ssl']> = {
     ...datos.tls,
+    ...(ca === undefined ? {} : { ca }),
     rejectUnauthorized: true,
     verifyIdentity: true,
     minVersion: 'TLSv1.2',
@@ -283,6 +308,23 @@ export function crearOpcionesConexionMysql(
     supportBigNumbers: true,
     bigNumberStrings: true,
   };
+}
+
+/**
+ * Combina las raíces habituales con CA del Portal y CA específica del perfil si existen.
+ *
+ * @param caPerfil Bundle CA proporcionado para este perfil, si existe.
+ * @param caAdicional Bundle CA confiable configurado para el conector MySQL, si existe.
+ * @returns Cadena PEM original o lista de raíces combinadas para Node TLS.
+ */
+function combinarAutoridadesCertificadoras(
+  caPerfil: string | undefined,
+  caAdicional: string | undefined,
+): string | string[] | undefined {
+  if (caAdicional === undefined) {
+    return caPerfil;
+  }
+  return [...getCACertificates(), caAdicional, ...(caPerfil === undefined ? [] : [caPerfil])];
 }
 
 /** Compara la huella SHA-256 OpenSSH esperada con la llave pública recibida. */

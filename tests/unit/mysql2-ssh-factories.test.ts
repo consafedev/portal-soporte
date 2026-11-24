@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { PassThrough } from 'node:stream';
+import { getCACertificates } from 'node:tls';
 import { describe, expect, it } from 'vitest';
 import {
   coincideFingerprintSsh,
@@ -57,6 +58,29 @@ describe('configuración de fábricas MySQL y SSH', () => {
         verifyIdentity: true,
         minVersion: 'TLSv1.2',
       },
+    });
+  });
+
+  it('combina raíces estándar, bundle RDS adicional y CA específica del perfil', () => {
+    const opciones = crearOpcionesConexionMysql(
+      crearDatos(),
+      new PassThrough(),
+      '-----BEGIN CERTIFICATE-----\nCA RDS sintética\n-----END CERTIFICATE-----',
+    );
+
+    const ca = opciones.ssl && typeof opciones.ssl !== 'string' ? opciones.ssl.ca : undefined;
+    expect(Array.isArray(ca)).toBe(true);
+    const autoridadesEfectivas = getCACertificates();
+    expect(ca).toHaveLength(autoridadesEfectivas.length + 2);
+    expect(ca).toContain(autoridadesEfectivas[0]);
+    expect(ca).toContain(
+      '-----BEGIN CERTIFICATE-----\nCA RDS sintética\n-----END CERTIFICATE-----',
+    );
+    expect(ca).toContain('CA sintética');
+    expect(opciones.ssl).toMatchObject({
+      rejectUnauthorized: true,
+      verifyIdentity: true,
+      minVersion: 'TLSv1.2',
     });
   });
 

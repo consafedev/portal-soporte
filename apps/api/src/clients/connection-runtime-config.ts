@@ -1,3 +1,6 @@
+import { X509Certificate } from 'node:crypto';
+import { lstatSync, readFileSync } from 'node:fs';
+import { isAbsolute } from 'node:path';
 import {
   ClientConnectionBrokerMySql,
   FabricaConexionMysql2,
@@ -30,17 +33,60 @@ export function cargarRuntimePerfilesConexion(
     variables['PORTAL_MASTER_KEYRING_PATH'],
     variables['PORTAL_MASTER_KEYRING_GID'],
   );
+  const caAdicionalMySql = cargarBundleCaMySql(variables['PORTAL_MYSQL_CA_BUNDLE_PATH']);
   return {
     custodia,
     politica,
     broker: new ClientConnectionBrokerMySql(
       politica,
-      new FabricaConexionMysql2(),
+      new FabricaConexionMysql2(caAdicionalMySql),
       new FabricaTunelSsh2(),
       5_000,
       new PoliticaDireccionesDestino(),
     ),
   };
+}
+
+/**
+ * Carga un bundle PEM adicional y verifica que sea un archivo absoluto con CA válidas.
+ *
+ * @param ruta Ruta operacional opcional al bundle CA PEM de MySQL.
+ * @returns PEM validado para inyectarlo solo en la fábrica de conexiones MySQL.
+ * @throws Error con código estable si la ruta o el contenido no cumplen la política.
+ */
+export function cargarBundleCaMySql(ruta: string | undefined): string | undefined {
+  if (ruta === undefined) {
+    return undefined;
+  }
+  if (!isAbsolute(ruta)) {
+    throw new Error('MYSQL_CA_BUNDLE_CONFIG_INVALID');
+  }
+
+  try {
+    const estado = lstatSync(ruta);
+    if (!estado.isFile() || estado.isSymbolicLink() || estado.size === 0 || estado.size > 262_144) {
+      throw new Error('MYSQL_CA_BUNDLE_CONFIG_INVALID');
+    }
+
+    const pem = readFileSync(ruta, 'utf8');
+    const certificados = [
+      ...pem.matchAll(/-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/gu),
+    ];
+    const resto = pem
+      .replace(/-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/gu, '')
+      .trim();
+    if (certificados.length === 0 || certificados.length > 200 || resto.length > 0) {
+      throw new Error('MYSQL_CA_BUNDLE_CONFIG_INVALID');
+    }
+    for (const certificado of certificados) {
+      if (certificado[0] === undefined || !new X509Certificate(certificado[0]).ca) {
+        throw new Error('MYSQL_CA_BUNDLE_CONFIG_INVALID');
+      }
+    }
+    return pem;
+  } catch {
+    throw new Error('MYSQL_CA_BUNDLE_CONFIG_INVALID');
+  }
 }
 
 /** Analiza una lista operacional estricta de destinos y rechaza toda propiedad adicional. */

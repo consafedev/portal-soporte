@@ -1,5 +1,10 @@
 import { randomBytes } from 'node:crypto';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { rootCertificates } from 'node:tls';
 import { describe, expect, it } from 'vitest';
+import { cargarBundleCaMySql } from '../../apps/api/src/clients/connection-runtime-config.js';
 import {
   cargarConfiguracionBasePrueba,
   cargarConfiguracionConexionPrueba,
@@ -100,6 +105,41 @@ describe('cargarConfiguracionEscuchaApi', () => {
     expect(() =>
       cargarConfiguracionEscuchaApi(crearEntornoEscucha({ API_LISTEN_PORT: port })),
     ).toThrow('API_LISTEN_PORT debe ser un entero entre 1 y 65535.');
+  });
+});
+
+describe('cargarBundleCaMySql', () => {
+  it('permite omitir el bundle para conservar el almacén TLS predeterminado', () => {
+    expect(cargarBundleCaMySql(undefined)).toBeUndefined();
+  });
+
+  it('carga únicamente certificados CA PEM desde un archivo absoluto regular', () => {
+    const directorio = mkdtempSync(join(tmpdir(), 'portal-ca-test-'));
+    const ruta = join(directorio, 'bundle.pem');
+    const certificado = rootCertificates.at(0);
+    if (certificado === undefined) {
+      throw new Error('NODE_ROOT_CERTIFICATE_MISSING');
+    }
+
+    try {
+      writeFileSync(ruta, certificado, { mode: 0o600 });
+      expect(cargarBundleCaMySql(ruta)).toBe(readFileSync(ruta, 'utf8'));
+    } finally {
+      rmSync(directorio, { recursive: true, force: true });
+    }
+  });
+
+  it('rechaza rutas relativas y archivos que no contienen una CA válida', () => {
+    const directorio = mkdtempSync(join(tmpdir(), 'portal-ca-invalid-'));
+    const ruta = join(directorio, 'bundle.pem');
+
+    try {
+      writeFileSync(ruta, 'contenido que no es un certificado', { mode: 0o600 });
+      expect(() => cargarBundleCaMySql('bundle.pem')).toThrow('MYSQL_CA_BUNDLE_CONFIG_INVALID');
+      expect(() => cargarBundleCaMySql(ruta)).toThrow('MYSQL_CA_BUNDLE_CONFIG_INVALID');
+    } finally {
+      rmSync(directorio, { recursive: true, force: true });
+    }
   });
 });
 
