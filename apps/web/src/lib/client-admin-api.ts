@@ -246,12 +246,17 @@ async function enviarJson<TEsquema extends TSchema, TCuerpo>(
   esquema: TEsquema,
 ): Promise<Static<TEsquema>> {
   const tokenCsrf = await obtenerTokenCsrf();
+  const cuerpoSerializado = cuerpo === undefined ? undefined : JSON.stringify(cuerpo);
+  const encabezados: Record<string, string> = { 'x-csrf-token': tokenCsrf };
+  if (cuerpoSerializado !== undefined) {
+    encabezados['content-type'] = 'application/json';
+  }
   const respuesta = await fetch(ruta, {
     method: metodo,
     credentials: 'same-origin',
     cache: 'no-store',
-    headers: { 'content-type': 'application/json', 'x-csrf-token': tokenCsrf },
-    body: JSON.stringify(cuerpo),
+    headers: encabezados,
+    ...(cuerpoSerializado === undefined ? {} : { body: cuerpoSerializado }),
   }).catch(() => {
     throw new ErrorApiClientes('NETWORK_ERROR', 0);
   });
