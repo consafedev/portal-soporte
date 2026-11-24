@@ -700,7 +700,7 @@ export function VistaPreviaRf1(): JSX.Element {
               </button>
             </div>
           ) : null}
-          {modo === 'REAL' && todosLosResultadosListos ? (
+          {modo === 'REAL' && todosLosResultadosListos && resultadosInsercion.length === 0 ? (
             <section className="panel-confirmacion-rf1" aria-labelledby="rf1-confirmar-titulo">
               <h2 id="rf1-confirmar-titulo">Confirmar operación real</h2>
               <p>

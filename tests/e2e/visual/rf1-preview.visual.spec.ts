@@ -248,3 +248,44 @@ test('ADMIN selecciona sociedad por teclado en escritorio/móvil y ambos temas',
   await expect(tablaResultados).toContainText('2000 · ERP-DEV · SUP-42');
   expect(solicitudesPreview).toBe(2);
 });
+
+/** Evita mostrar el bloqueo de inserción después de una operación ya verificada. */
+test('ADMIN ve solo el resultado tras una inserción verificada', async ({ page }) => {
+  const tokenCsrf = randomBytes(32).toString('base64url');
+  const tokenConfirmacion = randomBytes(32).toString('base64url');
+  await page.route('**/api/v1/auth/me', responderJson({ user: ADMIN_VISUAL }));
+  await page.route('**/api/v1/auth/csrf', responderJson({ token: tokenCsrf }));
+  await page.route('**/api/v1/me/preferences', responderJson({ theme: 'light' }));
+  await page.route('**/api/v1/clients', responderJson([CLIENTE_ACCESIBLE_VISUAL]));
+  await page.route(
+    `**/api/v1/admin/clients/${CLIENT_ID}/connection-profiles`,
+    responderJson([PERFIL_VISUAL]),
+  );
+  await page.route(`**/api/v1/clients/${CLIENT_ID}/modules/rf-1/preview?*`, async (ruta) => {
+    await responderJson({
+      resultados: [RESULTADO_VISUAL],
+      executionAvailable: true,
+      confirmationToken: tokenConfirmacion,
+    })(ruta);
+  });
+  await page.route(`**/api/v1/clients/${CLIENT_ID}/modules/rf-1/execute?*`, async (ruta) => {
+    expect(ruta.request().method()).toBe('POST');
+    await responderJson([{ status: 'INSERTADA_VERIFICADA' }])(ruta);
+  });
+
+  await page.goto('/modules/rf-1');
+  await page.getByLabel('Cliente').selectOption(CLIENT_ID);
+  await page.getByLabel('Perfil de conexión').selectOption(PERFIL_ID);
+  await page.getByLabel('Operación real').check();
+  await page.getByLabel('Archivos CFDI XML').setInputFiles({
+    name: 'factura-sintetica.xml',
+    mimeType: 'application/xml',
+    buffer: Buffer.from('<cfdi/>', 'utf8'),
+  });
+  await page.getByRole('button', { name: 'Validar antes de operar' }).click();
+  await page.getByRole('button', { name: 'Confirmar inserción de 1 factura' }).click();
+
+  await expect(page.getByText('Insertada y verificada', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Confirmar operación real' })).toHaveCount(0);
+  await expect(page.getByText(/servidor no ha habilitado la inserción/u)).toHaveCount(0);
+});
