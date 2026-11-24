@@ -2634,3 +2634,36 @@ eload, se reinició únicamente cloudflared-consafedev.service; procesos web, AP
 - No se repitió la prueba MySQL después de confirmar que las dos peticiones previas ni siquiera llegaron al broker. No hubo SELECT adicional ni escrituras a clientes.
 - Próximo paso: revisión final, commit focalizado y push normal a main bajo autorización ya concedida; esperar CI y desplegar con release/rollback. Después, un clic de verificación debería alcanzar el broker y revelar resultado de conectividad real sin publicar secretos.
 - Estado: EN_CURSO.
+
+### 2026-11-23T22:17:08-06:00 — Codex — PS-005.4 / DEPLOY-002 — FIX DESPLEGADO
+- Causa confirmada: dos eventos posteriores al hotfix de diagnóstico registraron `FST_ERR_CTP_EMPTY_JSON_BODY`; el cliente enviaba POST `application/json` sin body al serializar `undefined`. Fastify lo rechazaba durante el parseo y no llegaba al broker; por tanto, esos dos intentos no hicieron SELECT 1 al destino.
+- Commit y CI: `cd4159640a24b0fae89a4191ac94d70afc08e617`, push normal a `main`; Actions run 45323715484 SUCCESS: Calidad y seguridad básica y Conectores MySQL y SSH con fixture sintético.
+- Corrección verificada: `enviarJson` omite Content-Type y body solo si el cuerpo no está definido; conserva CSRF, JSON y Content-Type en operaciones con datos. TDD focal 3/3; suite 48 archivos/431 tests PASS; lint, typecheck, check:secrets, Prettier y build producción PASS.
+- Release Debian: construido desde el commit exacto con Node 24.22.3, pnpm 12.21.0, frozen lockfile/store offline y 0 paquetes descargados. Release activo `/opt/portal-soporte/releases/cd4159640a24b0fae89a4191ac94d70afc08e617-deploy`; rollback `/var/backups/portal-soporte/deploy-cd415964-rollback`. Se reiniciaron solo portal-soporte-api.service y portal-soporte-web.service.
+- Smoke de activación: ambos servicios y listener loopback correctos; login/CSRF same-origin 200, privado anónimo 401, cookie segura y no-store; conexión portal_app→portal_soporte SELECT 1 PASS, keyring sintético/AAD PASS, 0 eventos críticos en journal. rf-1:execute siguió deshabilitado.
+- Próximo paso: propietario ejecuta una vez más “Probar conexión” sobre el perfil guardado en el Portal. Ahora la solicitud debe alcanzar el broker y devolver CONNECTED o un error de conectividad estable redactado; informar solo el resultado visible, no secretos. No ejecutar escritura sobre clientes.
+- Riesgos: la conectividad real al destino todavía no está verificada; la causa previa ya se corrigió. Sin cambios en Cloudflare, DNS, UFW, PostgreSQL, servicios ajenos o bases de clientes.
+- Estado: EN_CURSO.
+
+### 2026-11-23T22:25:33-06:00 — Codex — PS-005.4 / PS-003 — INICIO ARREGLO POST SIN CUERPO
+- Objetivo: corregir simultáneamente la prueba de perfiles MySQL y el logout que fallan tras desplegar el arreglo anterior.
+- Alcance: serialización de POST same-origin sin payload en cliente web de perfiles y cliente de autenticación; pruebas unitarias; trazabilidad. No cambiar UI, API de negocio, sesiones ajenas, perfil ni destino MySQL.
+- Evidencia: el journal muestra `FST_ERR_CTP_INVALID_MEDIA_TYPE` para la prueba de conexión y `UNHANDLED_AUTH_ERROR` para logout. Una prueba pública anónima y CSRF de un POST vacío al endpoint de test reprodujo HTTP 500 antes de autenticación; no pudo ejecutar el broker. Los errores anteriores también muestran `FST_ERR_CTP_EMPTY_JSON_BODY`.
+- Hipótesis a verificar: Next rewrite requiere un JSON concreto para estos POST; serializar `undefined` omite el cuerpo y deja al backend con media type inválido. Enviar `{}` conserva semántica de operación sin parámetros; la ruta de perfil ya rechaza cualquier body no vacío.
+- Archivos previstos: `apps/web/src/lib/client-admin-api.ts`, `apps/web/src/lib/auth-api.ts`, pruebas unitarias correspondientes, WORKLOG y TASK_BOARD.
+- Verificaciones: pruebas focales RED/GREEN, suite unitaria, lint, typecheck, build, secretos, CI; después despliegue aislado con rollback y comprobaciones de los dos flujos.
+- Riesgo: auth global no expone aún causa tipada para el logout; verificar si `{}` resuelve antes de ampliar instrumentación.
+- UI/UX: no aplica; no se cambia presentación ni interacción visual.
+- Estado: EN_CURSO.
+
+### 2026-11-23T22:29:35-06:00 — Codex — PS-005.4 / PS-003 — ARREGLO DOBLE POST SIN CUERPO
+- Causa raíz: el proxy Next same-origin transforma la petición POST sin cuerpo en un media type que Fastify no acepta; evidencia concreta incluyó `FST_ERR_CTP_EMPTY_JSON_BODY` y `FST_ERR_CTP_INVALID_MEDIA_TYPE` en prueba de perfil y `UNHANDLED_AUTH_ERROR` en logout.
+- Reproducción de producción sin sesión: POST sin body a endpoint protegido de prueba MySQL y CSRF válido respondió 500; al enviar JSON `{}` con el mismo método/origen/CSRF respondió 401 por ausencia de autenticación. El 401 confirma parser/proxy funcional y el preHandler detuvo la solicitud antes de broker; no se ejecutó `SELECT 1` ni se creó perfil.
+- Fix: los dos clientes same-origin serializan `{}` cuando la operación de escritura no tiene parámetros, enviando `Content-Type: application/json` y el token CSRF. Se preservan los JSON de operaciones que llevan payload. La ruta del perfil rechaza cualquier body no vacío.
+- TDD: pruebas focales fallaron primero (content-type ausente); después PASS 10/10 en `web-client-admin-api` y `web-auth-api`, cubriendo prueba de conexión y logout.
+- Calidad local completa: `corepack pnpm test` PASS, 48 archivos / 432 tests; lint PASS; typecheck PASS; `check:secrets` PASS; Prettier focal PASS; build de producción API/web y typecheck de build PASS con `API_INTERNAL_ORIGIN=http://127.0.0.1:18841`.
+- Estado Git: cambios de código y docs locales sin commit; historial previo intacto. Siguiente paso: revisión diff, commit focalizado y push normal autorizado a main; esperar CI y desplegar por release/rollback ya establecido.
+- No se alteró UI visual, sesión productiva, base permanente, perfil, destino MySQL, Cloudflare, DNS, UFW ni servicios ajenos. No se ejecutó logout productivo desde la automatización ni conexión al cliente.
+- Riesgos: errores previos de UI permanecen hasta activar el fix; conectividad MySQL real sigue sin probar. Riesgos DEPLOY-002 previos se mantienen (5432 por aceptación, AP-013 sin MFA, SMTP inactivo, hallazgos esbuild/picomatch); `rf-1:execute` continúa deshabilitado.
+- UI/UX: no aplica; sin cambios de vista o interacción visual.
+- Estado: EN_CURSO.

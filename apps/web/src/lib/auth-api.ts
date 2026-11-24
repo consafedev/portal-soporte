@@ -385,7 +385,7 @@ async function enviarJsonSinRespuesta<TCuerpo>(
  *
  * @typeParam TCuerpo - Tipo del cuerpo JSON que se enviará en la mutación.
  * @param ruta - Ruta relativa del API que recibe la operación.
- * @param cuerpo - Datos de entrada o `undefined` para un cuerpo vacío.
+ * @param cuerpo - Datos de entrada o `undefined`, que se serializa como `{}` para el proxy.
  * @param metodo - Verbo de escritura admitido; por defecto utiliza POST.
  * @returns Respuesta HTTP sin interpretar para validación posterior.
  */
@@ -395,16 +395,17 @@ async function enviarSolicitudJson<TCuerpo>(
   metodo: MetodoEscritura,
 ): Promise<Response> {
   const csrf = await obtenerTokenCsrf();
+  const cuerpoSerializado = JSON.stringify(cuerpo === undefined ? {} : cuerpo);
   const encabezados = new Headers({
+    'content-type': 'application/json',
     'x-csrf-token': csrf,
-    ...(cuerpo === undefined ? {} : { 'content-type': 'application/json' }),
   });
   const respuesta = await fetch(ruta, {
     method: metodo,
     credentials: 'same-origin',
     cache: 'no-store',
     headers: encabezados,
-    ...(cuerpo === undefined ? {} : { body: JSON.stringify(cuerpo) }),
+    body: cuerpoSerializado,
   }).catch(() => {
     throw new ErrorApiAuth('NETWORK_ERROR', 0);
   });

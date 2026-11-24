@@ -44,7 +44,7 @@ describe('prueba de perfil de conexión administrativa', () => {
   beforeEach(configurarFetchSimulado);
   afterEach(limpiarFetchSimulado);
 
-  it('envía POST con CSRF y omite JSON cuando la operación no tiene cuerpo', async () => {
+  it('envía POST con CSRF y JSON vacío cuando la operación no tiene parámetros', async () => {
     fetchMock
       .mockResolvedValueOnce(crearRespuestaJson({ token: CSRF }))
       .mockResolvedValueOnce(
@@ -63,10 +63,9 @@ describe('prueba de perfil de conexión administrativa', () => {
       method: 'POST',
       credentials: 'same-origin',
       cache: 'no-store',
-      headers: { 'x-csrf-token': CSRF },
+      headers: { 'content-type': 'application/json', 'x-csrf-token': CSRF },
     });
-    expect(fetchMock.mock.calls[1]?.[1]?.headers).not.toHaveProperty('content-type');
-    expect(fetchMock.mock.calls[1]?.[1]?.body).toBeUndefined();
+    expect(fetchMock.mock.calls[1]?.[1]?.body).toBe(JSON.stringify({}));
   });
 
   it('conserva JSON y CSRF en las mutaciones que sí envían datos', async () => {

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  cerrarSesion,
   iniciarSesion,
   obtenerSesion,
   solicitarRecuperacion,
@@ -25,6 +26,23 @@ function respuestaJson(cuerpo: unknown, status = 200): Response {
 
 describe('cliente same-origin de autenticación web', () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it('cierra sesión con CSRF y un objeto JSON vacío para el proxy same-origin', async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(respuestaJson({ token: tokenCsrfSintetico }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetch);
+
+    await expect(cerrarSesion()).resolves.toBeUndefined();
+
+    const [ruta, opciones] = fetch.mock.calls[1] ?? [];
+    const encabezados = new Headers(opciones?.headers);
+    expect(ruta).toBe('/api/v1/auth/logout');
+    expect(encabezados.get('content-type')).toBe('application/json');
+    expect(encabezados.get('x-csrf-token')).toBe(tokenCsrfSintetico);
+    expect(opciones?.body).toBe(JSON.stringify({}));
+  });
 
   it('obtiene CSRF antes de login y envía credenciales solo por POST same-origin', async () => {
     const fetch = vi
