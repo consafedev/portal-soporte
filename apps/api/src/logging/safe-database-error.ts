@@ -2,6 +2,7 @@ const TABLAS_AUTH = new Set([
   'audit_events',
   'auth_invariants',
   'auth_throttle_windows',
+  'client_connection_profiles',
   'recovery_tokens',
   'sessions',
   'users',
@@ -17,6 +18,14 @@ export interface DiagnosticoBaseDatosSeguro {
   readonly databaseOperation?: string;
   /** Posición del parser PostgreSQL sin incluir la consulta ni sus parámetros. */
   readonly databasePosition?: number;
+}
+
+/** Identidad mínima de una excepción para correlación interna sin publicar su mensaje. */
+export interface IdentidadErrorSegura {
+  /** Nombre estándar del tipo de error o una categoría genérica normalizada. */
+  readonly errorType: string;
+  /** Código estructurado con formato acotado, si el error lo proporciona. */
+  readonly errorCode?: string;
 }
 
 /**
@@ -80,4 +89,52 @@ export function extraerDiagnosticoBaseDatosSeguro(error: unknown): DiagnosticoBa
     ...(databaseOperation === undefined ? {} : { databaseOperation }),
     ...(databasePosition === undefined ? {} : { databasePosition }),
   };
+}
+
+/**
+ * Extrae solo el nombre estándar y un código estructurado de una cadena causal.
+ * Nunca conserva mensaje, consulta, host, usuario, parámetros ni credenciales.
+ *
+ * @param error Excepción interna original, posiblemente encadenada con cause.
+ * @returns Identidad reducida y segura para logs operativos.
+ */
+export function extraerIdentidadErrorSegura(error: unknown): IdentidadErrorSegura {
+  const nombresPermitidos = new Set([
+    'Error',
+    'TypeError',
+    'RangeError',
+    'SyntaxError',
+    'ReferenceError',
+    'URIError',
+    'AggregateError',
+  ]);
+  const vistos = new Set<object>();
+  let actual: unknown = error;
+  let errorType = 'UnknownError';
+  let errorCode: string | undefined;
+
+  for (let nivel = 0; nivel < 5 && typeof actual === 'object' && actual !== null; nivel += 1) {
+    if (vistos.has(actual)) break;
+    vistos.add(actual);
+    const registro = actual as Record<string, unknown>;
+    const nombre = registro['name'];
+    const codigo = registro['code'];
+    if (
+      errorType === 'UnknownError' &&
+      typeof nombre === 'string' &&
+      nombresPermitidos.has(nombre)
+    ) {
+      errorType = nombre;
+    }
+    if (
+      errorCode === undefined &&
+      typeof codigo === 'string' &&
+      /^[A-Z][A-Z0-9_]{0,63}$/u.test(codigo)
+    ) {
+      errorCode = codigo;
+    }
+    actual = registro['cause'];
+  }
+
+  return { errorType, ...(errorCode === undefined ? {} : { errorCode }) };
 }

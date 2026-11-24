@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { extraerDiagnosticoBaseDatosSeguro } from '../../apps/api/src/logging/safe-database-error.js';
+import {
+  extraerDiagnosticoBaseDatosSeguro,
+  extraerIdentidadErrorSegura,
+} from '../../apps/api/src/logging/safe-database-error.js';
 
 describe('diagnóstico seguro de errores PostgreSQL', () => {
   it('conserva SQLSTATE y tabla permitida sin propagar mensajes de la cadena causal', () => {
@@ -44,5 +47,46 @@ describe('diagnóstico seguro de errores PostgreSQL', () => {
       databaseCode: '23505',
       databaseTable: 'users',
     });
+  });
+
+  it('permite diagnosticar restricciones del perfil sin incluir valores del destino', () => {
+    const error = Object.assign(new Error('violación para cliente-secreto.example'), {
+      code: '23514',
+      table_name: 'client_connection_profiles',
+      query: 'UPDATE portal.client_connection_profiles SET destination_hostname = $1 WHERE id = $2',
+    });
+
+    const diagnostico = extraerDiagnosticoBaseDatosSeguro(error);
+
+    expect(diagnostico).toEqual({
+      databaseCode: '23514',
+      databaseTable: 'client_connection_profiles',
+      databaseOperation: 'UPDATE',
+    });
+    expect(JSON.stringify(diagnostico)).not.toContain('cliente-secreto.example');
+    expect(JSON.stringify(diagnostico)).not.toContain('destination_hostname');
+  });
+
+  it('registra solo tipo y código estructurado de un error, nunca su mensaje', () => {
+    const error = Object.assign(
+      new Error('password=hunter2 host=cliente.example SELECT * FROM factura'),
+      { code: 'ER_ACCESS_DENIED_ERROR' },
+    );
+
+    const diagnostico = extraerIdentidadErrorSegura(error);
+
+    expect(diagnostico).toEqual({ errorType: 'Error', errorCode: 'ER_ACCESS_DENIED_ERROR' });
+    expect(JSON.stringify(diagnostico)).not.toContain('hunter2');
+    expect(JSON.stringify(diagnostico)).not.toContain('cliente.example');
+    expect(JSON.stringify(diagnostico)).not.toContain('SELECT');
+  });
+
+  it('normaliza nombres y códigos de excepción no confiables', () => {
+    const error = Object.assign(new Error('dato sensible'), {
+      name: 'Error\npassword=expuesto',
+      code: 'host=cliente.example',
+    });
+
+    expect(extraerIdentidadErrorSegura(error)).toEqual({ errorType: 'UnknownError' });
   });
 });

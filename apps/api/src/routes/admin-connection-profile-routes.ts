@@ -21,6 +21,10 @@ import type { ConfiguracionAuth } from '../config.js';
 import { requireAuthenticatedSession, requireRole } from '../auth/authorization.js';
 import type { ServicioSesion } from '../auth/session-service.js';
 import {
+  extraerDiagnosticoBaseDatosSeguro,
+  extraerIdentidadErrorSegura,
+} from '../logging/safe-database-error.js';
+import {
   ErrorPerfilesConexion,
   ServicioPerfilesConexion,
 } from '../clients/connection-profile-service.js';
@@ -275,7 +279,12 @@ function manejarErrorPerfil(
     });
   }
   solicitud.log.error(
-    { requestId: solicitud.id, code: 'CLIENT_CONNECTION_PROFILE_ROUTE_FAILURE' },
+    {
+      requestId: solicitud.id,
+      code: 'CLIENT_CONNECTION_PROFILE_ROUTE_FAILURE',
+      ...extraerIdentidadErrorSegura(error),
+      ...extraerDiagnosticoBaseDatosSeguro(error),
+    },
     'Fallo controlado de administración de perfiles de conexión.',
   );
   return respuesta.code(500).send({
